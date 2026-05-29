@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+from .pitch_accent import PITCH_ACCENT
+
 
 @dataclass
 class Definition:
@@ -40,6 +42,7 @@ class LookupResult:
     jlpt_level: str | None
     # True if the result came from a normalized/fallback lookup
     is_exact_match: bool
+    pitch_accent: str | None = None  # NHK accent number as string, e.g. "2"
 
 
 class DictionaryService:
@@ -154,6 +157,7 @@ class DictionaryService:
             frequency_rank=row["frequency_rank"],
             jlpt_level=row["jlpt_level"],
             is_exact_match=confidence == 1.0,
+            pitch_accent=PITCH_ACCENT.get(row["lemma"]),
         )
 
     def batch_lookup(

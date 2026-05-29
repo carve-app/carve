@@ -11,7 +11,11 @@ import (
 	"time"
 
 	"github.com/carve-app/carve/services/api/internal/auth"
+	"github.com/carve-app/carve/services/api/internal/cards"
 	"github.com/carve-app/carve/services/api/internal/db"
+	"github.com/carve-app/carve/services/api/internal/immersion"
+	"github.com/carve-app/carve/services/api/internal/nlp"
+	"github.com/carve-app/carve/services/api/internal/review"
 	"github.com/carve-app/carve/services/api/internal/users"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -58,10 +62,32 @@ func main() {
 
 	// Protected routes
 	userHandler := users.NewHandler(pool)
+	cardsHandler := cards.NewHandler(pool)
+	reviewHandler := review.NewHandler(pool)
+	immersionHandler := immersion.NewHandler(pool)
+	nlpProxy := nlp.NewProxy()
+
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(auth.Middleware)
+
+		// Users
 		r.Get("/users/me", userHandler.Me)
 		r.Patch("/users/me", userHandler.Update)
+
+		// Cards
+		r.Post("/cards", cardsHandler.Create)
+		r.Get("/cards", cardsHandler.List)
+		r.Delete("/cards/{id}", cardsHandler.Delete)
+
+		// Review
+		r.Get("/review/due-count", reviewHandler.DueCount)
+
+		// Immersion
+		r.Post("/immersion", immersionHandler.Create)
+
+		// NLP proxy
+		r.Post("/nlp/tokenize", nlpProxy.Tokenize)
+		r.Post("/nlp/lookup", nlpProxy.Lookup)
 	})
 
 	port := os.Getenv("PORT")

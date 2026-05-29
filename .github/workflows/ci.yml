@@ -144,6 +144,70 @@ jobs:
           go build -o /dev/null ./cmd/media
           echo "✓ Media service build succeeded"
 
+  # ── Chrome Extension ──────────────────────────────────────────────────────
+  extension:
+    name: Chrome Extension
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/extension
+        run: npm ci
+
+      - name: Type-check
+        working-directory: apps/extension
+        run: npm run typecheck
+
+      - name: Build
+        working-directory: apps/extension
+        run: npm run build
+
+      - name: Verify dist artifacts
+        working-directory: apps/extension
+        run: |
+          test -f dist/manifest.json
+          test -f dist/background/index.js
+          test -f dist/content/index.js
+          test -f dist/popup/app.js
+          test -f dist/popup/index.html
+          echo "✓ Extension build artifacts present"
+
+  # ── Web App (SvelteKit) ───────────────────────────────────────────────────
+  web:
+    name: Web App
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Type-check
+        working-directory: apps/web
+        run: npm run check
+
+      - name: Build
+        working-directory: apps/web
+        run: npm run build
+
   # ── Integration: Docker Compose ───────────────────────────────────────────
   integration:
     name: Docker Compose Integration

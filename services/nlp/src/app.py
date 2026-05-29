@@ -81,6 +81,7 @@ class LookupResponse(BaseModel):
     furigana: list[dict]  # [{text, reading}]
     is_exact_match: bool
     found: bool
+    pitch_accent: str | None
 
 
 class BatchLookupRequest(BaseModel):
@@ -207,6 +208,7 @@ def lookup(
         furigana = [{"text": s.text, "reading": s.reading} for s in spans]
 
     if not entry:
+        from .pitch_accent import PITCH_ACCENT
         return LookupResponse(
             lemma=lemma,
             reading=reading,
@@ -216,6 +218,7 @@ def lookup(
             furigana=furigana,
             is_exact_match=False,
             found=False,
+            pitch_accent=PITCH_ACCENT.get(lemma),
         )
 
     return LookupResponse(
@@ -237,6 +240,7 @@ def lookup(
         furigana=furigana,
         is_exact_match=entry.is_exact_match,
         found=True,
+        pitch_accent=entry.pitch_accent,
     )
 
 
