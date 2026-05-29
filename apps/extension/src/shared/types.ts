@@ -19,6 +19,7 @@ export interface DictEntry {
   reading: string | null;
   frequency_rank: number | null;
   jlpt_level: string | null;
+  pitch_accent: string | null;  // NHK accent number, e.g. "2"
   definitions: Array<{
     definition: string;
     pos: string;

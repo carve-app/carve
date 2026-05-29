@@ -109,13 +109,16 @@ export class PopupManager {
     const freqHtml = entry?.frequency_rank
       ? `<span style="font-size:11px;color:#6b7a99"> #${entry.frequency_rank}</span>`
       : '';
+    const pitchHtml = entry?.pitch_accent != null
+      ? `<span class="carve-pitch" title="NHK pitch accent">${escapeHtml(pitchLabel(entry.pitch_accent))}</span>`
+      : '';
 
     const sentence = getSurroundingSentence(tokenEl);
 
     popup.innerHTML = `
       <div>
         <div class="carve-furigana">${furiganaHtml}</div>
-        <div class="carve-reading">${escapeHtml(entry?.reading ?? reading)}${jlptHtml}${freqHtml}</div>
+        <div class="carve-reading">${escapeHtml(entry?.reading ?? reading)}${jlptHtml}${freqHtml}${pitchHtml}</div>
         <span class="carve-status ${escapeHtml(status)}">${escapeHtml(status)}</span>
         <div class="carve-defs">${defsHtml}</div>
         ${sentence ? `<div class="carve-sentence">${escapeHtml(sentence)}</div>` : ''}
@@ -166,16 +169,17 @@ export class PopupManager {
     const popup = this.getOrCreatePopup();
     const rect = tokenEl.getBoundingClientRect();
     const popupH = 200;
-    const spaceAbove = rect.top;
 
+    // popup is position:fixed, so getBoundingClientRect() coords are already in
+    // viewport space — do not add window.scroll* offsets
     let top: number;
-    if (spaceAbove > popupH + 8) {
-      top = rect.top + window.scrollY - popupH - 8;
+    if (rect.top > popupH + 8) {
+      top = rect.top - popupH - 8;
     } else {
-      top = rect.bottom + window.scrollY + 8;
+      top = rect.bottom + 8;
     }
 
-    let left = rect.left + window.scrollX;
+    let left = rect.left;
     const maxLeft = window.innerWidth - 360;
     left = Math.min(Math.max(left, 8), maxLeft);
 
@@ -214,6 +218,14 @@ function buildFurigana(spans: FuriganaSpan[]): string {
       return `<ruby>${escapeHtml(s.text)}<rt>${escapeHtml(s.reading)}</rt></ruby>`;
     })
     .join('');
+}
+
+function pitchLabel(accent: string): string {
+  const n = parseInt(accent, 10);
+  if (isNaN(n)) return `[${accent}]`;
+  if (n === 0) return `[${accent}⓪]`;   // heiban
+  if (n === 1) return `[${accent}①]`;   // atamadaka
+  return `[${accent}]`;                  // nakadaka / odaka
 }
 
 function getSurroundingSentence(el: HTMLElement): string | null {

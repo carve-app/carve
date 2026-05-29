@@ -121,6 +121,12 @@ export function injectStyles(): void {
       color: #9ba8c0;
       margin-left: 4px;
     }
+    #carve-popup .carve-pitch {
+      font-size: 11px;
+      color: #b8a0d0;
+      margin-left: 6px;
+      font-family: monospace;
+    }
   `;
   document.head.appendChild(style);
 }
