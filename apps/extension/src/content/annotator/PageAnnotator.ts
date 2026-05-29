@@ -84,16 +84,33 @@ export class PageAnnotator {
     return nodes;
   }
 
-  private async processBatch(batch: Array<{ node: Text; text: string }>): Promise<void> {
-    const combinedText = batch.map((b) => b.text).join(SEPARATOR);
-
-    const response = await chrome.runtime.sendMessage({
-      type: 'TOKENIZE',
-      text: combinedText,
+  // MV3 service workers can be terminated mid-request. Retry up to 3 times
+  // on "message channel closed" — each retry wakes a fresh SW instance.
+  private async tokenize(text: string): Promise<{ tokens: Token[] } | null> {
+    const msg = {
+      type: 'TOKENIZE' as const,
+      text,
       language: this.lang,
       knownLemmas: this.vocabCache.getKnownLemmas(),
       learningLemmas: this.vocabCache.getLearningLemmas(),
-    });
+    };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await chrome.runtime.sendMessage(msg);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : '';
+        const isChannelClosed = msg.includes('message channel closed') || msg.includes('Extension context');
+        if (!isChannelClosed || attempt === 2) return null;
+        await new Promise(r => setTimeout(r, 100 * (attempt + 1)));
+      }
+    }
+    return null;
+  }
+
+  private async processBatch(batch: Array<{ node: Text; text: string }>): Promise<void> {
+    const combinedText = batch.map((b) => b.text).join(SEPARATOR);
+
+    const response = await this.tokenize(combinedText);
 
     if (!response?.tokens) return;
 
