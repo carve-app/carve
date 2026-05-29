@@ -7,6 +7,7 @@ const SKIP_TAGS = new Set([
   'SCRIPT', 'STYLE', 'NOSCRIPT', 'CODE', 'PRE',
   'TEXTAREA', 'INPUT', 'BUTTON', 'SELECT', 'OPTION',
   'IFRAME', 'OBJECT', 'EMBED',
+  'RT', 'RP', 'RB',
 ]);
 const MAX_BATCH_CHARS = 3000;
 
@@ -69,6 +70,7 @@ export class PageAnnotator {
         const parent = node.parentElement;
         if (!parent) return NodeFilter.FILTER_REJECT;
         if (parent.closest('[data-carve]')) return NodeFilter.FILTER_REJECT;
+        if (parent.closest('ruby')) return NodeFilter.FILTER_REJECT;
         if (SKIP_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
         const text = node.textContent ?? '';
         if (!/[぀-ヿ一-鿿]/.test(text)) return NodeFilter.FILTER_REJECT;
