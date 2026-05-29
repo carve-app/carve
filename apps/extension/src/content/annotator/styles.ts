@@ -5,12 +5,7 @@ export function injectStyles(): void {
   style.id = 'carve-styles';
   style.textContent = `
     /* Token colorization */
-    [data-carve="token"][data-status="unknown"][data-rank] {
-      cursor: pointer;
-    }
-    [data-carve="token"][data-status="unknown"]:not([data-rank]) {
-      background: rgba(200, 60, 60, 0.25);
-      border-radius: 2px;
+    [data-carve="token"][data-status="unknown"] {
       cursor: pointer;
     }
     [data-carve="token"][data-status="learning"] {

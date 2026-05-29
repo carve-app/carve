@@ -70,7 +70,6 @@ export class PageAnnotator {
         const parent = node.parentElement;
         if (!parent) return NodeFilter.FILTER_REJECT;
         if (parent.closest('[data-carve]')) return NodeFilter.FILTER_REJECT;
-        if (parent.closest('ruby')) return NodeFilter.FILTER_REJECT;
         if (SKIP_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
         const text = node.textContent ?? '';
         if (!/[぀-ヿ一-鿿]/.test(text)) return NodeFilter.FILTER_REJECT;
@@ -153,7 +152,10 @@ export class PageAnnotator {
 
         if (tok.frequency_rank !== null) {
           span.setAttribute('data-rank', String(tok.frequency_rank));
-          const band = tok.frequency_rank <= 2000 ? 'green'
+        }
+        if (tok.is_content_word) {
+          const band = tok.frequency_rank == null ? 'red'
+            : tok.frequency_rank <= 2000 ? 'green'
             : tok.frequency_rank <= 5000 ? 'yellow'
             : 'red';
           span.setAttribute('data-band', band);

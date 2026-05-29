@@ -100,11 +100,12 @@ function startMockServer() {
         try { parsed = JSON.parse(body); } catch {}
         const text = parsed.text || '';
 
-        // Return character-level tokens for any CJK text so the annotator
-        // has to handle multi-token cases — this reproduces the ruby split bug.
-        const tokens = [...text].flatMap(ch => {
+        // Return character-level tokens for any CJK text.
+        // Every 3rd token gets frequency_rank=null to reproduce the pink-background
+        // bug (annotator must still set data-band so the fallback CSS never fires).
+        const tokens = [...text].flatMap((ch, i) => {
           if (/[぀-ヿ一-鿿]/.test(ch)) {
-            return [makeMockToken(ch, 'unknown', 3000)];
+            return [makeMockToken(ch, 'unknown', i % 3 === 0 ? null : 3000)];
           }
           return [];
         });
@@ -170,41 +171,65 @@ async function testRubyPreservation(context, mockBase) {
   const page = await context.newPage();
   await page.goto(`${mockBase}/ruby-test`);
 
-  // Wait for the plain paragraph to get annotated (it has no ruby)
+  // Wait for both paragraphs to be annotated
   await page.waitForSelector('#plain-para [data-carve="token"]', { timeout: 15_000 });
-  console.log('[page] plain paragraph annotated');
+  await page.waitForSelector('#ruby1 [data-carve="token"]', { timeout: 15_000 });
+  console.log('[page] both paragraphs annotated');
 
-  // Ruby element must NOT have been modified
-  const rubyInnerHTML = await page.$eval('#ruby1', el => el.innerHTML);
-  assert(
-    !rubyInnerHTML.includes('data-carve'),
-    `ruby element was modified by extension: ${rubyInnerHTML}`,
-  );
-  console.log('[assert] <ruby> element untouched ✓');
+  // ── Ruby base text MUST be annotated (highlighted) ──────────────────────────
+  const rubyTokenCount = await page.$$eval('#ruby1 [data-carve="token"]', els => els.length);
+  assert(rubyTokenCount >= 1, `expected ≥1 token span inside <ruby>, got ${rubyTokenCount}`);
+  console.log(`[assert] ${rubyTokenCount} token span(s) inside <ruby> ✓`);
 
-  // The <rt> text must still read correctly
+  // ── <rt> (furigana reading) must NOT be annotated ───────────────────────────
+  const rtTokenCount = await page.$$eval('#ruby1 rt [data-carve="token"]', els => els.length);
+  assert(rtTokenCount === 0, `expected 0 token spans inside <rt>, got ${rtTokenCount}`);
+  console.log('[assert] <rt> not annotated ✓');
+
+  // ── <rt> text content must be intact ────────────────────────────────────────
   const rtText = await page.$eval('#ruby1 rt', el => el.textContent);
   assert(rtText === 'せんりゅう', `<rt> text corrupted: "${rtText}"`);
   console.log(`[assert] <rt> text intact: "${rtText}" ✓`);
 
-  // The base ruby text must be intact (no spans injected inside)
-  const rubyBase = await page.$eval('#ruby1', el => {
-    // textContent of ruby includes rt; get just the first text node
+  // ── Ruby base kanji text must be preserved (concatenation of span texts) ────
+  const rubyBaseText = await page.$eval('#ruby1', el => {
+    // Sum text from all child nodes except <rt>/<rp>/<rb>
+    let t = '';
     for (const n of el.childNodes) {
-      if (n.nodeType === Node.TEXT_NODE) return n.textContent;
+      if (n.nodeType === Node.TEXT_NODE) t += n.textContent;
+      else if (n.nodeType === Node.ELEMENT_NODE) {
+        const tag = n.tagName.toUpperCase();
+        if (tag !== 'RT' && tag !== 'RP' && tag !== 'RB') t += n.textContent;
+      }
+    }
+    return t;
+  });
+  assert(rubyBaseText === '川柳', `ruby base text wrong — expected "川柳", got "${rubyBaseText}"`);
+  console.log(`[assert] ruby base text intact: "${rubyBaseText}" ✓`);
+
+  // ── No annotated token should have a pink/red background ────────────────────
+  // Tokens without a frequency rank must still get data-band (not fall through
+  // to a background-color CSS rule). Any non-transparent background is a bug.
+  const badTokenBg = await page.evaluate(() => {
+    for (const el of document.querySelectorAll('[data-carve="token"]')) {
+      const bg = window.getComputedStyle(el).backgroundColor;
+      // transparent = rgba(0,0,0,0) or 'transparent'
+      if (bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') return bg;
     }
     return null;
   });
-  assert(rubyBase === '川柳', `ruby base text corrupted — expected "川柳", got "${rubyBase}"`);
-  console.log(`[assert] ruby base text intact: "${rubyBase}" ✓`);
+  assert(badTokenBg === null, `annotated token has unexpected background: ${badTokenBg}`);
+  console.log('[assert] no token has a background color ✓');
 
-  // The ruby parent paragraph must NOT be marked data-carve="processed"
-  const rubyParaProcessed = await page.$eval('#ruby-para', el => el.getAttribute('data-carve'));
-  // processed is OK at the paragraph level, but the ruby child must be intact
-  // (we only check the ruby element itself wasn't processed)
-  const rubyProcessed = await page.$eval('#ruby1', el => el.getAttribute('data-carve'));
-  assert(rubyProcessed !== 'processed', `<ruby> itself was marked processed`);
-  console.log('[assert] <ruby> not marked as processed ✓');
+  // ── Every unknown content-word token must have data-band set ────────────────
+  const missingBand = await page.evaluate(() => {
+    for (const el of document.querySelectorAll('[data-carve="token"][data-status="unknown"][data-content="1"]')) {
+      if (!el.hasAttribute('data-band')) return el.textContent;
+    }
+    return null;
+  });
+  assert(missingBand === null, `unknown content-word token "${missingBand}" is missing data-band`);
+  console.log('[assert] all unknown content-word tokens have data-band ✓');
 
   await page.screenshot({ path: path.resolve(__dirname, 'extension-ruby-e2e.png'), fullPage: true });
   console.log('[screenshot] saved extension-ruby-e2e.png');
