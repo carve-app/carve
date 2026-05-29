@@ -472,3 +472,225 @@ class TestPOSTagging:
         """とても (adverb) is a content word."""
         result = tokenizer.tokenize("とても")
         assert any(t.is_content_word for t in result.tokens)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 10: Numbers and counters
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestNumbersAndCounters:
+
+    def test_hitotsu(self, tokenizer):
+        """一つ must read ひとつ."""
+        r = reading(tokenizer, "一つ")
+        assert r == "ひとつ", f"Expected ひとつ, got {r!r}"
+
+    def test_futari(self, tokenizer):
+        """二人 must read ふたり (not ににん)."""
+        r = reading(tokenizer, "二人")
+        assert r == "ふたり", f"Expected ふたり, got {r!r}"
+
+    def test_sanmai(self, tokenizer):
+        """三枚 must read さんまい."""
+        r = reading(tokenizer, "三枚")
+        assert r == "さんまい", f"Expected さんまい, got {r!r}"
+
+    def test_hyaku(self, tokenizer):
+        """百 alone reads ひゃく."""
+        r = reading(tokenizer, "百")
+        assert r == "ひゃく", f"Expected ひゃく, got {r!r}"
+
+    def test_sen(self, tokenizer):
+        """千 alone reads せん."""
+        r = reading(tokenizer, "千")
+        assert r == "せん", f"Expected せん, got {r!r}"
+
+    def test_nannichi(self, tokenizer):
+        """何日 must read なんにち."""
+        r = reading(tokenizer, "何日")
+        assert r == "なんにち", f"Expected なんにち, got {r!r}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 11: Katakana loanwords
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestKatakanaLoanwords:
+
+    def test_terebi(self, tokenizer):
+        """テレビ — kana-only, reading converts to hiragana."""
+        r = reading(tokenizer, "テレビ")
+        assert r == "てれび", f"Expected てれび, got {r!r}"
+
+    def test_koohii(self, tokenizer):
+        """コーヒー — has prolonged sound mark ー."""
+        r = reading(tokenizer, "コーヒー")
+        assert r == "こーひー", f"Expected こーひー, got {r!r}"
+
+    def test_pasokon(self, tokenizer):
+        """パソコン — compound loanword."""
+        r = reading(tokenizer, "パソコン")
+        assert r == "ぱそこん", f"Expected ぱそこん, got {r!r}"
+
+    def test_aisu_kuriimu(self, tokenizer):
+        """アイスクリーム."""
+        r = reading(tokenizer, "アイスクリーム")
+        assert r == "あいすくりーむ", f"Expected あいすくりーむ, got {r!r}"
+
+    def test_sumaho(self, tokenizer):
+        """スマホ."""
+        r = reading(tokenizer, "スマホ")
+        assert r == "すまほ", f"Expected すまほ, got {r!r}"
+
+    def test_intanetto(self, tokenizer):
+        """インターネット."""
+        r = reading(tokenizer, "インターネット")
+        assert r == "いんたーねっと", f"Expected いんたーねっと, got {r!r}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 12: Place names
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestPlaceNames:
+
+    def test_osaka(self, tokenizer):
+        """大阪 must read おおさか."""
+        r = reading(tokenizer, "大阪")
+        assert r == "おおさか", f"Expected おおさか, got {r!r}"
+
+    def test_kyoto(self, tokenizer):
+        """京都 must read きょうと."""
+        r = reading(tokenizer, "京都")
+        assert r == "きょうと", f"Expected きょうと, got {r!r}"
+
+    def test_akihabara(self, tokenizer):
+        """秋葉原 must read あきはばら."""
+        r = reading(tokenizer, "秋葉原")
+        assert r == "あきはばら", f"Expected あきはばら, got {r!r}"
+
+    def test_shinjuku(self, tokenizer):
+        """新宿 must read しんじゅく."""
+        r = reading(tokenizer, "新宿")
+        assert r == "しんじゅく", f"Expected しんじゅく, got {r!r}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 13: Additional verb forms
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestAdditionalVerbForms:
+
+    def test_volitional_form(self, tokenizer):
+        """食べよう volitional must read たべよう."""
+        r = reading(tokenizer, "食べよう")
+        assert r == "たべよう", f"Expected たべよう, got {r!r}"
+
+    def test_tai_form(self, tokenizer):
+        """食べたい desiderative must read たべたい."""
+        r = reading(tokenizer, "食べたい")
+        assert r == "たべたい", f"Expected たべたい, got {r!r}"
+
+    def test_passive_form(self, tokenizer):
+        """書かれる passive must read かかれる."""
+        r = reading(tokenizer, "書かれる")
+        assert r == "かかれる", f"Expected かかれる, got {r!r}"
+
+    def test_causative_form(self, tokenizer):
+        """食べさせる causative must read たべさせる."""
+        r = reading(tokenizer, "食べさせる")
+        assert r == "たべさせる", f"Expected たべさせる, got {r!r}"
+
+    def test_imperative_form(self, tokenizer):
+        """食べろ imperative must read たべろ."""
+        r = reading(tokenizer, "食べろ")
+        assert r == "たべろ", f"Expected たべろ, got {r!r}"
+
+    def test_masu_form(self, tokenizer):
+        """食べます polite present must read たべます."""
+        r = reading(tokenizer, "食べます")
+        assert r == "たべます", f"Expected たべます, got {r!r}"
+
+    def test_masen_form(self, tokenizer):
+        """食べません polite negative must read たべません."""
+        r = reading(tokenizer, "食べません")
+        assert r == "たべません", f"Expected たべません, got {r!r}"
+
+    def test_mashita_form(self, tokenizer):
+        """食べました polite past must read たべました."""
+        r = reading(tokenizer, "食べました")
+        assert r == "たべました", f"Expected たべました, got {r!r}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 14: Common expressions
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestCommonExpressions:
+
+    def test_sumimasen(self, tokenizer):
+        """すみません — common apology."""
+        r = reading(tokenizer, "すみません")
+        assert r == "すみません", f"Expected すみません, got {r!r}"
+
+    def test_arigatou(self, tokenizer):
+        """ありがとう — thank you."""
+        r = reading(tokenizer, "ありがとう")
+        assert r == "ありがとう", f"Expected ありがとう, got {r!r}"
+
+    def test_yoroshiku(self, tokenizer):
+        """よろしく."""
+        r = reading(tokenizer, "よろしく")
+        assert r == "よろしく", f"Expected よろしく, got {r!r}"
+
+    def test_hajimemashite(self, tokenizer):
+        """初めまして must read はじめまして."""
+        r = reading(tokenizer, "初めまして")
+        assert r == "はじめまして", f"Expected はじめまして, got {r!r}"
+
+    def test_daijoubu(self, tokenizer):
+        """大丈夫 must read だいじょうぶ."""
+        r = reading(tokenizer, "大丈夫")
+        assert r == "だいじょうぶ", f"Expected だいじょうぶ, got {r!r}"
+
+    def test_moshimoshi(self, tokenizer):
+        """もしもし — phone greeting."""
+        r = reading(tokenizer, "もしもし")
+        assert r == "もしもし", f"Expected もしもし, got {r!r}"
+
+    def test_wakarimashita(self, tokenizer):
+        """分かりました must read わかりました."""
+        r = reading(tokenizer, "分かりました")
+        assert r == "わかりました", f"Expected わかりました, got {r!r}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 15: Core vocabulary
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestCoreVocabulary:
+
+    def test_kuuki(self, tokenizer):
+        """空気 must read くうき."""
+        r = reading(tokenizer, "空気")
+        assert r == "くうき", f"Expected くうき, got {r!r}"
+
+    def test_jikan(self, tokenizer):
+        """時間 must read じかん."""
+        r = reading(tokenizer, "時間")
+        assert r == "じかん", f"Expected じかん, got {r!r}"
+
+    def test_denwa(self, tokenizer):
+        """電話 must read でんわ."""
+        r = reading(tokenizer, "電話")
+        assert r == "でんわ", f"Expected でんわ, got {r!r}"
+
+    def test_eiga(self, tokenizer):
+        """映画 must read えいが."""
+        r = reading(tokenizer, "映画")
+        assert r == "えいが", f"Expected えいが, got {r!r}"
+
+    def test_ongaku(self, tokenizer):
+        """音楽 must read おんがく."""
+        r = reading(tokenizer, "音楽")
+        assert r == "おんがく", f"Expected おんがく, got {r!r}"
