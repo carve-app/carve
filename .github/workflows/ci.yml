@@ -244,11 +244,11 @@ jobs:
           docker compose logs
           exit 1
 
-      - name: Smoke test: API health
+      - name: "Smoke test: API health"
         run: |
           curl -sf http://localhost:8080/health | grep '"status":"ok"'
 
-      - name: Smoke test: NLP tokenize endpoint
+      - name: "Smoke test: NLP tokenize endpoint"
         run: |
           curl -sf -X POST http://localhost:8001/tokenize \
             -H 'Content-Type: application/json' \
@@ -256,7 +256,7 @@ jobs:
             python3 -c "import sys,json; d=json.load(sys.stdin); assert len(d['tokens'])>0, 'no tokens'"
           echo "✓ NLP tokenize works"
 
-      - name: Smoke test: NLP Migaku failure cases
+      - name: "Smoke test: NLP Migaku failure cases"
         run: |
           # Test ございません reading
           READING=$(curl -sf -X POST http://localhost:8001/tokenize \
