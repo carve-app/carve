@@ -9,10 +9,6 @@ const SKIP_TAGS = new Set([
   'IFRAME', 'OBJECT', 'EMBED',
   'RT', 'RP', 'RB',
 ]);
-const MAX_BATCH_CHARS = 3000;
-
-// Separator: word-joiner character unlikely to appear in Japanese text
-const SEPARATOR = '\n⁠\n';
 
 export class PageAnnotator {
   private observer: MutationObserver;
@@ -44,23 +40,8 @@ export class PageAnnotator {
 
   private async annotateElement(root: Element): Promise<void> {
     const textNodes = this.collectTextNodes(root);
-    if (textNodes.length === 0) return;
-
-    let batch: Array<{ node: Text; text: string }> = [];
-    let batchChars = 0;
-
     for (const node of textNodes) {
-      const text = node.textContent!;
-      batch.push({ node, text });
-      batchChars += text.length;
-      if (batchChars >= MAX_BATCH_CHARS) {
-        await this.processBatch(batch);
-        batch = [];
-        batchChars = 0;
-      }
-    }
-    if (batch.length > 0) {
-      await this.processBatch(batch);
+      await this.processNode(node);
     }
   }
 
@@ -108,66 +89,65 @@ export class PageAnnotator {
     return null;
   }
 
-  private async processBatch(batch: Array<{ node: Text; text: string }>): Promise<void> {
-    const combinedText = batch.map((b) => b.text).join(SEPARATOR);
+  private async processNode(node: Text): Promise<void> {
+    if (!node.parentNode) return;
+    const text = node.textContent!;
 
-    const response = await this.tokenize(combinedText);
+    const response = await this.tokenize(text);
+    if (!response?.tokens?.length) return;
+    if (!node.parentNode) return;  // detached during await
 
-    if (!response?.tokens) return;
+    const fragment = this.buildFragment(text, response.tokens);
+    const parent = node.parentElement!;
+    parent.setAttribute('data-carve', 'processed');
+    node.parentNode.replaceChild(fragment, node);
+  }
 
-    const allTokens: Token[] = response.tokens;
-    let tokenIdx = 0;
+  // Reconstruct a fragment from tokens, preserving any characters not covered
+  // by tokens (leading/trailing punctuation, whitespace) as plain text nodes.
+  // This avoids dropping characters that the tokenizer skips (e.g. 。).
+  private buildFragment(text: string, tokens: Token[]): DocumentFragment {
+    const fragment = document.createDocumentFragment();
+    let pos = 0;
 
-    for (const { node, text } of batch) {
-      if (!node.parentNode) continue;
+    for (const tok of tokens) {
+      const idx = text.indexOf(tok.surface, pos);
+      if (idx === -1) continue;
 
-      // Collect tokens for this segment (stop at separator token)
-      const segTokens: Token[] = [];
-      let chars = 0;
-      while (tokenIdx < allTokens.length && chars < text.length) {
-        const tok = allTokens[tokenIdx];
-        // Separator token — skip it and move to next segment
-        if (tok.surface.includes('⁠')) {
-          tokenIdx++;
-          break;
-        }
-        segTokens.push(tok);
-        chars += tok.surface.length;
-        tokenIdx++;
+      if (idx > pos) {
+        fragment.appendChild(document.createTextNode(text.slice(pos, idx)));
       }
 
-      if (segTokens.length === 0) continue;
+      const span = document.createElement('span');
+      span.setAttribute('data-carve', 'token');
+      span.setAttribute('data-lemma', tok.lemma);
+      span.setAttribute('data-reading', tok.reading_hira);
+      span.setAttribute('data-pos', tok.pos);
+      span.setAttribute('data-content', tok.is_content_word ? '1' : '0');
 
-      const fragment = document.createDocumentFragment();
-      for (const tok of segTokens) {
-        const span = document.createElement('span');
-        span.setAttribute('data-carve', 'token');
-        span.setAttribute('data-lemma', tok.lemma);
-        span.setAttribute('data-reading', tok.reading_hira);
-        span.setAttribute('data-pos', tok.pos);
-        span.setAttribute('data-content', tok.is_content_word ? '1' : '0');
+      const status = this.vocabCache.getStatus(tok.lemma);
+      span.setAttribute('data-status', tok.is_content_word ? status : 'function');
 
-        const status = this.vocabCache.getStatus(tok.lemma);
-        span.setAttribute('data-status', tok.is_content_word ? status : 'function');
-
-        if (tok.frequency_rank !== null) {
-          span.setAttribute('data-rank', String(tok.frequency_rank));
-        }
-        if (tok.is_content_word) {
-          const band = tok.frequency_rank == null ? 'red'
-            : tok.frequency_rank <= 2000 ? 'green'
-            : tok.frequency_rank <= 5000 ? 'yellow'
-            : 'red';
-          span.setAttribute('data-band', band);
-        }
-
-        span.textContent = tok.surface;
-        fragment.appendChild(span);
+      if (tok.frequency_rank !== null) {
+        span.setAttribute('data-rank', String(tok.frequency_rank));
+      }
+      if (tok.is_content_word) {
+        const band = tok.frequency_rank == null ? 'red'
+          : tok.frequency_rank <= 2000 ? 'green'
+          : tok.frequency_rank <= 5000 ? 'yellow'
+          : 'red';
+        span.setAttribute('data-band', band);
       }
 
-      const parent = node.parentElement!;
-      parent.setAttribute('data-carve', 'processed');
-      node.parentNode.replaceChild(fragment, node);
+      span.textContent = tok.surface;
+      fragment.appendChild(span);
+      pos = idx + tok.surface.length;
     }
+
+    if (pos < text.length) {
+      fragment.appendChild(document.createTextNode(text.slice(pos)));
+    }
+
+    return fragment;
   }
 }

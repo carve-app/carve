@@ -11,22 +11,15 @@ export class PopupManager {
   }
 
   private setupListeners(): void {
-    document.addEventListener('mouseover', (e) => {
+    document.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
       if (
         target.getAttribute('data-carve') === 'token' &&
         target.getAttribute('data-content') === '1'
       ) {
+        e.stopPropagation();
         this.showPopupForToken(target);
-      }
-    });
-
-    document.addEventListener('click', (e) => {
-      const target = e.target as HTMLElement;
-      if (
-        !target.closest('#carve-popup') &&
-        target.getAttribute('data-carve') !== 'token'
-      ) {
+      } else if (!target.closest('#carve-popup')) {
         this.hidePopup();
       }
     });

@@ -46,19 +46,23 @@ const TEST_PAGE_HTML = `<!DOCTYPE html>
 </html>`;
 
 // Ruby regression test page — mirrors NHK Easy structure
-// Before fix: extension walked into <ruby> and split 川柳→川+柳, breaking furigana
+// Includes navigation text (症状・病名から探す) to catch cross-segment token
+// contamination: if the annotator batches text nodes and misaligns token
+// boundaries, navigation text can appear inside the article paragraph.
 const RUBY_PAGE_HTML = `<!DOCTYPE html>
 <html lang="ja">
 <head>
   <meta charset="utf-8">
   <title>Ruby Test</title>
   <style>
-    /* Ensure ruby renders normally so screenshots are useful */
     ruby { display: inline; }
     rt { font-size: 0.6em; }
   </style>
 </head>
 <body>
+  <nav id="nav">
+    <a id="nav-link" href="#">症状・病名から探す</a>
+  </nav>
   <p id="ruby-para">
     <ruby id="ruby1">川柳<rt>せんりゅう</rt></ruby>のニュースです。
   </p>
@@ -206,6 +210,29 @@ async function testRubyPreservation(context, mockBase) {
   });
   assert(rubyBaseText === '川柳', `ruby base text wrong — expected "川柳", got "${rubyBaseText}"`);
   console.log(`[assert] ruby base text intact: "${rubyBaseText}" ✓`);
+
+  // ── Text content must not be corrupted (cross-segment token contamination) ───
+  // The annotator used to batch text nodes joined by a separator. If the
+  // tokenizer skipped characters (e.g. 。), chars < text.length kept consuming
+  // tokens from the NEXT segment, injecting wrong text into the wrong node.
+  const plainText = await page.$eval('#plain-para', el => el.textContent?.trim() ?? '');
+  assert(
+    plainText.includes('災害時'),
+    `#plain-para missing expected text. Got: "${plainText}"`,
+  );
+  assert(
+    !plainText.includes('症状') && !plainText.includes('病名'),
+    `nav text leaked into #plain-para: "${plainText}"`,
+  );
+  console.log(`[assert] #plain-para text intact: "${plainText.slice(0, 30)}" ✓`);
+
+  const navText = await page.$eval('#nav-link', el => el.textContent?.trim() ?? '');
+  assert(navText.includes('症状'), `#nav-link text wrong. Got: "${navText}"`);
+  assert(
+    !navText.includes('川柳') && !navText.includes('災害'),
+    `article text leaked into nav: "${navText}"`,
+  );
+  console.log(`[assert] nav text intact: "${navText}" ✓`);
 
   // ── No annotated token should have a pink/red background ────────────────────
   // Tokens without a frequency rank must still get data-band (not fall through
