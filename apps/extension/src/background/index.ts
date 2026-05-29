@@ -13,17 +13,16 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
   return true; // keep message channel open for async response
 });
 
-// Alarm: refresh due count every 30 minutes
-chrome.alarms.create('refresh_due_count', { periodInMinutes: 30 });
+// Create alarm only on install/update — not every service worker wake-up
+chrome.runtime.onInstalled.addListener(async () => {
+  chrome.alarms.create('refresh_due_count', { periodInMinutes: 30 });
+  await updateBadge();
+});
+
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'refresh_due_count') {
     await updateBadge();
   }
-});
-
-chrome.runtime.onInstalled.addListener(async () => {
-  console.log('[Carve] Extension installed');
-  await updateBadge();
 });
 
 async function handleMessage(msg: Message): Promise<MessageResponse> {
