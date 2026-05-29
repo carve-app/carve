@@ -5,7 +5,11 @@
 	<h1>Carve</h1>
 	<p>Science-grounded language learning.</p>
 	<nav>
-		<a href="/cards">Review queue</a>
+		<a href="/review">Review</a>
+		<a href="/cards">Cards</a>
+		<a href="/decks">Decks</a>
+		<a href="/settings">Settings</a>
+		<a href="/export">Export</a>
 		<a href="/login">Log in</a>
 	</nav>
 </main>

@@ -1,5 +1,25 @@
 /// <reference types="chrome" />
 
+export interface OfflineReviewEvent {
+  card_id: string;
+  rating: 1 | 2 | 3 | 4;
+  time_taken_ms: number;
+  reviewed_at: string; // ISO 8601
+}
+
+export interface CachedReviewCard {
+  id: string;
+  front_text: string;
+  back_text: string | null;
+  sentence: string | null;
+  source_url: string | null;
+  fsrs_state: string;
+  stability: number | null;
+  difficulty: number | null;
+  reps: number;
+  lapses: number;
+}
+
 export interface StorageData {
   accessToken?: string;        // in session storage
   userId?: string;
@@ -11,6 +31,9 @@ export interface StorageData {
   ignoredLemmas?: string[];
   dueCount?: number;
   lastDueCountFetch?: number;  // timestamp
+  offlineReviewQueue?: OfflineReviewEvent[];  // events pending sync
+  cachedReviewCards?: CachedReviewCard[];     // cards for offline review
+  cachedReviewAt?: number;                    // timestamp of last cache
 }
 
 /**

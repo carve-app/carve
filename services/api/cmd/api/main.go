@@ -13,12 +13,15 @@ import (
 	"github.com/carve-app/carve/services/api/internal/auth"
 	"github.com/carve-app/carve/services/api/internal/cards"
 	"github.com/carve-app/carve/services/api/internal/db"
+	"github.com/carve-app/carve/services/api/internal/decks"
+	"github.com/carve-app/carve/services/api/internal/export"
 	"github.com/carve-app/carve/services/api/internal/immersion"
 	"github.com/carve-app/carve/services/api/internal/nlp"
 	"github.com/carve-app/carve/services/api/internal/review"
+	"github.com/carve-app/carve/services/api/internal/settings"
 	"github.com/carve-app/carve/services/api/internal/users"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 )
 
@@ -40,11 +43,11 @@ func main() {
 	slog.Info("database connected")
 
 	r := chi.NewRouter()
-	r.Use(middleware.RealIP)
-	r.Use(middleware.RequestID)
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(chimw.RealIP)
+	r.Use(chimw.RequestID)
+	r.Use(chimw.Logger)
+	r.Use(chimw.Recoverer)
+	r.Use(chimw.Timeout(30 * time.Second))
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   []string{"http://localhost:*", "https://localhost:*"},
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
@@ -74,6 +77,9 @@ func main() {
 	reviewHandler := review.NewHandler(pool)
 	immersionHandler := immersion.NewHandler(pool)
 	nlpProxy := nlp.NewProxy()
+	decksHandler := decks.NewHandler(pool)
+	exportHandler := export.NewHandler(pool)
+	settingsHandler := settings.NewHandler(pool)
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(auth.Middleware)
@@ -89,6 +95,26 @@ func main() {
 
 		// Review
 		r.Get("/review/due-count", reviewHandler.DueCount)
+		r.Get("/review/session", reviewHandler.Session)
+		r.Post("/review/events", reviewHandler.SubmitEvent)
+		r.Get("/review/intervals", reviewHandler.Intervals)
+		r.Get("/review/forecast", reviewHandler.Forecast)
+		r.Get("/review/notifications", reviewHandler.Notifications)
+		r.Post("/review/notifications/{id}/read", reviewHandler.MarkNotificationRead)
+
+		// Decks
+		r.Get("/decks", decksHandler.List)
+		r.Post("/decks/{id}/subscribe", decksHandler.Subscribe)
+		r.Delete("/decks/{id}/subscribe", decksHandler.Unsubscribe)
+		r.Post("/decks/{id}/rate", decksHandler.Rate)
+
+		// Export
+		r.Get("/export", exportHandler.Export)
+
+		// Settings
+		r.Get("/settings/fsrs", settingsHandler.GetFSRS)
+		r.Put("/settings/fsrs", settingsHandler.PutFSRS)
+		r.Get("/settings/workload-preview", settingsHandler.WorkloadPreview)
 
 		// Immersion
 		r.Post("/immersion", immersionHandler.Create)

@@ -208,6 +208,47 @@ jobs:
         working-directory: apps/web
         run: npm run build
 
+  # ── Extension e2e (Playwright) ────────────────────────────────────────────
+  extension-e2e:
+    name: Extension E2E
+    runs-on: ubuntu-latest
+    needs: [extension]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/extension/package-lock.json
+
+      - name: Build extension
+        working-directory: apps/extension
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install e2e dependencies
+        working-directory: e2e
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: e2e
+        run: npx playwright install chromium --with-deps
+
+      - name: Run extension e2e test
+        working-directory: e2e
+        run: node extension.test.js
+
+      - name: Upload screenshot on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-e2e-screenshot
+          path: e2e/extension-e2e.png
+
   # ── Integration: Docker Compose ───────────────────────────────────────────
   integration:
     name: Docker Compose Integration

@@ -1,7 +1,7 @@
 .PHONY: help setup \
         colima-start infra-up infra-down infra-logs \
         dev dev-api dev-nlp dev-web \
-        test-nlp test-api test-all \
+        test-nlp test-api test-extension test-all \
         import-jmdict import-tatoeba migrate \
         lint build clean \
         docker-up docker-down docker-logs
@@ -39,6 +39,7 @@ help:
 	@echo "Testing:"
 	@echo "  make test-nlp       — NLP correctness + API tests"
 	@echo "  make test-api       — Go API unit tests"
+	@echo "  make test-extension — Chrome extension e2e (Playwright, no backend needed)"
 	@echo "  make test-all       — all tests"
 	@echo ""
 	@echo "Other:"
@@ -157,7 +158,14 @@ test-nlp: $(NLP_DIR)/data/dictionary.db
 test-api:
 	cd $(API_DIR) && go test ./... -v -race
 
-test-all: test-nlp test-api
+test-extension:
+	@echo "→ Building extension..."
+	cd apps/extension && npm run build
+	@echo "→ Running extension e2e test..."
+	cd e2e && node extension.test.js
+	@echo "✓ Extension e2e test passed"
+
+test-all: test-nlp test-api test-extension
 	@echo "✓ All tests passed — Phase 0 gate cleared"
 
 # ── Database ──────────────────────────────────────────────────────────────────

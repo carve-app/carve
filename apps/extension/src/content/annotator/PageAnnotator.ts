@@ -134,6 +134,10 @@ export class PageAnnotator {
 
         if (tok.frequency_rank !== null) {
           span.setAttribute('data-rank', String(tok.frequency_rank));
+          const band = tok.frequency_rank <= 2000 ? 'green'
+            : tok.frequency_rank <= 5000 ? 'yellow'
+            : 'red';
+          span.setAttribute('data-band', band);
         }
 
         span.textContent = tok.surface;

@@ -124,3 +124,33 @@ export async function getDueCount(language?: string): Promise<number> {
   const data: { due_count: number } = await response.json();
   return data.due_count ?? 0;
 }
+
+/**
+ * Fetch a review session (cards due for review).
+ */
+export async function getReviewSession(language = 'ja', limit = 20): Promise<{ cards: any[] }> {
+  const params = new URLSearchParams({ language, limit: String(limit) });
+  const response = await apiFetch(`/v1/review/session?${params.toString()}`);
+  return response.json();
+}
+
+/**
+ * Submit a review event to the server.
+ */
+export async function submitReviewEvent(params: {
+  card_id: string;
+  rating: 1 | 2 | 3 | 4;
+  time_taken_ms?: number;
+  reviewed_at?: string;
+}): Promise<any> {
+  const response = await apiFetch('/v1/review/events', {
+    method: 'POST',
+    body: JSON.stringify({
+      card_id: params.card_id,
+      rating: params.rating,
+      time_taken_ms: params.time_taken_ms,
+      reviewed_at: params.reviewed_at ?? new Date().toISOString(),
+    }),
+  });
+  return response.json();
+}

@@ -1,6 +1,6 @@
 /// <reference types="chrome" />
-import { nlpTokenize, nlpLookup, createCard, logImmersion, getDueCount } from '../shared/api';
-import { getAccessToken, storageGet, storageSet } from '../shared/storage';
+import { nlpTokenize, nlpLookup, createCard, logImmersion, getDueCount, getReviewSession, submitReviewEvent } from '../shared/api';
+import { getAccessToken, storageGet, storageSet, type OfflineReviewEvent, type CachedReviewCard } from '../shared/storage';
 import type { Message, MessageResponse } from '../shared/messages';
 
 // Handle messages from content scripts
@@ -13,16 +13,28 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
   return true; // keep message channel open for async response
 });
 
-// Create alarm only on install/update — not every service worker wake-up
+// Create alarms on install/update — not every service worker wake-up
 chrome.runtime.onInstalled.addListener(async () => {
   chrome.alarms.create('refresh_due_count', { periodInMinutes: 30 });
+  chrome.alarms.create('sync_offline_queue', { periodInMinutes: 5 });
+  chrome.alarms.create('cache_review_cards', { periodInMinutes: 60 });
   await updateBadge();
+  await cacheReviewCards();
 });
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'refresh_due_count') {
     await updateBadge();
+  } else if (alarm.name === 'sync_offline_queue') {
+    await syncOfflineQueue();
+  } else if (alarm.name === 'cache_review_cards') {
+    await cacheReviewCards();
   }
+});
+
+// Sync when the service worker wakes after connectivity is restored
+self.addEventListener('online', () => {
+  syncOfflineQueue().catch(() => {});
 });
 
 async function handleMessage(msg: Message): Promise<MessageResponse> {
@@ -102,6 +114,23 @@ async function handleMessage(msg: Message): Promise<MessageResponse> {
       return { type: 'DUE_COUNT', count };
     }
 
+    case 'GET_CACHED_REVIEW_CARDS': {
+      const cards = (await storageGet('cachedReviewCards')) ?? [];
+      return { type: 'CACHED_REVIEW_CARDS', cards };
+    }
+
+    case 'QUEUE_REVIEW_EVENT': {
+      await queueOfflineReviewEvent({
+        card_id: msg.cardId,
+        rating: msg.rating,
+        time_taken_ms: msg.timeTakenMs,
+        reviewed_at: new Date().toISOString(),
+      });
+      // Try immediate sync; if offline it stays queued
+      syncOfflineQueue().catch(() => {});
+      return { type: 'MINE_CARD_RESULT', success: true };
+    }
+
     default:
       return { type: 'AUTH_STATE', isLoggedIn: false };
   }
@@ -116,5 +145,67 @@ async function updateBadge(): Promise<number> {
     return count;
   } catch {
     return 0;
+  }
+}
+
+/**
+ * Add a review event to the offline queue.
+ */
+async function queueOfflineReviewEvent(event: OfflineReviewEvent): Promise<void> {
+  const queue = (await storageGet('offlineReviewQueue')) ?? [];
+  queue.push(event);
+  await storageSet('offlineReviewQueue', queue);
+}
+
+/**
+ * Attempt to flush all queued offline review events to the server.
+ * Events that succeed are removed; failed events remain for next retry.
+ */
+async function syncOfflineQueue(): Promise<void> {
+  const token = await getAccessToken();
+  if (!token) return;
+
+  const queue = (await storageGet('offlineReviewQueue')) ?? [];
+  if (queue.length === 0) return;
+
+  const remaining: OfflineReviewEvent[] = [];
+  for (const event of queue) {
+    try {
+      await submitReviewEvent(event);
+    } catch {
+      remaining.push(event); // keep for next retry
+    }
+  }
+  await storageSet('offlineReviewQueue', remaining);
+
+  if (remaining.length < queue.length) {
+    await updateBadge();
+  }
+}
+
+/**
+ * Pre-fetch review cards into local storage so offline review is possible.
+ */
+async function cacheReviewCards(): Promise<void> {
+  const token = await getAccessToken();
+  if (!token) return;
+  try {
+    const session = await getReviewSession('ja', 50);
+    const cards: CachedReviewCard[] = (session.cards ?? []).map((c: any) => ({
+      id: c.id,
+      front_text: c.front_text,
+      back_text: c.back_text ?? null,
+      sentence: c.sentence ?? null,
+      source_url: c.source_url ?? null,
+      fsrs_state: c.fsrs_state,
+      stability: c.stability ?? null,
+      difficulty: c.difficulty ?? null,
+      reps: c.reps ?? 0,
+      lapses: c.lapses ?? 0,
+    }));
+    await storageSet('cachedReviewCards', cards);
+    await storageSet('cachedReviewAt', Date.now());
+  } catch {
+    // Network unavailable — keep stale cache
   }
 }

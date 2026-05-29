@@ -21,9 +21,15 @@ export function injectStyles(): void {
     [data-carve="token"][data-status="known"] {
       cursor: pointer;
     }
-    /* Frequency-band coloring for unknown words */
-    [data-carve="token"][data-status="unknown"][data-rank] {
-      border-bottom: 2px solid;
+    /* Frequency-band underlines for unknown content words */
+    [data-carve="token"][data-status="unknown"][data-band="green"] {
+      border-bottom: 2px solid #1db954;
+    }
+    [data-carve="token"][data-status="unknown"][data-band="yellow"] {
+      border-bottom: 2px solid #ffa726;
+    }
+    [data-carve="token"][data-status="unknown"][data-band="red"] {
+      border-bottom: 2px solid #ef5350;
     }
     /* Popup container */
     #carve-popup {
