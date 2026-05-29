@@ -20,6 +20,34 @@ async function clearToken(): Promise<void> {
   await chrome.storage.local.remove('accessToken');
 }
 
+// ── Site toggle helpers ───────────────────────────────────────────────────────
+
+async function getDisabledDomains(): Promise<string[]> {
+  const r = await chrome.storage.local.get('disabledDomains');
+  return (r['disabledDomains'] as string[] | undefined) ?? [];
+}
+
+async function isSiteEnabled(hostname: string): Promise<boolean> {
+  const disabled = await getDisabledDomains();
+  return !disabled.includes(hostname);
+}
+
+async function setSiteEnabled(hostname: string, enabled: boolean): Promise<void> {
+  const disabled = await getDisabledDomains();
+  const next = enabled
+    ? disabled.filter(d => d !== hostname)
+    : [...new Set([...disabled, hostname])];
+  await chrome.storage.local.set({ disabledDomains: next });
+
+  // Tell the active tab's content script immediately
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id) {
+    chrome.tabs.sendMessage(tab.id, { type: 'SET_SITE_ENABLED', enabled }).catch(() => {
+      // Content script may not be present on this page — ignore
+    });
+  }
+}
+
 // ── Views ─────────────────────────────────────────────────────────────────────
 
 function showLogin(errorMsg?: string): void {
@@ -63,7 +91,7 @@ function showLogin(errorMsg?: string): void {
       const data = await res.json() as { access_token: string };
       await setToken(data.access_token);
       await showDueCount();
-    } catch (err) {
+    } catch {
       showLogin('Could not reach API — is Docker running?');
     }
   });
@@ -78,7 +106,26 @@ async function showDueCount(): Promise<void> {
     return;
   }
 
+  // Get current tab hostname for the site toggle
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const hostname = tab?.url ? new URL(tab.url).hostname : null;
+  const enabled = hostname ? await isSiteEnabled(hostname) : true;
+
+  const siteToggleHTML = hostname ? `
+    <div class="site-row">
+      <div class="site-row-label">
+        Enable on this site
+        <span>${escHtml(hostname)}</span>
+      </div>
+      <label class="toggle" title="${enabled ? 'Disable on this site' : 'Enable on this site'}">
+        <input type="checkbox" id="site-toggle" ${enabled ? 'checked' : ''} />
+        <div class="toggle-track"></div>
+      </label>
+    </div>
+  ` : '';
+
   app.innerHTML = `
+    ${siteToggleHTML}
     <div class="section">
       <div class="label">Cards due today</div>
       <div class="due-count" id="due-count">—</div>
@@ -89,6 +136,13 @@ async function showDueCount(): Promise<void> {
     </a>
     <button id="logout-btn">Sign out</button>
   `;
+
+  if (hostname) {
+    document.getElementById('site-toggle')!.addEventListener('change', async (e) => {
+      const checked = (e.target as HTMLInputElement).checked;
+      await setSiteEnabled(hostname, checked);
+    });
+  }
 
   document.getElementById('logout-btn')!.addEventListener('click', async () => {
     await clearToken();

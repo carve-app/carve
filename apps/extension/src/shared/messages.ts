@@ -10,7 +10,8 @@ export type Message =
   | { type: 'GET_AUTH_STATE' }
   | { type: 'GET_DUE_COUNT' }
   | { type: 'GET_CACHED_REVIEW_CARDS' }
-  | { type: 'QUEUE_REVIEW_EVENT'; cardId: string; rating: 1|2|3|4; timeTakenMs: number };
+  | { type: 'QUEUE_REVIEW_EVENT'; cardId: string; rating: 1|2|3|4; timeTakenMs: number }
+  | { type: 'SET_SITE_ENABLED'; enabled: boolean };
 
 export type MessageResponse =
   | { type: 'TOKENIZE_RESULT'; tokens: Token[]; comprehension_pct: number | null }

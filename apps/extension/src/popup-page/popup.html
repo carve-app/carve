@@ -105,6 +105,54 @@
       margin-bottom: 6px;
     }
 
+    /* Site toggle */
+    .site-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #13151a;
+      border-radius: 8px;
+      padding: 10px 14px;
+      margin-bottom: 10px;
+    }
+    .site-row-label {
+      font-size: 12px;
+      color: #9ba8c0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 160px;
+    }
+    .site-row-label span { color: #6b7a99; font-size: 11px; display: block; }
+    .toggle {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      flex-shrink: 0;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: #2d3344;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .toggle input:checked + .toggle-track { background: #4caf50; }
+    .toggle-track::after {
+      content: '';
+      position: absolute;
+      left: 2px;
+      top: 2px;
+      width: 16px;
+      height: 16px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .toggle input:checked + .toggle-track::after { transform: translateX(16px); }
+
     /* Sign out */
     #logout-btn {
       display: block;

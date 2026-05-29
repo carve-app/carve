@@ -26,6 +26,7 @@ export interface StorageData {
   apiBaseUrl?: string;         // defaults to 'http://localhost:8080'
   nlpBaseUrl?: string;         // not used directly - goes through API
   enabledDomains?: string[];   // null = all domains
+  disabledDomains?: string[];  // domains where annotation is suppressed
   knownLemmas?: string[];
   learningLemmas?: string[];
   ignoredLemmas?: string[];

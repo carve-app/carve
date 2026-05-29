@@ -6,7 +6,30 @@ import { ImmersionTracker } from './tracker/ImmersionTracker';
 import { SubtitleHook } from './video/SubtitleHook';
 import { injectStyles } from './annotator/styles';
 
+let annotator: PageAnnotator | null = null;
+
+async function isSiteDisabled(): Promise<boolean> {
+  const result = await chrome.storage.local.get('disabledDomains');
+  const disabled: string[] = result['disabledDomains'] ?? [];
+  return disabled.includes(location.hostname);
+}
+
+function teardown(): void {
+  // Remove all token spans, restoring original text nodes
+  document.querySelectorAll('[data-carve="processed"]').forEach(el => {
+    el.removeAttribute('data-carve');
+  });
+  document.querySelectorAll('[data-carve="token"]').forEach(span => {
+    span.replaceWith(span.textContent ?? '');
+  });
+  document.getElementById('carve-popup')?.remove();
+  document.getElementById('carve-styles')?.remove();
+  annotator = null;
+}
+
 async function init(): Promise<void> {
+  if (await isSiteDisabled()) return;
+
   const lang = detectLanguage();
   if (!lang) return;
 
@@ -21,7 +44,7 @@ async function init(): Promise<void> {
   const subtitleHook = new SubtitleHook(lang, vocabCache, popupManager);
   subtitleHook.mount();
 
-  const annotator = new PageAnnotator(lang, vocabCache, popupManager);
+  annotator = new PageAnnotator(lang, vocabCache, popupManager);
   annotator.start();
 }
 
@@ -35,6 +58,16 @@ function detectLanguage(): string | null {
 
   return null;
 }
+
+// Listen for toggle from the popup
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type !== 'SET_SITE_ENABLED') return;
+  if (msg.enabled) {
+    init();
+  } else {
+    teardown();
+  }
+});
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => { init(); });
