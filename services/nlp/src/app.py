@@ -11,7 +11,9 @@ Endpoints:
 
 from __future__ import annotations
 
+import logging
 import os
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import FastAPI, Header, HTTPException
@@ -21,10 +23,26 @@ from .dictionary import DictionaryService
 from .scorer import score_content
 from .tokenizer import JapaneseTokenizer
 
-app = FastAPI(title="Carve NLP Service", version="0.1.0")
+logger = logging.getLogger(__name__)
 
 _dict_service = DictionaryService()
 _ja_tokenizer = JapaneseTokenizer()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Warm up SudachiPy — first tokenize call loads the dictionary into memory
+    # and can take 5-30s. Do it at startup so the first user request is instant.
+    logger.info("warming up tokenizer...")
+    try:
+        _ja_tokenizer.tokenize("日本語", mode="C")
+        logger.info("tokenizer warm-up complete")
+    except Exception as e:
+        logger.warning("tokenizer warm-up failed: %s", e)
+    yield
+
+
+app = FastAPI(title="Carve NLP Service", version="0.1.0", lifespan=lifespan)
 
 # Internal-only: requests must carry this header when deployed
 _INTERNAL_SECRET = os.environ.get("NLP_INTERNAL_SECRET", "")

@@ -1,10 +1,12 @@
 package nlp
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 )
 
 // Proxy forwards NLP requests to the Python NLP service.
@@ -24,12 +26,19 @@ func NewProxy() *Proxy {
 	}
 }
 
+const nlpTimeout = 120 * time.Second
+
 // forward proxies the incoming request body to the given upstream path,
 // copies all response headers and the body back to the client.
 func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, upstreamPath string) {
 	upstreamURL := p.serviceURL + upstreamPath
 
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, upstreamURL, r.Body)
+	// Use a dedicated timeout longer than the global chi middleware (30s) so
+	// the first request after NLP service startup isn't killed prematurely.
+	ctx, cancel := context.WithTimeout(context.Background(), nlpTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, r.Body)
 	if err != nil {
 		slog.Error("nlp proxy: build request", "error", err)
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)

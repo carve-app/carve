@@ -119,9 +119,14 @@ func main() {
 		// Immersion
 		r.Post("/immersion", immersionHandler.Create)
 
-		// NLP proxy
-		r.Post("/nlp/tokenize", nlpProxy.Tokenize)
-		r.Post("/nlp/lookup", nlpProxy.Lookup)
+	})
+
+	// NLP proxy routes get their own subrouter without the global 30s timeout
+	// middleware, since SudachiPy can take up to 2 minutes on first request.
+	r.Route("/v1/nlp", func(r chi.Router) {
+		r.Use(auth.Middleware)
+		r.Post("/tokenize", nlpProxy.Tokenize)
+		r.Post("/lookup", nlpProxy.Lookup)
 	})
 
 	port := os.Getenv("PORT")
@@ -134,7 +139,7 @@ func main() {
 		Addr:         addr,
 		Handler:      r,
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 130 * time.Second, // NLP proxy can take up to 120s on cold start
 		IdleTimeout:  60 * time.Second,
 	}
 
