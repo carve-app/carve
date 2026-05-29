@@ -1,6 +1,6 @@
 .PHONY: help setup \
         colima-start infra-up infra-down infra-logs \
-        dev-api dev-nlp \
+        dev dev-api dev-nlp dev-web \
         test-nlp test-api test-all \
         import-jmdict import-tatoeba migrate \
         lint build clean \
@@ -23,11 +23,8 @@ help:
 	@echo "  brew install colima docker docker-compose"
 	@echo "  make setup"
 	@echo ""
-	@echo "Daily workflow (3 terminals):"
-	@echo "  make infra-up       — start Colima + postgres + redis + minio, apply migrations"
-	@echo "  make dev-api        — terminal 1: Go API on :8080"
-	@echo "  make dev-nlp        — terminal 2: Python NLP on :8001"
-	@echo "  make dev-web        — terminal 3: SvelteKit on :5173"
+	@echo "Daily workflow:"
+	@echo "  make dev            — start everything (infra + api + nlp + web), Ctrl+C stops all"
 	@echo ""
 	@echo "Infrastructure:"
 	@echo "  make infra-up       — start postgres + redis + minio (via Colima)"
@@ -100,8 +97,7 @@ infra-up: colima-start
 	@echo "  redis     → localhost:6379"
 	@echo "  minio     → localhost:9000  (console: localhost:9001)"
 	@echo ""
-	@echo "Start services in separate terminals:"
-	@echo "  make dev-api    make dev-nlp    make dev-web"
+	@echo "Run 'make dev' to start all services."
 
 infra-down:
 	docker-compose down
@@ -110,6 +106,14 @@ infra-logs:
 	docker-compose logs -f postgres redis minio
 
 # ── Development servers ───────────────────────────────────────────────────────
+
+dev: infra-up
+	@echo "→ Starting api, nlp, web (Ctrl+C stops all)..."
+	@trap 'kill 0' SIGINT; \
+	  $(MAKE) dev-api & \
+	  $(MAKE) dev-nlp & \
+	  $(MAKE) dev-web & \
+	  wait
 
 dev-api:
 	cd $(API_DIR) && \
