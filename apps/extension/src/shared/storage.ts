@@ -57,25 +57,25 @@ export async function storageSet<K extends keyof StorageData>(
 }
 
 /**
- * Get access token from chrome.storage.session (clears on browser close).
+ * Get access token from chrome.storage.local (persists across extension reloads).
  */
 export async function getAccessToken(): Promise<string | null> {
-  const result = await chrome.storage.session.get('accessToken');
+  const result = await chrome.storage.local.get('accessToken');
   return (result['accessToken'] as string | undefined) ?? null;
 }
 
 /**
- * Set access token in chrome.storage.session.
+ * Set access token in chrome.storage.local.
  */
 export async function setAccessToken(token: string): Promise<void> {
-  await chrome.storage.session.set({ accessToken: token });
+  await chrome.storage.local.set({ accessToken: token });
 }
 
 /**
- * Clear session storage.
+ * Clear auth token from local storage.
  */
 export async function clearSession(): Promise<void> {
-  await chrome.storage.session.clear();
+  await chrome.storage.local.remove('accessToken');
 }
 
 /**

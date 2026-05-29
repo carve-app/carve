@@ -8,16 +8,16 @@ async function getApiBase(): Promise<string> {
 }
 
 async function getToken(): Promise<string | null> {
-  const r = await chrome.storage.session.get('accessToken');
+  const r = await chrome.storage.local.get('accessToken');
   return (r['accessToken'] as string | undefined) ?? null;
 }
 
 async function setToken(token: string): Promise<void> {
-  await chrome.storage.session.set({ accessToken: token });
+  await chrome.storage.local.set({ accessToken: token });
 }
 
 async function clearToken(): Promise<void> {
-  await chrome.storage.session.remove('accessToken');
+  await chrome.storage.local.remove('accessToken');
 }
 
 // ── Views ─────────────────────────────────────────────────────────────────────
