@@ -1,0 +1,21 @@
+[package]
+name = "ja-tokenizer"
+version = "0.1.0"
+edition = "2021"
+description = "In-browser Japanese tokenizer compiled to WASM"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+console_error_panic_hook = { version = "0.1", optional = true }
+
+[features]
+default = ["console_error_panic_hook"]
+
+[profile.release]
+opt-level = "s"   # optimize for size (WASM download size matters)
+lto = true

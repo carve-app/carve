@@ -1,0 +1,132 @@
+version: "3.9"
+
+# Carve development environment
+# Start everything: docker compose up
+# Start specific service: docker compose up postgres redis
+
+services:
+
+  # ── Infrastructure ─────────────────────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: carve
+      POSTGRES_PASSWORD: carve
+      POSTGRES_DB: carve
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U carve"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"   # console
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Services ───────────────────────────────────────────────────────────────
+
+  migrate:
+    build:
+      context: services/api
+      dockerfile: Dockerfile
+    command: ["./migrate", "--dir", "./migrations"]
+    environment:
+      DATABASE_URL: postgres://carve:carve@postgres:5432/carve?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: services/api
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgres://carve:carve@postgres:5432/carve?sslmode=disable
+      JWT_SECRET: dev-secret-change-in-production-at-least-32-chars
+      PORT: "8080"
+      NLP_SERVICE_URL: http://nlp:8001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  nlp:
+    build:
+      context: services/nlp
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      DICT_DB_PATH: /app/data/dictionary.db
+      NLP_INTERNAL_SECRET: ""   # empty = no auth check in dev
+      PORT: "8001"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8001/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  media:
+    build:
+      context: services/media
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    environment:
+      PORT: "8002"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8002/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

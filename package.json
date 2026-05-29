@@ -1,0 +1,20 @@
+{
+  "name": "carve",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev:web": "pnpm --filter @carve/web dev",
+    "dev:ext": "pnpm --filter @carve/extension dev",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test"
+  },
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=10"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Carve — Language Immersion",
+  "version": "0.1.0",
+  "description": "Science-grounded language learning through immersion. Japanese tokenization, FSRS-6 SRS, furigana, card mining.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab",
+    "declarativeNetRequest"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background/index.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/index.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/index.html",
+    "default_title": "Carve"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["wasm/*.wasm", "wasm/*.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
