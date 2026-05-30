@@ -24,6 +24,9 @@ const entries: Record<Target, { input: string; outFile: string }> = {
 const { input, outFile } = entries[TARGET];
 
 export default defineConfig({
+  define: {
+    __WEB_BASE__: JSON.stringify(process.env.WEB_BASE ?? 'http://localhost:5173'),
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: TARGET === 'background',

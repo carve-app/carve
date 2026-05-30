@@ -1,5 +1,7 @@
 /// <reference types="chrome" />
 
+declare const __WEB_BASE__: string;
+
 const API_DEFAULT = 'http://localhost:8080';
 
 async function getApiBase(): Promise<string> {
@@ -150,7 +152,7 @@ async function showDueCount(): Promise<void> {
       <div class="due-count" id="due-count">—</div>
       <div class="status" id="status">Checking…</div>
     </div>
-    <a href="http://localhost:5173/cards" target="_blank" class="review-link" id="review-link">
+    <a href="${__WEB_BASE__}/cards" target="_blank" class="review-link" id="review-link">
       Open review queue →
     </a>
     <button id="logout-btn">Sign out</button>

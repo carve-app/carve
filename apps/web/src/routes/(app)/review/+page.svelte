@@ -1,15 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import {
     fetchReviewSession,
     submitReviewEvent,
     fetchIntervals,
-    ApiError,
     type Card,
     type IntervalsResponse,
   } from '$lib/api';
+  import { lang } from '$lib/stores/lang';
+  import { toasts } from '$lib/stores/toast';
 
-  type Phase = 'loading' | 'front' | 'back' | 'done' | 'unauthenticated' | 'error';
+  type Phase = 'loading' | 'front' | 'back' | 'done' | 'error';
 
   let phase: Phase = 'loading';
   let queue: Card[] = [];
@@ -28,8 +30,6 @@
     const el = document.getElementById('card-audio') as HTMLAudioElement | null;
     el?.play();
   }
-
-  // ── helpers ───────────────────────────────────────────────────────────────────
 
   function formatInterval(isoOrDuration: string): string {
     const now = Date.now();
@@ -50,39 +50,31 @@
     return `${s.toFixed(1)}d`;
   }
 
-  // ── lifecycle ─────────────────────────────────────────────────────────────────
-
-  onMount(async () => {
-    const token = localStorage.getItem('carve_access_token');
-    if (!token) {
-      phase = 'unauthenticated';
-      return;
-    }
-    await loadSession();
+  onMount(() => {
+    let init = false;
+    const unsub = lang.subscribe(l => { if (init) loadSession(l); });
+    loadSession(get(lang));
+    init = true;
+    return unsub;
   });
 
-  async function loadSession() {
+  async function loadSession(language = get(lang)) {
     phase = 'loading';
+    reviewedCount = 0;
+    queue = [];
     try {
-      const res = await fetchReviewSession('ja', 20);
+      const res = await fetchReviewSession(language, 20);
       queue = res.cards;
       sessionStartTime = Date.now();
       advance();
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        phase = 'unauthenticated';
-      } else {
-        errorMessage = err instanceof Error ? err.message : 'Unknown error';
-        phase = 'error';
-      }
+      errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      phase = 'error';
     }
   }
 
   function advance() {
-    if (queue.length === 0) {
-      phase = 'done';
-      return;
-    }
+    if (queue.length === 0) { phase = 'done'; return; }
     current = queue.shift()!;
     intervals = null;
     cardStartTime = Date.now();
@@ -92,11 +84,10 @@
   async function flip() {
     if (!current || phase !== 'front') return;
     phase = 'back';
-    // Load interval previews in background
     try {
       intervals = await fetchIntervals(current.id);
     } catch {
-      // non-fatal
+      // interval preview is optional
     }
   }
 
@@ -111,56 +102,31 @@
         isLeechNotif = true;
         setTimeout(() => { isLeechNotif = false; }, 4000);
       }
-    } catch {
-      // non-fatal: continue session even if save fails
+    } catch (err) {
+      toasts.add(err instanceof Error ? err.message : 'Failed to save review');
     }
     submitting = false;
     advance();
   }
 
-  const RATING_LABELS: Record<number, string> = {
-    1: 'Again',
-    2: 'Hard',
-    3: 'Good',
-    4: 'Easy',
-  };
-
+  const RATING_LABELS: Record<number, string> = { 1: 'Again', 2: 'Hard', 3: 'Good', 4: 'Easy' };
   const RATING_COLORS: Record<number, string> = {
-    1: '#e57373',
-    2: '#ffb74d',
-    3: '#4caf50',
-    4: '#42a5f5',
+    1: '#e57373', 2: '#ffb74d', 3: '#4caf50', 4: '#42a5f5',
   };
 </script>
 
 <main>
-  <header>
-    <h1>Review</h1>
-    <nav>
-      <a href="/">Home</a>
-      <a href="/cards">Cards</a>
-    </nav>
-  </header>
-
   {#if isLeechNotif}
-    <div class="leech-banner">
-      Card suspended — too many lapses (leech detected)
-    </div>
+    <div class="leech-banner">Card suspended — too many lapses (leech detected)</div>
   {/if}
 
   {#if phase === 'loading'}
     <div class="center-msg"><p>Loading session…</p></div>
 
-  {:else if phase === 'unauthenticated'}
-    <div class="center-msg">
-      <p>You need to log in to review.</p>
-      <a href="/login" class="btn">Log in</a>
-    </div>
-
   {:else if phase === 'error'}
     <div class="center-msg error">
       <p>{errorMessage}</p>
-      <button class="btn" on:click={loadSession}>Retry</button>
+      <button class="btn" on:click={() => loadSession()}>Retry</button>
     </div>
 
   {:else if phase === 'done'}
@@ -169,7 +135,7 @@
       <h2>Session complete</h2>
       <p class="done-sub">{reviewedCount} card{reviewedCount === 1 ? '' : 's'} reviewed</p>
       <div class="done-actions">
-        <button class="btn" on:click={loadSession}>Review more</button>
+        <button class="btn" on:click={() => loadSession()}>Review more</button>
         <a href="/cards" class="btn btn-ghost">View cards</a>
       </div>
     </div>
@@ -180,15 +146,12 @@
     </div>
 
     <div class="card-wrap">
-      <!-- Card face -->
       <div class="flashcard" class:flipped={phase === 'back'}>
         <div class="card-front">
           <div class="word">{current.front_text}</div>
           {#if current.audio_url}
             <audio src={current.audio_url} preload="auto" id="card-audio"></audio>
-            <button class="audio-btn" on:click={playAudio} title="Play audio">
-              ▶
-            </button>
+            <button class="audio-btn" on:click={playAudio} title="Play audio">▶</button>
           {/if}
           {#if phase === 'front'}
             <button class="show-btn" on:click={flip}>Show answer</button>
@@ -210,7 +173,6 @@
         {/if}
       </div>
 
-      <!-- Stats row (shown on back) -->
       {#if phase === 'back' && (current.stability != null || current.difficulty != null)}
         <div class="stats-row">
           <span title="Stability">S: {formatStability(current.stability)}</span>
@@ -220,7 +182,6 @@
         </div>
       {/if}
 
-      <!-- Rating buttons (shown on back) -->
       {#if phase === 'back'}
         <div class="rating-row">
           {#each [1, 2, 3, 4] as r}
@@ -248,34 +209,12 @@
 </main>
 
 <style>
-  :global(body) {
-    background: #13151a;
-    color: #e8eaf0;
-    font-family: system-ui, sans-serif;
-    margin: 0;
-  }
-
   main {
     max-width: 720px;
     margin: 0 auto;
     padding: 1.5rem 1rem;
-    min-height: 100vh;
+    min-height: calc(100vh - 50px);
   }
-
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 1.5rem;
-    border-bottom: 1px solid #2a2d36;
-    padding-bottom: 1rem;
-  }
-
-  header h1 { margin: 0; font-size: 1.4rem; }
-
-  nav { display: flex; gap: 1rem; }
-  nav a { color: #9ba8c0; text-decoration: none; font-size: 0.9rem; }
-  nav a:hover { color: #e8eaf0; }
 
   .leech-banner {
     background: #3a1515;
@@ -324,18 +263,9 @@
     text-align: center;
   }
 
-  .word {
-    font-size: 3rem;
-    font-weight: 700;
-    color: #e8eaf0;
-    line-height: 1.2;
-  }
+  .word { font-size: 3rem; font-weight: 700; line-height: 1.2; }
 
-  .definition {
-    font-size: 1.3rem;
-    color: #b0bec5;
-    margin: 0;
-  }
+  .definition { font-size: 1.3rem; color: #b0bec5; margin: 0; }
 
   .sentence {
     font-size: 0.95rem;
@@ -418,25 +348,16 @@
     font-weight: 600;
     transition: background 0.15s;
   }
-  .rating-btn:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--color) 15%, #1e2128);
-  }
+  .rating-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--color) 15%, #1e2128); }
   .rating-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .rating-label { font-size: 0.9rem; }
   .interval-hint { font-size: 0.72rem; font-weight: 400; opacity: 0.8; }
 
-  .center-msg {
-    text-align: center;
-    margin-top: 4rem;
-    color: #9ba8c0;
-  }
+  .center-msg { text-align: center; margin-top: 4rem; color: #9ba8c0; }
   .center-msg.error { color: #e57373; }
 
-  .done-screen {
-    text-align: center;
-    margin-top: 5rem;
-  }
+  .done-screen { text-align: center; margin-top: 5rem; }
   .done-emoji { font-size: 3rem; color: #4caf50; margin: 0; }
   .done-screen h2 { font-size: 1.8rem; margin: 0.5rem 0; }
   .done-sub { color: #9ba8c0; margin-bottom: 2rem; }

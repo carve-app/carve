@@ -2,7 +2,7 @@
  * Typed API client for the Carve web app.
  */
 
-const API_BASE = 'http://localhost:8080';
+const API_BASE: string = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080';
 
 function getToken(): string | null {
   if (typeof localStorage === 'undefined') return null;
@@ -146,6 +146,13 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
 
   if (!res.ok) {
+    // Expired/invalid session: clear token and redirect
+    if (res.status === 401 && typeof window !== 'undefined' && localStorage.getItem('carve_access_token')) {
+      localStorage.removeItem('carve_access_token');
+      window.location.href = '/login';
+      throw new ApiError(401, 'Session expired');
+    }
+
     let message = `HTTP ${res.status}`;
     try {
       const body = await res.json();
@@ -160,6 +167,14 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
+
+export async function fetchUser(): Promise<User> {
+  return apiFetch<User>('/v1/users/me');
+}
+
+export async function fetchDueCount(language = 'ja'): Promise<{ due_count: number }> {
+  return apiFetch<{ due_count: number }>(`/v1/review/due-count?language=${language}`);
+}
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
   return apiFetch<LoginResponse>('/v1/auth/login', {

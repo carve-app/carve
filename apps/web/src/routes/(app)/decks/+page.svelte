@@ -1,8 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { fetchDecks, subscribeDeck, unsubscribeDeck, rateDeck, createDeck, updateDeck, deleteDeckById, ApiError, type Deck } from '$lib/api';
+  import { get } from 'svelte/store';
+  import {
+    fetchDecks, subscribeDeck, unsubscribeDeck, rateDeck,
+    createDeck, updateDeck, deleteDeckById,
+    type Deck,
+  } from '$lib/api';
+  import { lang } from '$lib/stores/lang';
+  import { toasts } from '$lib/stores/toast';
 
-  type State = 'loading' | 'loaded' | 'unauthenticated' | 'error';
+  type State = 'loading' | 'loaded' | 'error';
 
   let state: State = 'loading';
   let decks: Deck[] = [];
@@ -11,7 +18,6 @@
   let subscribing: Record<string, boolean> = {};
   let ratingCard: string | null = null;
 
-  // Deck creation
   let showCreate = false;
   let creating = false;
   let newName = '';
@@ -19,40 +25,36 @@
   let newPublic = false;
   let createError = '';
 
-  // Deck editing
   let editingDeck: string | null = null;
   let editName = '';
   let editDesc = '';
   let editPublic = false;
   let editSaving = false;
 
-  onMount(async () => {
-    if (!localStorage.getItem('carve_access_token')) {
-      state = 'unauthenticated';
-      return;
-    }
-    await load();
+  onMount(() => {
+    let init = false;
+    const unsub = lang.subscribe(l => { if (init) load(activeTab, l); });
+    load(activeTab, get(lang));
+    init = true;
+    return unsub;
   });
 
-  async function load() {
+  async function load(tab = activeTab, language = get(lang)) {
     state = 'loading';
     try {
-      const res = await fetchDecks('ja', activeTab === 'mine');
+      const res = await fetchDecks(language, tab === 'mine');
       decks = res.decks ?? [];
       state = 'loaded';
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) {
-        state = 'unauthenticated';
-      } else {
-        errorMessage = err instanceof Error ? err.message : 'Unknown error';
-        state = 'error';
-      }
+      errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      toasts.add(errorMessage);
+      state = 'error';
     }
   }
 
   async function switchTab(tab: 'browse' | 'mine') {
     activeTab = tab;
-    await load();
+    await load(tab);
   }
 
   async function toggleSubscribe(deck: Deck) {
@@ -67,9 +69,9 @@
         deck.is_subscribed = true;
         deck.download_count++;
       }
-      decks = [...decks]; // trigger reactivity
-    } catch {
-      // no-op
+      decks = [...decks];
+    } catch (err) {
+      toasts.add(err instanceof Error ? err.message : 'Failed to update subscription');
     }
     subscribing[deck.id] = false;
   }
@@ -81,8 +83,8 @@
       await rateDeck(deckId, rating);
       ratingCard = null;
       await load();
-    } catch {
-      // no-op
+    } catch (err) {
+      toasts.add(err instanceof Error ? err.message : 'Failed to rate deck');
     }
   }
 
@@ -92,10 +94,7 @@
     createError = '';
     try {
       await createDeck({ name: newName.trim(), description: newDesc.trim() || undefined, is_public: newPublic });
-      newName = '';
-      newDesc = '';
-      newPublic = false;
-      showCreate = false;
+      newName = ''; newDesc = ''; newPublic = false; showCreate = false;
       await load();
     } catch (err) {
       createError = err instanceof Error ? err.message : 'Failed to create deck';
@@ -104,10 +103,8 @@
   }
 
   function startEdit(deck: Deck) {
-    editingDeck = deck.id;
-    editName = deck.name;
-    editDesc = deck.description ?? '';
-    editPublic = deck.is_public;
+    editingDeck = deck.id; editName = deck.name;
+    editDesc = deck.description ?? ''; editPublic = deck.is_public;
   }
 
   async function saveEdit(deckId: string) {
@@ -116,8 +113,8 @@
       await updateDeck(deckId, { name: editName, description: editDesc || undefined, is_public: editPublic });
       editingDeck = null;
       await load();
-    } catch {
-      // no-op
+    } catch (err) {
+      toasts.add(err instanceof Error ? err.message : 'Failed to save deck');
     }
     editSaving = false;
   }
@@ -127,18 +124,13 @@
     try {
       await deleteDeckById(deckId);
       await load();
-    } catch {
-      // no-op
+    } catch (err) {
+      toasts.add(err instanceof Error ? err.message : 'Failed to delete deck');
     }
   }
 </script>
 
 <main>
-  <header>
-    <h1>Decks</h1>
-    <nav><a href="/">Home</a><a href="/review">Review</a></nav>
-  </header>
-
   <div class="tabs-row">
     <div class="tabs">
       <button class="tab" class:active={activeTab === 'browse'} on:click={() => switchTab('browse')}>Browse</button>
@@ -157,7 +149,7 @@
       <input class="text-input" placeholder="Deck name" bind:value={newName} />
       <input class="text-input" placeholder="Description (optional)" bind:value={newDesc} />
       <label class="check-label">
-        <input type="checkbox" bind:checked={newPublic} /> Make public (others can subscribe)
+        <input type="checkbox" bind:checked={newPublic} /> Make public
       </label>
       {#if createError}<p class="form-error">{createError}</p>{/if}
       <button class="btn" on:click={submitCreate} disabled={creating || !newName.trim()}>
@@ -169,11 +161,8 @@
   {#if state === 'loading'}
     <p class="msg">Loading…</p>
 
-  {:else if state === 'unauthenticated'}
-    <div class="msg"><p>Please <a href="/login">log in</a> to browse decks.</p></div>
-
   {:else if state === 'error'}
-    <div class="msg error"><p>{errorMessage}</p><button class="btn" on:click={load}>Retry</button></div>
+    <div class="msg error"><p>{errorMessage}</p><button class="btn" on:click={() => load()}>Retry</button></div>
 
   {:else if decks.length === 0}
     <div class="msg"><p>No decks found.</p></div>
@@ -185,12 +174,8 @@
           <div class="deck-top">
             <div>
               <h2 class="deck-name">{deck.name}</h2>
-              {#if deck.is_official}
-                <span class="badge-official">Official</span>
-              {/if}
-              {#if deck.description}
-                <p class="deck-desc">{deck.description}</p>
-              {/if}
+              {#if deck.is_official}<span class="badge-official">Official</span>{/if}
+              {#if deck.description}<p class="deck-desc">{deck.description}</p>{/if}
             </div>
             <button
               class="sub-btn"
@@ -205,18 +190,14 @@
           <div class="deck-meta">
             <span>{deck.card_count} cards</span>
             <span>{deck.download_count} learners</span>
-            {#if deck.avg_rating != null}
-              <span>★ {deck.avg_rating.toFixed(1)}</span>
-            {/if}
-            {#if deck.tags?.length}
-              <span class="tags">{deck.tags.join(', ')}</span>
-            {/if}
+            {#if deck.avg_rating != null}<span>★ {deck.avg_rating.toFixed(1)}</span>{/if}
+            {#if deck.tags?.length}<span class="tags">{deck.tags.join(', ')}</span>{/if}
           </div>
 
           {#if deck.is_subscribed && !deck.is_official}
             <div class="rate-row">
               {#if ratingCard === deck.id}
-                <span class="rate-label">Rate this deck:</span>
+                <span class="rate-label">Rate:</span>
                 {#each [1,2,3,4,5] as r}
                   <button class="star" on:click={() => submitRating(deck.id, starRating(r))}>{'★'.repeat(r)}{'☆'.repeat(5-r)}</button>
                 {/each}
@@ -232,12 +213,8 @@
               <div class="edit-form">
                 <input class="text-input-sm" bind:value={editName} placeholder="Name" />
                 <input class="text-input-sm" bind:value={editDesc} placeholder="Description" />
-                <label class="check-label-sm">
-                  <input type="checkbox" bind:checked={editPublic} /> Public
-                </label>
-                <button class="btn-sm" on:click={() => saveEdit(deck.id)} disabled={editSaving}>
-                  {editSaving ? '…' : 'Save'}
-                </button>
+                <label class="check-label-sm"><input type="checkbox" bind:checked={editPublic} /> Public</label>
+                <button class="btn-sm" on:click={() => saveEdit(deck.id)} disabled={editSaving}>{editSaving ? '…' : 'Save'}</button>
                 <button class="btn-ghost-sm" on:click={() => editingDeck = null}>Cancel</button>
               </div>
             {:else}
@@ -254,22 +231,16 @@
 </main>
 
 <style>
-  :global(body) { background: #13151a; color: #e8eaf0; font-family: system-ui, sans-serif; margin: 0; }
   main { max-width: 760px; margin: 0 auto; padding: 1.5rem 1rem; }
 
-  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; border-bottom: 1px solid #2a2d36; padding-bottom: 1rem; }
-  header h1 { margin: 0; font-size: 1.4rem; }
-  nav { display: flex; gap: 1rem; }
-  nav a { color: #9ba8c0; text-decoration: none; font-size: 0.9rem; }
-  nav a:hover { color: #e8eaf0; }
-
+  .tabs-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+  .tabs { display: flex; gap: 0.5rem; }
   .tab { background: #1e2128; border: 1px solid #2a2d36; color: #9ba8c0; padding: 0.5rem 1.2rem; border-radius: 6px; cursor: pointer; font-size: 0.9rem; transition: all 0.15s; }
   .tab.active { background: #4caf50; border-color: #4caf50; color: #fff; }
   .tab:hover:not(.active) { color: #e8eaf0; }
 
   .msg { text-align: center; margin-top: 3rem; color: #9ba8c0; }
   .msg.error { color: #e57373; }
-  .msg a { color: #4caf50; }
 
   .deck-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1rem; }
 
@@ -300,8 +271,6 @@
   .btn { display: inline-block; padding: 0.6rem 1.4rem; background: #4caf50; color: #fff; border-radius: 6px; font-size: 0.9rem; font-weight: 500; border: none; cursor: pointer; }
   .btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
-  .tabs-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
-  .tabs { display: flex; gap: 0.5rem; }
   .btn-new { background: #1e2128; border: 1px solid #4caf50; color: #4caf50; padding: 0.45rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.88rem; font-weight: 500; transition: background 0.15s; }
   .btn-new:hover { background: #2a3320; }
 

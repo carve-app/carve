@@ -1,18 +1,19 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import {
     fetchFsrsSettings,
     saveFsrsSettings,
     fetchWorkloadPreview,
     apiFetch,
-    ApiError,
     type FsrsSettings,
     type WorkloadPreview,
   } from '$lib/api';
+  import { lang } from '$lib/stores/lang';
+  import { toasts } from '$lib/stores/toast';
 
   let loading = true;
   let saving = false;
-  let error = '';
   let saved = false;
 
   let settings: FsrsSettings = {
@@ -26,25 +27,30 @@
   let preview: WorkloadPreview | null = null;
   let previewLoading = false;
 
-  onMount(async () => {
-    if (!localStorage.getItem('carve_access_token')) {
-      error = 'unauthenticated';
-      loading = false;
-      return;
-    }
-    try {
-      settings = await fetchFsrsSettings('ja');
-      await loadPreview();
-    } catch {
-      // defaults already set
-    }
-    loading = false;
+  onMount(() => {
+    let init = false;
+    const unsub = lang.subscribe(l => { if (init) reload(l); });
+    reload(get(lang));
+    init = true;
+    return unsub;
   });
 
-  async function loadPreview() {
+  async function reload(language = get(lang)) {
+    loading = true;
+    try {
+      settings = await fetchFsrsSettings(language);
+      settings.language_code = language;
+      await loadPreview(language);
+    } catch {
+      // use defaults already set
+    }
+    loading = false;
+  }
+
+  async function loadPreview(language = get(lang)) {
     previewLoading = true;
     try {
-      preview = await fetchWorkloadPreview('ja', settings.target_retention);
+      preview = await fetchWorkloadPreview(language, settings.target_retention);
     } catch {
       preview = null;
     }
@@ -53,10 +59,9 @@
 
   async function save() {
     saving = true;
-    error = '';
     try {
       await saveFsrsSettings({
-        language_code: 'ja',
+        language_code: settings.language_code,
         target_retention: settings.target_retention,
         leech_threshold: settings.leech_threshold,
         daily_new_limit: settings.daily_new_limit,
@@ -65,7 +70,7 @@
       setTimeout(() => { saved = false; }, 2500);
       await loadPreview();
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Save failed';
+      toasts.add(err instanceof Error ? err.message : 'Save failed');
     }
     saving = false;
   }
@@ -79,18 +84,16 @@
 
   function pct(v: number) { return Math.round(v * 100); }
 
-  // FSRS optimizer
   let optimizing = false;
-  let optimizeResult: { optimized: boolean; reason?: string; events_used?: number; final_loss?: number } | null = null;
+  let optimizeResult: { optimized: boolean; reason?: string; events_used?: number } | null = null;
 
   async function runOptimizer() {
     optimizing = true;
     optimizeResult = null;
     try {
-      optimizeResult = await apiFetch('/v1/settings/fsrs/optimize?language=ja', { method: 'POST' });
+      optimizeResult = await apiFetch(`/v1/settings/fsrs/optimize?language=${settings.language_code}`, { method: 'POST' });
       if (optimizeResult?.optimized) {
-        // Reload updated settings
-        settings = await fetchFsrsSettings('ja');
+        settings = await fetchFsrsSettings(settings.language_code);
       }
     } catch (err) {
       optimizeResult = { optimized: false, reason: err instanceof Error ? err.message : 'Optimizer failed' };
@@ -100,14 +103,7 @@
 </script>
 
 <main>
-  <header>
-    <h1>Settings</h1>
-    <nav><a href="/">Home</a><a href="/review">Review</a></nav>
-  </header>
-
-  {#if error === 'unauthenticated'}
-    <div class="msg"><p>Please <a href="/login">log in</a> to access settings.</p></div>
-  {:else if loading}
+  {#if loading}
     <p class="msg">Loading…</p>
   {:else}
     <div class="section">
@@ -122,15 +118,12 @@
           <input
             id="retention-slider"
             type="range"
-            min="0.70"
-            max="0.98"
-            step="0.01"
+            min="0.70" max="0.98" step="0.01"
             bind:value={settings.target_retention}
-            on:change={loadPreview}
+            on:change={() => loadPreview()}
           />
           <span class="pct">{pct(settings.target_retention)}%</span>
         </div>
-
         {#if previewLoading}
           <p class="preview-text">Calculating…</p>
         {:else if preview}
@@ -147,14 +140,7 @@
           Daily New Cards Limit
           <span class="hint">Maximum new cards added to your queue per day.</span>
         </label>
-        <input
-          id="daily-new-limit"
-          type="number"
-          min="0"
-          max="500"
-          bind:value={settings.daily_new_limit}
-          class="number-input"
-        />
+        <input id="daily-new-limit" type="number" min="0" max="500" bind:value={settings.daily_new_limit} class="number-input" />
       </div>
 
       <div class="field">
@@ -162,19 +148,8 @@
           Leech Threshold
           <span class="hint">Cards suspended after this many lapses.</span>
         </label>
-        <input
-          id="leech-threshold"
-          type="number"
-          min="1"
-          max="20"
-          bind:value={settings.leech_threshold}
-          class="number-input"
-        />
+        <input id="leech-threshold" type="number" min="1" max="20" bind:value={settings.leech_threshold} class="number-input" />
       </div>
-
-      {#if error && error !== 'unauthenticated'}
-        <p class="error">{error}</p>
-      {/if}
 
       <div class="actions">
         <button class="btn" on:click={save} disabled={saving}>
@@ -207,9 +182,7 @@
         </button>
         {#if optimizeResult}
           {#if optimizeResult.optimized}
-            <span class="opt-success">
-              ✓ Optimized using {optimizeResult.events_used} reviews
-            </span>
+            <span class="opt-success">✓ Optimized using {optimizeResult.events_used} reviews</span>
           {:else}
             <span class="opt-info">{optimizeResult.reason}</span>
           {/if}
@@ -220,13 +193,9 @@
 </main>
 
 <style>
-  :global(body) { background: #13151a; color: #e8eaf0; font-family: system-ui, sans-serif; margin: 0; }
   main { max-width: 680px; margin: 0 auto; padding: 1.5rem 1rem; }
 
-  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; border-bottom: 1px solid #2a2d36; padding-bottom: 1rem; }
-  header h1 { margin: 0; font-size: 1.4rem; }
-  nav { display: flex; gap: 1rem; }
-  nav a { color: #9ba8c0; text-decoration: none; font-size: 0.9rem; }
+  .msg { text-align: center; margin-top: 3rem; color: #9ba8c0; }
 
   .section { background: #1e2128; border: 1px solid #2a2d36; border-radius: 10px; padding: 1.5rem; margin-bottom: 1.5rem; }
   .section h2 { margin: 0 0 1.25rem; font-size: 1.1rem; }
@@ -241,15 +210,7 @@
 
   .preview-text { font-size: 0.82rem; color: #9ba8c0; margin: 0.4rem 0 0; }
 
-  .number-input {
-    background: #13151a;
-    border: 1px solid #3a3d47;
-    color: #e8eaf0;
-    padding: 0.45rem 0.75rem;
-    border-radius: 6px;
-    font-size: 1rem;
-    width: 90px;
-  }
+  .number-input { background: #13151a; border: 1px solid #3a3d47; color: #e8eaf0; padding: 0.45rem 0.75rem; border-radius: 6px; font-size: 1rem; width: 90px; }
 
   .actions { display: flex; gap: 1rem; align-items: center; margin-top: 1.5rem; }
 
@@ -259,8 +220,6 @@
 
   .btn-ghost { background: transparent; border: 1px solid #3a3d47; color: #9ba8c0; padding: 0.6rem 1.2rem; border-radius: 7px; font-size: 0.9rem; cursor: pointer; }
   .btn-ghost:hover { background: #2a2d36; }
-
-  .error { color: #e57373; font-size: 0.9rem; }
 
   .info-text { font-size: 0.85rem; color: #9ba8c0; margin: 0 0 1rem; line-height: 1.6; }
 
@@ -272,7 +231,4 @@
   .weight-cell { background: #13151a; border: 1px solid #2a2d36; border-radius: 6px; padding: 0.4rem 0.6rem; text-align: center; }
   .weight-index { display: block; font-size: 0.65rem; color: #6b7591; }
   .weight-val { font-size: 0.8rem; font-family: monospace; color: #b0bec5; }
-
-  .msg { text-align: center; margin-top: 3rem; color: #9ba8c0; }
-  .msg a { color: #4caf50; }
 </style>

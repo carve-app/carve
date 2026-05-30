@@ -1,31 +1,25 @@
 <script lang="ts">
-  import { triggerExport, ApiError } from '$lib/api';
+  import { triggerExport } from '$lib/api';
+  import { toasts } from '$lib/stores/toast';
 
   let exporting = false;
-  let error = '';
   let done = false;
 
   async function doExport() {
     exporting = true;
-    error = '';
     done = false;
     try {
       await triggerExport();
       done = true;
       setTimeout(() => { done = false; }, 3000);
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Export failed';
+      toasts.add(err instanceof Error ? err.message : 'Export failed');
     }
     exporting = false;
   }
 </script>
 
 <main>
-  <header>
-    <h1>Export Data</h1>
-    <nav><a href="/">Home</a><a href="/settings">Settings</a></nav>
-  </header>
-
   <div class="section">
     <h2>Download your data</h2>
     <p class="info">
@@ -43,10 +37,6 @@
       </ul>
     </div>
 
-    {#if error}
-      <p class="error">{error}</p>
-    {/if}
-
     {#if done}
       <p class="success">Download started!</p>
     {/if}
@@ -58,13 +48,7 @@
 </main>
 
 <style>
-  :global(body) { background: #13151a; color: #e8eaf0; font-family: system-ui, sans-serif; margin: 0; }
   main { max-width: 620px; margin: 0 auto; padding: 1.5rem 1rem; }
-
-  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; border-bottom: 1px solid #2a2d36; padding-bottom: 1rem; }
-  header h1 { margin: 0; font-size: 1.4rem; }
-  nav { display: flex; gap: 1rem; }
-  nav a { color: #9ba8c0; text-decoration: none; font-size: 0.9rem; }
 
   .section { background: #1e2128; border: 1px solid #2a2d36; border-radius: 10px; padding: 1.5rem; }
   .section h2 { margin: 0 0 0.75rem; font-size: 1.1rem; }
@@ -79,6 +63,5 @@
   .btn:hover:not(:disabled) { background: #43a047; }
   .btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
-  .error { color: #e57373; font-size: 0.9rem; margin-bottom: 0.75rem; }
   .success { color: #4caf50; font-size: 0.9rem; margin-bottom: 0.75rem; }
 </style>
