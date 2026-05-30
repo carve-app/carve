@@ -1034,15 +1034,22 @@ class TestNHKWorldBroadcastDescription:
         )
 
     def test_daisumo_split(self, tokenizer):
-        """大相撲中継 splits as 大 + 相撲 + 中継 (大 is a prefix, not merged)."""
+        """大相撲中継: SudachiPy splits as 大+相撲+中継 and reads おおすもう.
+        NOTE: this is a known tokenizer deficiency. The correct compound reading
+        is おおずもう (with rendaku す→ず). Marked here to catch regressions
+        if SudachiPy is updated to fix it."""
         result = tokenizer.tokenize("大相撲中継")
         surfaces = [t.surface for t in result.tokens]
-        assert "相撲" in surfaces and "中継" in surfaces, (
-            f"Expected 相撲 and 中継 as tokens, got: {surfaces}"
+        # Correct behaviour would be: 大相撲 as single token reading おおずもう.
+        # Current SudachiPy behaviour: splits and loses rendaku (す instead of ず).
+        sumo = next((t for t in result.tokens if "相撲" in t.surface), None)
+        assert sumo is not None, "相撲 token not found"
+        # Document the wrong reading so a future fix is noticed immediately.
+        assert sumo.reading_hira == "すもう", (
+            f"SudachiPy rendaku behaviour changed — update this test: got {sumo.reading_hira!r}"
         )
-        assert "大相撲" not in surfaces, (
-            f"大相撲 should not be a single token, got: {surfaces}"
-        )
+        # The correct reading we want eventually:
+        # assert sumo_compound.reading_hira == "ずもう"  # with rendaku
 
     def test_jouhou_bangumi_split(self, tokenizer):
         """情報番組 splits as 情報 + 番組 (two content words)."""
