@@ -694,3 +694,219 @@ class TestCoreVocabulary:
         """音楽 must read おんがく."""
         r = reading(tokenizer, "音楽")
         assert r == "おんがく", f"Expected おんがく, got {r!r}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 16: NHK Web Easy article — 川柳コンクール
+#
+# Source article (furigana stripped):
+#
+#   川柳のニュースです。
+#   川柳は日本の短い詩のひとつです。自分の気持ちや周りで起こったおもしろいことを、
+#   短いことばで言います。
+#   コンクールには5万4000の川柳が集まりました。
+#   1位の川柳は、「キャッシュレス　充電無くなり　無一文」です。
+#   無一文は、お金がない、という意味です。スマートフォンでお金を払おうとしたら、
+#   充電がなくなっていて払うことができなかったという川柳です。
+#   ほかにも、インターネットなどが中心の世界になる「デジタル化」に慣れなくて
+#   困るという川柳が多かったです。
+#
+# Every assertion below is hand-verified against:
+#   1. NHK Easy's own furigana (authoritative reading source)
+#   2. Actual SudachiPy output (run 2026-05-30)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_ARTICLE_PARAGRAPHS = [
+    "川柳のニュースです。",
+    "川柳は日本の短い詩のひとつです。自分の気持ちや周りで起こったおもしろいことを、短いことばで言います。",
+    "コンクールには5万4000の川柳が集まりました。",
+    "1位の川柳は、「キャッシュレス　充電無くなり　無一文」です。",
+    "無一文は、お金がない、という意味です。スマートフォンでお金を払おうとしたら、充電がなくなっていて払うことができなかったという川柳です。",
+    "ほかにも、インターネットなどが中心の世界になる「デジタル化」に慣れなくて困るという川柳が多かったです。",
+]
+_ARTICLE_FULL = "\n".join(_ARTICLE_PARAGRAPHS)
+
+
+class TestNHKEasyArticleSenryu:
+    """
+    Full-article tokenization test for the NHK Web Easy 川柳コンクール article.
+    Covers readings, lemmatization, and content-word detection for every
+    significant word in the article.
+    """
+
+    # ── Readings ──────────────────────────────────────────────────────────────
+
+    def test_senryu_reading(self, tokenizer):
+        """川柳 reads せんりゅう (NHK Easy furigana: せんりゅう)."""
+        assert reading(tokenizer, "川柳") == "せんりゅう"
+
+    def test_nihon_reading(self, tokenizer):
+        """日本 reads にっぽん (Sudachi normalises to にっぽん; NHK Easy: にっぽん)."""
+        result = tokenizer.tokenize("川柳は日本の短い詩のひとつです")
+        nihon = next(t for t in result.tokens if t.surface == "日本")
+        assert nihon.reading_hira == "にっぽん", (
+            f"日本 reading: expected にっぽん, got {nihon.reading_hira!r}"
+        )
+
+    def test_mijikai_reading(self, tokenizer):
+        """短い reads みじかい."""
+        assert reading(tokenizer, "短い") == "みじかい"
+
+    def test_shi_reading(self, tokenizer):
+        """詩 (poem) reads し."""
+        result = tokenizer.tokenize("短い詩のひとつ")
+        shi = next(t for t in result.tokens if t.surface == "詩")
+        assert shi.reading_hira == "し", f"詩: expected し, got {shi.reading_hira!r}"
+
+    def test_jibun_reading(self, tokenizer):
+        """自分 reads じぶん."""
+        assert reading(tokenizer, "自分") == "じぶん"
+
+    def test_kimochi_reading(self, tokenizer):
+        """気持ち reads きもち."""
+        assert reading(tokenizer, "気持ち") == "きもち"
+
+    def test_mawari_reading(self, tokenizer):
+        """周り reads まわり."""
+        assert reading(tokenizer, "周り") == "まわり"
+
+    def test_juuden_reading(self, tokenizer):
+        """充電 reads じゅうでん."""
+        assert reading(tokenizer, "充電") == "じゅうでん"
+
+    def test_muichimono_reading(self, tokenizer):
+        """無一文 reads むいちもん."""
+        assert reading(tokenizer, "無一文") == "むいちもん"
+
+    def test_imi_reading(self, tokenizer):
+        """意味 reads いみ."""
+        assert reading(tokenizer, "意味") == "いみ"
+
+    def test_harau_reading(self, tokenizer):
+        """払う reads はらう."""
+        assert reading(tokenizer, "払う") == "はらう"
+
+    def test_chuushin_reading(self, tokenizer):
+        """中心 reads ちゅうしん."""
+        assert reading(tokenizer, "中心") == "ちゅうしん"
+
+    def test_sekai_reading(self, tokenizer):
+        """世界 reads せかい."""
+        assert reading(tokenizer, "世界") == "せかい"
+
+    def test_komaru_reading(self, tokenizer):
+        """困る reads こまる."""
+        assert reading(tokenizer, "困る") == "こまる"
+
+    def test_cashless_reading(self, tokenizer):
+        """キャッシュレス reads きゃっしゅれす (loanword, katakana→hiragana)."""
+        assert reading(tokenizer, "キャッシュレス") == "きゃっしゅれす"
+
+    def test_smartphone_reading(self, tokenizer):
+        """スマートフォン reads すまーとふぉん."""
+        assert reading(tokenizer, "スマートフォン") == "すまーとふぉん"
+
+    def test_internet_reading(self, tokenizer):
+        """インターネット reads いんたーねっと."""
+        assert reading(tokenizer, "インターネット") == "いんたーねっと"
+
+    # ── Lemmatization ─────────────────────────────────────────────────────────
+
+    def test_okotta_lemma(self, tokenizer):
+        """起こった (past) lemma is 起こる."""
+        result = tokenizer.tokenize("周りで起こったおもしろいことを")
+        okoru = next((t for t in result.tokens if "起" in t.surface), None)
+        assert okoru is not None, "起こ token not found"
+        assert okoru.lemma == "起こる", f"Expected 起こる, got {okoru.lemma!r}"
+
+    def test_atsumari_lemma(self, tokenizer):
+        """集まりました lemma is 集まる."""
+        result = tokenizer.tokenize("川柳が集まりました")
+        atsumaru = next((t for t in result.tokens if "集" in t.surface), None)
+        assert atsumaru is not None, "集 token not found"
+        assert atsumaru.lemma == "集まる", f"Expected 集まる, got {atsumaru.lemma!r}"
+
+    def test_nakunari_lemma(self, tokenizer):
+        """無くなり lemma is 無くなる."""
+        result = tokenizer.tokenize("充電無くなり")
+        nakunaru = next((t for t in result.tokens if "無" in t.surface), None)
+        assert nakunaru is not None, "無くなり token not found"
+        assert nakunaru.lemma == "無くなる", f"Expected 無くなる, got {nakunaru.lemma!r}"
+
+    def test_harou_lemma(self, tokenizer):
+        """払おう (volitional) lemma is 払う."""
+        result = tokenizer.tokenize("お金を払おうとしたら")
+        harau = next((t for t in result.tokens if "払" in t.surface), None)
+        assert harau is not None, "払 token not found"
+        assert harau.lemma == "払う", f"Expected 払う, got {harau.lemma!r}"
+
+    def test_narenakute_lemma(self, tokenizer):
+        """慣れなくて — verb stem lemma is 慣れる."""
+        result = tokenizer.tokenize("慣れなくて困る")
+        nareru = next((t for t in result.tokens if "慣" in t.surface), None)
+        assert nareru is not None, "慣れ token not found"
+        assert nareru.lemma == "慣れる", f"Expected 慣れる, got {nareru.lemma!r}"
+
+    def test_ookatta_lemma(self, tokenizer):
+        """多かった (past of i-adj) lemma is 多い."""
+        result = tokenizer.tokenize("川柳が多かったです")
+        ooi = next((t for t in result.tokens if "多" in t.surface), None)
+        assert ooi is not None, "多 token not found"
+        assert ooi.lemma == "多い", f"Expected 多い, got {ooi.lemma!r}"
+
+    # ── Segmentation ──────────────────────────────────────────────────────────
+
+    def test_smartphone_single_token(self, tokenizer):
+        """スマートフォン must be a single token, not split."""
+        result = tokenizer.tokenize("スマートフォンでお金を払う")
+        assert "スマートフォン" in [t.surface for t in result.tokens], (
+            f"スマートフォン not single token: {[t.surface for t in result.tokens]}"
+        )
+
+    def test_internet_single_token(self, tokenizer):
+        """インターネット must be a single token."""
+        result = tokenizer.tokenize("インターネットなどが")
+        assert "インターネット" in [t.surface for t in result.tokens], (
+            f"インターネット not single token: {[t.surface for t in result.tokens]}"
+        )
+
+    def test_cashless_single_token(self, tokenizer):
+        """キャッシュレス must be a single token (from the poem)."""
+        result = tokenizer.tokenize("キャッシュレス　充電無くなり　無一文")
+        assert "キャッシュレス" in [t.surface for t in result.tokens], (
+            f"キャッシュレス not single token: {[t.surface for t in result.tokens]}"
+        )
+
+    def test_digital_ka_split(self, tokenizer):
+        """デジタル化 splits as デジタル + 化 (Sudachi C-mode does not merge them)."""
+        result = tokenizer.tokenize("デジタル化")
+        surfaces = [t.surface for t in result.tokens]
+        assert "デジタル" in surfaces and "化" in surfaces, (
+            f"Expected デジタル + 化, got: {surfaces}"
+        )
+
+    # ── Full-article quality ───────────────────────────────────────────────────
+
+    def test_full_article_no_error(self, tokenizer):
+        """Full article tokenizes without exception."""
+        result = tokenizer.tokenize(_ARTICLE_FULL)
+        assert len(result.tokens) > 0
+
+    def test_full_article_content_word_count(self, tokenizer):
+        """Full article has ≥ 40 content-word tokens."""
+        result = tokenizer.tokenize(_ARTICLE_FULL)
+        count = sum(1 for t in result.tokens if t.is_content_word)
+        assert count >= 40, f"Expected ≥40 content words, got {count}"
+
+    def test_full_article_key_lemmas_present(self, tokenizer):
+        """All key content-word lemmas from the article appear in token output."""
+        result = tokenizer.tokenize(_ARTICLE_FULL)
+        lemmas = {t.lemma for t in result.tokens if t.is_content_word}
+        expected = {
+            "川柳", "日本", "短い", "詩", "自分", "気持ち", "起こる",
+            "集まる", "充電", "意味", "払う", "中心", "世界", "困る", "多い",
+            "無一文", "無くなる", "慣れる", "キャッシュレス", "インターネット",
+            "スマートフォン",
+        }
+        missing = expected - lemmas
+        assert not missing, f"Missing lemmas from article: {sorted(missing)}"
