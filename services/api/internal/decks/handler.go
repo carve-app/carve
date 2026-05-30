@@ -143,6 +143,128 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ── POST /v1/decks ────────────────────────────────────────────────────────────
+
+func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.ClaimsFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	var req struct {
+		Name         string   `json:"name"`
+		Description  string   `json:"description"`
+		LanguageCode string   `json:"language_code"`
+		Tags         []string `json:"tags"`
+		IsPublic     bool     `json:"is_public"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.Name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if req.LanguageCode == "" {
+		req.LanguageCode = "ja"
+	}
+	if req.Tags == nil {
+		req.Tags = []string{}
+	}
+
+	id := auth.NewID()
+	ctx := r.Context()
+	_, err := h.db.Exec(ctx,
+		`INSERT INTO decks (id, owner_id, name, description, language_code, tags, is_public, is_official, card_count, download_count)
+		 VALUES ($1, $2, $3, NULLIF($4,''), $5, $6, $7, false, 0, 0)`,
+		id, claims.UserID, req.Name, req.Description, req.LanguageCode, req.Tags, req.IsPublic,
+	)
+	if err != nil {
+		slog.Error("create deck", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{"id": id, "name": req.Name})
+}
+
+// ── PATCH /v1/decks/{id} ──────────────────────────────────────────────────────
+
+func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.ClaimsFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	deckID := chi.URLParam(r, "id")
+	var req struct {
+		Name        *string  `json:"name"`
+		Description *string  `json:"description"`
+		IsPublic    *bool    `json:"is_public"`
+		Tags        []string `json:"tags"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+
+	ctx := r.Context()
+	// Verify ownership
+	var ownerID string
+	if err := h.db.QueryRow(ctx, `SELECT owner_id FROM decks WHERE id = $1 AND deleted_at IS NULL`, deckID).Scan(&ownerID); err != nil {
+		writeError(w, http.StatusNotFound, "deck not found")
+		return
+	}
+	if ownerID != claims.UserID {
+		writeError(w, http.StatusForbidden, "not your deck")
+		return
+	}
+
+	if req.Name != nil {
+		h.db.Exec(ctx, `UPDATE decks SET name = $1 WHERE id = $2`, *req.Name, deckID)
+	}
+	if req.Description != nil {
+		h.db.Exec(ctx, `UPDATE decks SET description = NULLIF($1,'') WHERE id = $2`, *req.Description, deckID)
+	}
+	if req.IsPublic != nil {
+		h.db.Exec(ctx, `UPDATE decks SET is_public = $1 WHERE id = $2`, *req.IsPublic, deckID)
+	}
+	if req.Tags != nil {
+		h.db.Exec(ctx, `UPDATE decks SET tags = $1 WHERE id = $2`, req.Tags, deckID)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"updated": true})
+}
+
+// ── DELETE /v1/decks/{id} ─────────────────────────────────────────────────────
+
+func (h *Handler) DeleteDeck(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.ClaimsFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	deckID := chi.URLParam(r, "id")
+	ctx := r.Context()
+
+	var ownerID string
+	if err := h.db.QueryRow(ctx, `SELECT owner_id FROM decks WHERE id = $1 AND deleted_at IS NULL`, deckID).Scan(&ownerID); err != nil {
+		writeError(w, http.StatusNotFound, "deck not found")
+		return
+	}
+	if ownerID != claims.UserID {
+		writeError(w, http.StatusForbidden, "not your deck")
+		return
+	}
+
+	h.db.Exec(ctx, `UPDATE decks SET deleted_at = NOW() WHERE id = $1`, deckID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ── POST /v1/decks/{id}/subscribe ────────────────────────────────────────────
 
 func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {

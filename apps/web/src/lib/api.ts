@@ -133,7 +133,7 @@ export interface Notification {
 
 // ── Fetch helper ─────────────────────────────────────────────────────────────
 
-async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -242,6 +242,29 @@ export async function rateDeck(deckId: string, rating: 1 | 2 | 3 | 4 | 5): Promi
     method: 'POST',
     body: JSON.stringify({ rating }),
   });
+}
+
+export async function createDeck(params: {
+  name: string;
+  description?: string;
+  language_code?: string;
+  tags?: string[];
+  is_public?: boolean;
+}): Promise<{ id: string; name: string }> {
+  return apiFetch('/v1/decks', { method: 'POST', body: JSON.stringify(params) });
+}
+
+export async function updateDeck(deckId: string, params: {
+  name?: string;
+  description?: string;
+  is_public?: boolean;
+  tags?: string[];
+}): Promise<void> {
+  await apiFetch(`/v1/decks/${deckId}`, { method: 'PATCH', body: JSON.stringify(params) });
+}
+
+export async function deleteDeckById(deckId: string): Promise<void> {
+  await apiFetch(`/v1/decks/${deckId}`, { method: 'DELETE' });
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────

@@ -85,3 +85,8 @@ func (p *Proxy) Tokenize(w http.ResponseWriter, r *http.Request) {
 func (p *Proxy) Lookup(w http.ResponseWriter, r *http.Request) {
 	p.forward(w, r, "/lookup")
 }
+
+// POST /v1/nlp/score-content — proxies to NLP /score-text.
+func (p *Proxy) ScoreContent(w http.ResponseWriter, r *http.Request) {
+	p.forward(w, r, "/score-text")
+}

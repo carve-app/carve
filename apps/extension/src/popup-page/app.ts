@@ -124,8 +124,27 @@ async function showDueCount(): Promise<void> {
     </div>
   ` : '';
 
+  // Comprehension overlay state
+  let overlayOn = false;
+  chrome.storage.local.get('overlayEnabled').then(r => {
+    overlayOn = !!r['overlayEnabled'];
+    const cb = document.getElementById('overlay-toggle') as HTMLInputElement | null;
+    if (cb) cb.checked = overlayOn;
+    updateOverlayBadge();
+  });
+
   app.innerHTML = `
     ${siteToggleHTML}
+    <div class="overlay-row">
+      <div class="overlay-row-label">
+        Comprehension overlay
+        <span class="overlay-pct-badge" id="overlay-pct"></span>
+      </div>
+      <label class="toggle" title="Show comprehension score on page">
+        <input type="checkbox" id="overlay-toggle" />
+        <div class="toggle-track"></div>
+      </label>
+    </div>
     <div class="section">
       <div class="label">Cards due today</div>
       <div class="due-count" id="due-count">—</div>
@@ -136,6 +155,31 @@ async function showDueCount(): Promise<void> {
     </a>
     <button id="logout-btn">Sign out</button>
   `;
+
+  async function updateOverlayBadge(): Promise<void> {
+    const badge = document.getElementById('overlay-pct');
+    if (!badge) return;
+    try {
+      const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!activeTab?.id) return;
+      const response = await chrome.tabs.sendMessage(activeTab.id, { type: 'GET_COMPREHENSION' }) as { pct: number | null } | undefined;
+      badge.textContent = response?.pct != null ? `${response.pct}%` : '';
+    } catch {
+      badge.textContent = '';
+    }
+  }
+
+  document.getElementById('overlay-toggle')!.addEventListener('change', async (e) => {
+    const checked = (e.target as HTMLInputElement).checked;
+    await chrome.storage.local.set({ overlayEnabled: checked });
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (activeTab?.id) {
+      try {
+        await chrome.tabs.sendMessage(activeTab.id, { type: 'SET_OVERLAY', enabled: checked });
+      } catch { /* tab may not have content script */ }
+    }
+    if (checked) updateOverlayBadge();
+  });
 
   if (hostname) {
     document.getElementById('site-toggle')!.addEventListener('change', async (e) => {

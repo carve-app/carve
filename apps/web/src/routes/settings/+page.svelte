@@ -4,6 +4,7 @@
     fetchFsrsSettings,
     saveFsrsSettings,
     fetchWorkloadPreview,
+    apiFetch,
     ApiError,
     type FsrsSettings,
     type WorkloadPreview,
@@ -77,6 +78,25 @@
   }
 
   function pct(v: number) { return Math.round(v * 100); }
+
+  // FSRS optimizer
+  let optimizing = false;
+  let optimizeResult: { optimized: boolean; reason?: string; events_used?: number; final_loss?: number } | null = null;
+
+  async function runOptimizer() {
+    optimizing = true;
+    optimizeResult = null;
+    try {
+      optimizeResult = await apiFetch('/v1/settings/fsrs/optimize?language=ja', { method: 'POST' });
+      if (optimizeResult?.optimized) {
+        // Reload updated settings
+        settings = await fetchFsrsSettings('ja');
+      }
+    } catch (err) {
+      optimizeResult = { optimized: false, reason: err instanceof Error ? err.message : 'Optimizer failed' };
+    }
+    optimizing = false;
+  }
 </script>
 
 <main>
@@ -181,6 +201,20 @@
           {/each}
         </div>
       {/if}
+      <div class="optimizer-row">
+        <button class="btn" on:click={runOptimizer} disabled={optimizing}>
+          {optimizing ? 'Optimizing…' : 'Optimize my parameters'}
+        </button>
+        {#if optimizeResult}
+          {#if optimizeResult.optimized}
+            <span class="opt-success">
+              ✓ Optimized using {optimizeResult.events_used} reviews
+            </span>
+          {:else}
+            <span class="opt-info">{optimizeResult.reason}</span>
+          {/if}
+        {/if}
+      </div>
     </div>
   {/if}
 </main>
@@ -231,6 +265,10 @@
   .info-text { font-size: 0.85rem; color: #9ba8c0; margin: 0 0 1rem; line-height: 1.6; }
 
   .weights-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 0.5rem; }
+
+  .optimizer-row { display: flex; align-items: center; gap: 1rem; margin-top: 1rem; flex-wrap: wrap; }
+  .opt-success { color: #4caf50; font-size: 0.85rem; }
+  .opt-info { color: #9ba8c0; font-size: 0.85rem; }
   .weight-cell { background: #13151a; border: 1px solid #2a2d36; border-radius: 6px; padding: 0.4rem 0.6rem; text-align: center; }
   .weight-index { display: block; font-size: 0.65rem; color: #6b7591; }
   .weight-val { font-size: 0.8rem; font-family: monospace; color: #b0bec5; }

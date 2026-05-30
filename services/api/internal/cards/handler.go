@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/carve-app/carve/services/api/internal/audio"
 	"github.com/carve-app/carve/services/api/internal/auth"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -50,6 +51,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		LanguageCode    string   `json:"language_code"`
 		Lemma           string   `json:"lemma"`
+		Reading         string   `json:"reading"`
 		Sentence        *string  `json:"sentence"`
 		SourceURL       *string  `json:"source_url"`
 		SourceTimestamp *float64 `json:"source_timestamp"`
@@ -85,13 +87,18 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var readingVal *string
+	if req.Reading != "" {
+		readingVal = &req.Reading
+	}
+
 	var createdAt time.Time
 	err := h.db.QueryRow(ctx,
 		`INSERT INTO cards
-		    (id, user_id, language_code, front_text, sentence, source_url, source_timestamp, fsrs_state)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, 'new')
+		    (id, user_id, language_code, front_text, front_reading, sentence, source_url, source_timestamp, fsrs_state)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'new')
 		 RETURNING created_at`,
-		id, claims.UserID, req.LanguageCode, req.Lemma,
+		id, claims.UserID, req.LanguageCode, req.Lemma, readingVal,
 		req.Sentence, req.SourceURL, req.SourceTimestamp,
 	).Scan(&createdAt)
 	if err != nil {
@@ -102,6 +109,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		slog.Error("create card", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
+	}
+
+	// Populate audio asynchronously — non-blocking, best-effort.
+	if req.Reading != "" {
+		go audio.PopulateCard(h.db, id, req.LanguageCode, req.Lemma, req.Reading)
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{

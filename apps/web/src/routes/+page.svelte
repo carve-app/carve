@@ -8,7 +8,10 @@
 		<a href="/review">Review</a>
 		<a href="/cards">Cards</a>
 		<a href="/decks">Decks</a>
+		<a href="/library">Library</a>
+		<a href="/stats">Stats</a>
 		<a href="/settings">Settings</a>
+		<a href="/output">Output Practice</a>
 		<a href="/export">Export</a>
 		<a href="/login">Log in</a>
 	</nav>

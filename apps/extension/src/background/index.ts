@@ -71,6 +71,7 @@ async function handleMessage(msg: Message): Promise<MessageResponse> {
         const card = await createCard({
           language_code: msg.languageCode,
           lemma: msg.lemma,
+          reading: msg.reading,
           sentence: msg.sentence,
           source_url: msg.sourceUrl,
         });
@@ -131,9 +132,42 @@ async function handleMessage(msg: Message): Promise<MessageResponse> {
       return { type: 'MINE_CARD_RESULT', success: true };
     }
 
+    case 'CAPTURE_SCREENSHOT': {
+      try {
+        const dataUrl: string = await new Promise((resolve, reject) => {
+          chrome.tabs.captureVisibleTab({ format: 'png' }, (url) => {
+            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+            else resolve(url);
+          });
+        });
+        // Convert data URL to Blob and upload to media service.
+        const blob = dataURLToBlob(dataUrl);
+        const mediaBase = 'http://localhost:8002';
+        const resp = await fetch(`${mediaBase}/screenshots`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'image/png' },
+          body: blob,
+        });
+        if (!resp.ok) throw new Error('upload failed');
+        const { url } = await resp.json();
+        return { type: 'SCREENSHOT_RESULT', success: true, url: `${mediaBase}${url}` };
+      } catch (e: unknown) {
+        return { type: 'SCREENSHOT_RESULT', success: false, error: e instanceof Error ? e.message : 'capture failed' };
+      }
+    }
+
     default:
       return { type: 'AUTH_STATE', isLoggedIn: false };
   }
+}
+
+function dataURLToBlob(dataUrl: string): Blob {
+  const [header, data] = dataUrl.split(',');
+  const mime = header.match(/:(.*?);/)?.[1] ?? 'image/png';
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
 }
 
 async function updateBadge(): Promise<number> {

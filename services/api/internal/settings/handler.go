@@ -1,7 +1,9 @@
 package settings
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -10,6 +12,114 @@ import (
 	"github.com/carve-app/carve/services/api/internal/fsrs"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ── POST /v1/settings/fsrs/optimize ──────────────────────────────────────────
+// Triggers FSRS parameter optimization using the user's review history.
+// Returns immediately with a job summary (runs synchronously; typically <2s).
+
+func (h *Handler) Optimize(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.ClaimsFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	language := r.URL.Query().Get("language")
+	if language == "" {
+		language = "ja"
+	}
+
+	ctx := r.Context()
+
+	// Load review history for this user+language.
+	rows, err := h.db.Query(ctx,
+		`SELECT re.card_id, re.rating, re.reviewed_at
+		 FROM review_events re
+		 JOIN cards c ON c.id = re.card_id
+		 WHERE re.user_id = $1 AND c.language_code = $2
+		 ORDER BY re.reviewed_at ASC`,
+		claims.UserID, language,
+	)
+	if err != nil {
+		slog.Error("optimize: load review events", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	defer rows.Close()
+
+	var events []fsrs.ReviewEvent
+	for rows.Next() {
+		var ev fsrs.ReviewEvent
+		var rating int
+		if err := rows.Scan(&ev.CardID, &rating, &ev.ReviewedAt); err != nil {
+			continue
+		}
+		ev.Rating = fsrs.Rating(rating)
+		events = append(events, ev)
+	}
+
+	if len(events) < 400 {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"optimized": false,
+			"reason":    fmt.Sprintf("need at least 400 reviews; current count: %d", len(events)),
+			"count":     len(events),
+		})
+		return
+	}
+
+	// Load existing params.
+	p := loadParams(ctx, h.db, claims.UserID, language)
+
+	// Run optimizer (synchronous; typically 1–3s for 400–2000 events).
+	result := fsrs.Optimize(p, events, 100)
+
+	if result.Iters == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"optimized": false,
+			"reason":    "insufficient review-phase events for optimization",
+			"count":     len(events),
+		})
+		return
+	}
+
+	// Persist updated weights.
+	newWeightsJSON, _ := json.Marshal(result.Params.W[:])
+	_, err = h.db.Exec(ctx,
+		`INSERT INTO user_fsrs_params
+		    (id, user_id, language_code, weights, updated_at)
+		 VALUES (gen_random_uuid(), $1, $2, $3, now())
+		 ON CONFLICT (user_id, language_code) DO UPDATE SET
+		   weights    = EXCLUDED.weights,
+		   updated_at = now()`,
+		claims.UserID, language, newWeightsJSON,
+	)
+	if err != nil {
+		slog.Error("optimize: persist weights", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"optimized":   true,
+		"events_used": len(events),
+		"iters":       result.Iters,
+		"final_loss":  result.FinalLoss,
+	})
+}
+
+func loadParams(ctx context.Context, db *pgxpool.Pool, userID, lang string) fsrs.Params {
+	p := fsrs.DefaultParams()
+	var weightsJSON []byte
+	if db.QueryRow(ctx, `SELECT weights FROM user_fsrs_params WHERE user_id = $1 AND language_code = $2`, userID, lang).Scan(&weightsJSON) == nil {
+		var w []float64
+		if json.Unmarshal(weightsJSON, &w) == nil && len(w) == 19 {
+			for i := range w {
+				p.W[i] = w[i]
+			}
+		}
+	}
+	return p
+}
 
 type Handler struct {
 	db *pgxpool.Pool

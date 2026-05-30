@@ -11,14 +11,18 @@ import (
 	"time"
 
 	"github.com/carve-app/carve/services/api/internal/auth"
+	"github.com/carve-app/carve/services/api/internal/billing"
 	"github.com/carve-app/carve/services/api/internal/cards"
 	"github.com/carve-app/carve/services/api/internal/db"
 	"github.com/carve-app/carve/services/api/internal/decks"
 	"github.com/carve-app/carve/services/api/internal/export"
 	"github.com/carve-app/carve/services/api/internal/immersion"
+	"github.com/carve-app/carve/services/api/internal/library"
 	"github.com/carve-app/carve/services/api/internal/nlp"
+	"github.com/carve-app/carve/services/api/internal/output"
 	"github.com/carve-app/carve/services/api/internal/review"
 	"github.com/carve-app/carve/services/api/internal/settings"
+	"github.com/carve-app/carve/services/api/internal/stats"
 	"github.com/carve-app/carve/services/api/internal/users"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -80,6 +84,10 @@ func main() {
 	decksHandler := decks.NewHandler(pool)
 	exportHandler := export.NewHandler(pool)
 	settingsHandler := settings.NewHandler(pool)
+	billingHandler := billing.NewHandler(pool)
+	statsHandler := stats.NewHandler(pool)
+	libraryHandler := library.NewHandler(pool)
+	outputHandler := output.NewHandler(pool)
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(auth.Middleware)
@@ -104,6 +112,9 @@ func main() {
 
 		// Decks
 		r.Get("/decks", decksHandler.List)
+		r.Post("/decks", decksHandler.Create)
+		r.Patch("/decks/{id}", decksHandler.Update)
+		r.Delete("/decks/{id}", decksHandler.DeleteDeck)
 		r.Post("/decks/{id}/subscribe", decksHandler.Subscribe)
 		r.Delete("/decks/{id}/subscribe", decksHandler.Unsubscribe)
 		r.Post("/decks/{id}/rate", decksHandler.Rate)
@@ -119,7 +130,31 @@ func main() {
 		// Immersion
 		r.Post("/immersion", immersionHandler.Create)
 
+		// Billing
+		r.Get("/billing/subscription", billingHandler.Subscription)
+		r.Post("/billing/checkout", billingHandler.Checkout)
+
+		// Stats dashboard
+		r.Get("/stats", statsHandler.Dashboard)
+
+		// Library
+		r.Get("/library", libraryHandler.List)
+		r.Post("/library", libraryHandler.Add)
+		r.Delete("/library/{id}", libraryHandler.Delete)
+
+		// FSRS optimizer
+		r.Post("/settings/fsrs/optimize", settingsHandler.Optimize)
+
+		// Output practice
+		r.Get("/output/exercises", outputHandler.ListExercises)
+		r.Post("/output/submit", outputHandler.Submit)
+		r.Get("/output/shadowing", outputHandler.ShadowingQueue)
+		r.Post("/output/shadowing/{id}/complete", outputHandler.CompleteShadowing)
+
 	})
+
+	// Stripe webhook — no auth middleware; signature verified inside handler.
+	r.Post("/v1/billing/webhook", billingHandler.Webhook)
 
 	// NLP proxy routes get their own subrouter without the global 30s timeout
 	// middleware, since SudachiPy can take up to 2 minutes on first request.
@@ -127,6 +162,7 @@ func main() {
 		r.Use(auth.Middleware)
 		r.Post("/tokenize", nlpProxy.Tokenize)
 		r.Post("/lookup", nlpProxy.Lookup)
+		r.Post("/score-content", nlpProxy.ScoreContent)
 	})
 
 	port := os.Getenv("PORT")
@@ -142,6 +178,16 @@ func main() {
 		WriteTimeout: 130 * time.Second, // NLP proxy can take up to 120s on cold start
 		IdleTimeout:  60 * time.Second,
 	}
+
+	// Daily word-count snapshot job — runs shortly after midnight UTC.
+	go func() {
+		for {
+			now := time.Now().UTC()
+			next := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 5, 0, 0, time.UTC)
+			time.Sleep(time.Until(next))
+			stats.SnapshotAllUsers(pool)
+		}
+	}()
 
 	slog.Info("starting server", "addr", addr)
 	go func() {

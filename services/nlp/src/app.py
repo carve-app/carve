@@ -22,11 +22,15 @@ from pydantic import BaseModel, Field
 from .dictionary import DictionaryService
 from .scorer import score_content
 from .tokenizer import JapaneseTokenizer
+from .tokenizer_zh import ChineseTokenizer
+from .tokenizer_ko import KoreanTokenizer
 
 logger = logging.getLogger(__name__)
 
 _dict_service = DictionaryService()
 _ja_tokenizer = JapaneseTokenizer()
+_zh_tokenizer = ChineseTokenizer()
+_ko_tokenizer = KoreanTokenizer()
 
 
 @asynccontextmanager
@@ -138,24 +142,51 @@ def tokenize(
 ) -> TokenizeResponse:
     _check_auth(x_internal_secret)
 
-    if req.language != "ja":
-        raise HTTPException(status_code=422, detail=f"Language '{req.language}' not yet supported")
-
-    result = _ja_tokenizer.tokenize(req.text, mode=req.mode)
-
     known = set(req.known_lemmas)
     learning = set(req.learning_lemmas)
 
+    if req.language == "ja":
+        result = _ja_tokenizer.tokenize(req.text, mode=req.mode)
+        raw_tokens = result.tokens
+    elif req.language in ("zh-cn", "zh-tw", "zh"):
+        zh_result = _zh_tokenizer.tokenize(req.text)
+        raw_tokens = zh_result.tokens
+    elif req.language == "ko":
+        ko_result = _ko_tokenizer.tokenize(req.text)
+        raw_tokens = ko_result.tokens
+    else:
+        raise HTTPException(status_code=422, detail=f"Language '{req.language}' not yet supported")
+
     token_outs = []
-    for t in result.tokens:
+    for t in raw_tokens:
+        lemma = t.lemma
+        surface = t.surface
+        pos = t.pos
+        is_content = t.is_content_word
+        freq = getattr(t, "frequency_rank", None)
+
+        # Language-specific reading fields
+        if req.language == "ja":
+            reading = t.reading
+            reading_hira = t.reading_hira
+        elif req.language in ("zh-cn", "zh-tw", "zh"):
+            reading = t.pinyin_num
+            reading_hira = t.pinyin
+        elif req.language == "ko":
+            reading = t.romanization
+            reading_hira = t.romanization
+        else:
+            reading = surface
+            reading_hira = surface
+
         status = (
-            "known" if t.lemma in known else
-            "learning" if t.lemma in learning else
+            "known" if lemma in known else
+            "learning" if lemma in learning else
             "unknown"
         )
         defs = None
-        if req.include_definitions and status == "unknown" and t.is_content_word:
-            entry = _dict_service.lookup(t.lemma, target_lang="en")
+        if req.include_definitions and status == "unknown" and is_content:
+            entry = _dict_service.lookup(lemma, target_lang="en")
             if entry:
                 defs = [
                     {
@@ -167,25 +198,29 @@ def tokenize(
                     for d in entry.definitions[:3]
                 ]
         token_outs.append(TokenOut(
-            surface=t.surface,
-            lemma=t.lemma,
-            reading=t.reading,
-            reading_hira=t.reading_hira,
-            pos=t.pos,
-            is_content_word=t.is_content_word,
+            surface=surface,
+            lemma=lemma,
+            reading=reading,
+            reading_hira=reading_hira,
+            pos=pos,
+            is_content_word=is_content,
             user_status=status,
-            frequency_rank=t.frequency_rank,
+            frequency_rank=freq,
             definitions=defs,
         ))
 
-    score = None
     if req.known_lemmas or req.learning_lemmas:
-        s = score_content(result.tokens, known, learning)
+        # Compute comprehension from content word coverage
+        content = [t for t in raw_tokens if t.is_content_word]
+        known_ct = sum(1 for t in content if t.lemma in known or t.lemma in learning)
+        total = len(content) or 1
+        pct = round(known_ct / total * 100, 1)
+        unknown = total - known_ct
         return TokenizeResponse(
             tokens=token_outs,
-            comprehension_pct=s.comprehension_pct,
-            unknown_count=s.unknown_count,
-            recommended_mode=s.recommended_mode,
+            comprehension_pct=pct,
+            unknown_count=unknown,
+            recommended_mode="C",
         )
 
     return TokenizeResponse(
@@ -203,30 +238,48 @@ def lookup(
 ) -> LookupResponse:
     _check_auth(x_internal_secret)
 
-    if req.language != "ja":
+    furigana: list[dict] = []
+    lemma = req.surface
+    reading: str | None = None
+    reading_hira: str | None = None
+    pitch_accent: str | None = None
+
+    if req.language == "ja":
+        result = _ja_tokenizer.tokenize(req.surface)
+        tokens = result.tokens
+        content = [t for t in tokens if t.is_content_word]
+        canonical = (content[0] if content else tokens[0]) if tokens else None
+        if canonical:
+            lemma = canonical.lemma
+            reading = canonical.reading
+            reading_hira = canonical.reading_hira
+        if reading_hira:
+            spans = _ja_tokenizer.get_furigana(req.surface, reading_hira)
+            furigana = [{"text": s.text, "reading": s.reading} for s in spans]
+        from .pitch_accent import PITCH_ACCENT
+        pitch_accent = PITCH_ACCENT.get(lemma)
+    elif req.language in ("zh-cn", "zh-tw", "zh"):
+        zh_result = _zh_tokenizer.tokenize(req.surface)
+        if zh_result.tokens:
+            t = zh_result.tokens[0]
+            lemma = t.lemma
+            reading = t.pinyin_num
+            reading_hira = t.pinyin
+        furigana = [{"text": req.surface, "reading": reading_hira or ""}]
+    elif req.language == "ko":
+        ko_result = _ko_tokenizer.tokenize(req.surface)
+        if ko_result.tokens:
+            t = ko_result.tokens[0]
+            lemma = t.lemma
+            reading = t.romanization
+            reading_hira = t.romanization
+        furigana = [{"text": req.surface, "reading": reading or ""}]
+    else:
         raise HTTPException(status_code=422, detail=f"Language '{req.language}' not yet supported")
-
-    # Tokenize the surface to get the lemma
-    result = _ja_tokenizer.tokenize(req.surface)
-    tokens = result.tokens
-    # Use the first content token's lemma, or first token if all function words
-    content = [t for t in tokens if t.is_content_word]
-    canonical = (content[0] if content else tokens[0]) if tokens else None
-
-    lemma = canonical.lemma if canonical else req.surface
-    reading = canonical.reading if canonical else None
-    reading_hira = canonical.reading_hira if canonical else None
 
     entry = _dict_service.lookup(lemma, target_lang=req.target_lang)
 
-    # Generate furigana for the surface form
-    furigana: list[dict] = []
-    if reading_hira:
-        spans = _ja_tokenizer.get_furigana(req.surface, reading_hira)
-        furigana = [{"text": s.text, "reading": s.reading} for s in spans]
-
     if not entry:
-        from .pitch_accent import PITCH_ACCENT
         return LookupResponse(
             lemma=lemma,
             reading=reading,
@@ -236,7 +289,7 @@ def lookup(
             furigana=furigana,
             is_exact_match=False,
             found=False,
-            pitch_accent=PITCH_ACCENT.get(lemma),
+            pitch_accent=pitch_accent,
         )
 
     return LookupResponse(
@@ -258,7 +311,7 @@ def lookup(
         furigana=furigana,
         is_exact_match=entry.is_exact_match,
         found=True,
-        pitch_accent=entry.pitch_accent,
+        pitch_accent=pitch_accent if pitch_accent else entry.pitch_accent,
     )
 
 
@@ -299,11 +352,46 @@ def score_text(
 ) -> ScoreResponse:
     _check_auth(x_internal_secret)
 
-    if req.language != "ja":
-        raise HTTPException(status_code=422, detail=f"Language '{req.language}' not yet supported")
+    known = set(req.known_lemmas)
+    learning = set(req.learning_lemmas)
 
-    result = _ja_tokenizer.tokenize(req.text)
-    s = score_content(result.tokens, set(req.known_lemmas), set(req.learning_lemmas))
+    if req.language == "ja":
+        result = _ja_tokenizer.tokenize(req.text)
+        s = score_content(result.tokens, known, learning)
+    elif req.language in ("zh-cn", "zh-tw", "zh"):
+        zh_result = _zh_tokenizer.tokenize(req.text)
+        content = [t for t in zh_result.tokens if t.is_content_word]
+        known_ct = sum(1 for t in content if t.lemma in known or t.lemma in learning)
+        total = len(content) or 1
+        pct = round(known_ct / total * 100, 1)
+        from .scorer import ContentScore
+        s = ContentScore(
+            comprehension_pct=pct,
+            difficulty_score=round(1.0 - pct / 100, 2),
+            total_content_words=total,
+            unknown_count=total - known_ct,
+            learning_count=0,
+            recommended_mode="mining_read" if pct >= 90 else "study_read" if pct >= 80 else "too_hard",
+            top_unknown_lemmas=[t.lemma for t in content if t.lemma not in known and t.lemma not in learning][:10],
+        )
+    elif req.language == "ko":
+        ko_result = _ko_tokenizer.tokenize(req.text)
+        content = [t for t in ko_result.tokens if t.is_content_word]
+        known_ct = sum(1 for t in content if t.lemma in known or t.lemma in learning)
+        total = len(content) or 1
+        pct = round(known_ct / total * 100, 1)
+        from .scorer import ContentScore
+        s = ContentScore(
+            comprehension_pct=pct,
+            difficulty_score=round(1.0 - pct / 100, 2),
+            total_content_words=total,
+            unknown_count=total - known_ct,
+            learning_count=0,
+            recommended_mode="mining_read" if pct >= 90 else "study_read" if pct >= 80 else "too_hard",
+            top_unknown_lemmas=[t.lemma for t in content if t.lemma not in known and t.lemma not in learning][:10],
+        )
+    else:
+        raise HTTPException(status_code=422, detail=f"Language '{req.language}' not yet supported")
 
     return ScoreResponse(
         comprehension_pct=s.comprehension_pct,

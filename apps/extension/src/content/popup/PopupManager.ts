@@ -126,6 +126,7 @@ export class PopupManager {
       await chrome.runtime.sendMessage({
         type: 'MINE_CARD',
         lemma,
+        reading: entry?.reading ?? reading,
         sentence: sentence ?? '',
         sourceUrl: window.location.href,
         languageCode: 'ja',

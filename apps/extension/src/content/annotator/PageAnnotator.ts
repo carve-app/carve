@@ -2,6 +2,7 @@
 import type { VocabCache } from '../../nlp/VocabCache';
 import type { PopupManager } from '../popup/PopupManager';
 import type { Token } from '../../shared/types';
+import { wasmTokenize } from '../../nlp/WasmTokenizer';
 
 const SKIP_TAGS = new Set([
   'SCRIPT', 'STYLE', 'NOSCRIPT', 'CODE', 'PRE',
@@ -66,9 +67,17 @@ export class PageAnnotator {
     return nodes;
   }
 
-  // MV3 service workers can be terminated mid-request. Retry up to 3 times
-  // on "message channel closed" — each retry wakes a fresh SW instance.
   private async tokenize(text: string): Promise<{ tokens: Token[] } | null> {
+    if (this.lang === 'ja') {
+      try {
+        const tokens = await wasmTokenize(text);
+        return { tokens };
+      } catch {
+        return null;
+      }
+    }
+    // Non-Japanese: fall back to background → NLP API path.
+    // MV3 service workers can be terminated mid-request; retry up to 3 times.
     const msg = {
       type: 'TOKENIZE' as const,
       text,
@@ -80,8 +89,8 @@ export class PageAnnotator {
       try {
         return await chrome.runtime.sendMessage(msg);
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : '';
-        const isChannelClosed = msg.includes('message channel closed') || msg.includes('Extension context');
+        const errMsg = e instanceof Error ? e.message : '';
+        const isChannelClosed = errMsg.includes('message channel closed') || errMsg.includes('Extension context');
         if (!isChannelClosed || attempt === 2) return null;
         await new Promise(r => setTimeout(r, 100 * (attempt + 1)));
       }

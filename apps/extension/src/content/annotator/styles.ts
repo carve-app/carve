@@ -128,6 +128,52 @@ export function injectStyles(): void {
       margin-left: 6px;
       font-family: monospace;
     }
+    /* Comprehension score overlay */
+    #carve-overlay {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 2147483646;
+      background: rgba(30, 33, 40, 0.92);
+      border: 1px solid #2a2d36;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-family: system-ui, sans-serif;
+      font-size: 13px;
+      color: #e8eaf0;
+      min-width: 130px;
+      text-align: center;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      backdrop-filter: blur(4px);
+      cursor: default;
+      user-select: none;
+    }
+    #carve-overlay .overlay-label {
+      font-size: 10px;
+      color: #6b7a99;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 4px;
+    }
+    #carve-overlay .overlay-pct {
+      font-size: 26px;
+      font-weight: 700;
+    }
+    #carve-overlay .overlay-sub {
+      font-size: 10px;
+      color: #6b7a99;
+      margin-top: 2px;
+    }
+    #carve-overlay .overlay-close {
+      position: absolute;
+      top: 4px;
+      right: 7px;
+      font-size: 14px;
+      color: #6b7a99;
+      cursor: pointer;
+      line-height: 1;
+    }
+    #carve-overlay .overlay-close:hover { color: #e8eaf0; }
   `;
   document.head.appendChild(style);
 }

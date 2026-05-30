@@ -293,7 +293,7 @@ async function __wbg_init(module_or_path) {
     }
 
     if (module_or_path === undefined) {
-        module_or_path = new URL('ja_tokenizer_bg.wasm', import.meta.url);
+        throw new Error('ja_tokenizer: must pass explicit wasm URL — import.meta.url not available in MV3 content scripts');
     }
     const imports = __wbg_get_imports();
 

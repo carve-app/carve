@@ -71,6 +71,7 @@ export async function nlpLookup(surface: string, language: string): Promise<any>
 export async function createCard(params: {
   language_code: string;
   lemma: string;
+  reading?: string;
   sentence?: string;
   source_url?: string;
 }): Promise<{ id: string; lemma: string }> {
