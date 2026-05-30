@@ -910,3 +910,174 @@ class TestNHKEasyArticleSenryu:
         }
         missing = expected - lemmas
         assert not missing, f"Missing lemmas from article: {sorted(missing)}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 17: NHK World broadcast description
+#
+# Source text (no furigana — already standard Japanese):
+#
+#   海外に住んでいる、あるいは、海外旅行中の日本人のために、ニュース・情報番組に
+#   加え、ドラマ、音楽番組、こども番組、大相撲中継などのスポーツ番組を国内各波
+#   から抜粋し、1日24時間編成しています。一部のニュース・番組は海外向けに
+#   インターネットでも配信しています。
+#
+# Every assertion verified against actual SudachiPy output (2026-05-30).
+# ─────────────────────────────────────────────────────────────────────────────
+
+_BROADCAST_TEXT = (
+    "海外に住んでいる、あるいは、海外旅行中の日本人のために、ニュース・情報番組に加え、"
+    "ドラマ、音楽番組、こども番組、大相撲中継などのスポーツ番組を国内各波から抜粋し、"
+    "1日24時間編成しています。一部のニュース・番組は海外向けにインターネットでも配信しています。"
+)
+
+
+class TestNHKWorldBroadcastDescription:
+    """
+    Tokenizer test for NHK World's broadcast service description.
+    No furigana stripping needed — text is already standard Japanese.
+    """
+
+    # ── Readings ──────────────────────────────────────────────────────────────
+
+    def test_kaigai_reading(self, tokenizer):
+        """海外 reads かいがい."""
+        assert reading(tokenizer, "海外") == "かいがい"
+
+    def test_kaigai_ryokou_reading(self, tokenizer):
+        """海外旅行 is a single token reading かいがいりょこう."""
+        result = tokenizer.tokenize("海外旅行中の日本人")
+        tok = next(t for t in result.tokens if t.surface == "海外旅行")
+        assert tok.reading_hira == "かいがいりょこう", (
+            f"Expected かいがいりょこう, got {tok.reading_hira!r}"
+        )
+
+    def test_nihonjin_reading(self, tokenizer):
+        """日本人 reads にほんじん (not にっぽんじん — compound differs from 日本 alone)."""
+        result = tokenizer.tokenize("日本人のために")
+        tok = next(t for t in result.tokens if t.surface == "日本人")
+        assert tok.reading_hira == "にほんじん", (
+            f"Expected にほんじん, got {tok.reading_hira!r}"
+        )
+
+    def test_jouhou_reading(self, tokenizer):
+        """情報 reads じょうほう."""
+        assert reading(tokenizer, "情報") == "じょうほう"
+
+    def test_bangumi_reading(self, tokenizer):
+        """番組 reads ばんぐみ."""
+        assert reading(tokenizer, "番組") == "ばんぐみ"
+
+    def test_sumo_reading(self, tokenizer):
+        """相撲 reads すもう."""
+        assert reading(tokenizer, "相撲") == "すもう"
+
+    def test_chuukei_reading(self, tokenizer):
+        """中継 reads ちゅうけい."""
+        assert reading(tokenizer, "中継") == "ちゅうけい"
+
+    def test_sports_reading(self, tokenizer):
+        """スポーツ reads すぽーつ."""
+        assert reading(tokenizer, "スポーツ") == "すぽーつ"
+
+    def test_kokunai_reading(self, tokenizer):
+        """国内 reads こくない."""
+        assert reading(tokenizer, "国内") == "こくない"
+
+    def test_bassui_reading(self, tokenizer):
+        """抜粋 reads ばっすい."""
+        assert reading(tokenizer, "抜粋") == "ばっすい"
+
+    def test_jikan_reading(self, tokenizer):
+        """時間 reads じかん."""
+        assert reading(tokenizer, "時間") == "じかん"
+
+    def test_hensei_reading(self, tokenizer):
+        """編成 reads へんせい."""
+        assert reading(tokenizer, "編成") == "へんせい"
+
+    def test_ichibu_reading(self, tokenizer):
+        """一部 reads いちぶ."""
+        assert reading(tokenizer, "一部") == "いちぶ"
+
+    def test_haishin_reading(self, tokenizer):
+        """配信 reads はいしん."""
+        assert reading(tokenizer, "配信") == "はいしん"
+
+    def test_drama_reading(self, tokenizer):
+        """ドラマ reads どらま."""
+        assert reading(tokenizer, "ドラマ") == "どらま"
+
+    # ── Lemmatization ─────────────────────────────────────────────────────────
+
+    def test_sunde_lemma(self, tokenizer):
+        """住んでいる → verb stem 住ん has lemma 住む."""
+        result = tokenizer.tokenize("海外に住んでいる")
+        sumu = next((t for t in result.tokens if "住" in t.surface), None)
+        assert sumu is not None, "住 token not found"
+        assert sumu.lemma == "住む", f"Expected 住む, got {sumu.lemma!r}"
+
+    def test_kuwaeru_lemma(self, tokenizer):
+        """加え (て-form stem) has lemma 加える."""
+        result = tokenizer.tokenize("情報番組に加え")
+        kuwaeru = next((t for t in result.tokens if "加" in t.surface), None)
+        assert kuwaeru is not None, "加 token not found"
+        assert kuwaeru.lemma == "加える", f"Expected 加える, got {kuwaeru.lemma!r}"
+
+    # ── Segmentation ──────────────────────────────────────────────────────────
+
+    def test_kaigai_ryokou_single_token(self, tokenizer):
+        """海外旅行 is recognized as a single compound noun, not 海外+旅行."""
+        result = tokenizer.tokenize("海外旅行中の")
+        assert "海外旅行" in [t.surface for t in result.tokens], (
+            f"海外旅行 not a single token: {[t.surface for t in result.tokens]}"
+        )
+
+    def test_daisumo_split(self, tokenizer):
+        """大相撲中継 splits as 大 + 相撲 + 中継 (大 is a prefix, not merged)."""
+        result = tokenizer.tokenize("大相撲中継")
+        surfaces = [t.surface for t in result.tokens]
+        assert "相撲" in surfaces and "中継" in surfaces, (
+            f"Expected 相撲 and 中継 as tokens, got: {surfaces}"
+        )
+        assert "大相撲" not in surfaces, (
+            f"大相撲 should not be a single token, got: {surfaces}"
+        )
+
+    def test_jouhou_bangumi_split(self, tokenizer):
+        """情報番組 splits as 情報 + 番組 (two content words)."""
+        result = tokenizer.tokenize("情報番組に加え")
+        surfaces = [t.surface for t in result.tokens]
+        assert "情報" in surfaces and "番組" in surfaces, (
+            f"Expected 情報 and 番組 as separate tokens, got: {surfaces}"
+        )
+
+    def test_internet_single_token(self, tokenizer):
+        """インターネット is a single token."""
+        result = tokenizer.tokenize("インターネットでも配信")
+        assert "インターネット" in [t.surface for t in result.tokens]
+
+    # ── Full-text quality ──────────────────────────────────────────────────────
+
+    def test_full_text_no_error(self, tokenizer):
+        """Full text tokenizes without exception."""
+        result = tokenizer.tokenize(_BROADCAST_TEXT)
+        assert len(result.tokens) > 0
+
+    def test_full_text_content_word_count(self, tokenizer):
+        """Full text has ≥ 20 content-word tokens."""
+        result = tokenizer.tokenize(_BROADCAST_TEXT)
+        count = sum(1 for t in result.tokens if t.is_content_word)
+        assert count >= 20, f"Expected ≥20 content words, got {count}"
+
+    def test_full_text_key_lemmas_present(self, tokenizer):
+        """All key content-word lemmas appear in the full-text token output."""
+        result = tokenizer.tokenize(_BROADCAST_TEXT)
+        lemmas = {t.lemma for t in result.tokens if t.is_content_word}
+        expected = {
+            "海外", "住む", "海外旅行", "日本人", "ニュース", "情報", "番組",
+            "加える", "ドラマ", "音楽", "相撲", "中継", "スポーツ", "国内",
+            "抜粋", "時間", "編成", "一部", "インターネット", "配信",
+        }
+        missing = expected - lemmas
+        assert not missing, f"Missing lemmas: {sorted(missing)}"
