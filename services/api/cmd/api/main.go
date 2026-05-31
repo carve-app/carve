@@ -19,6 +19,7 @@ import (
 	"github.com/carve-app/carve/services/api/internal/immersion"
 	"github.com/carve-app/carve/services/api/internal/library"
 	"github.com/carve-app/carve/services/api/internal/nlp"
+	"github.com/carve-app/carve/services/api/internal/onboarding"
 	"github.com/carve-app/carve/services/api/internal/output"
 	"github.com/carve-app/carve/services/api/internal/review"
 	"github.com/carve-app/carve/services/api/internal/settings"
@@ -88,6 +89,7 @@ func main() {
 	statsHandler := stats.NewHandler(pool)
 	libraryHandler := library.NewHandler(pool)
 	outputHandler := output.NewHandler(pool)
+	onboardingHandler := onboarding.NewHandler(pool)
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(auth.Middleware)
@@ -95,6 +97,11 @@ func main() {
 		// Users
 		r.Get("/users/me", userHandler.Me)
 		r.Patch("/users/me", userHandler.Update)
+		r.Delete("/users/me", userHandler.Delete)
+
+		// Onboarding
+		r.Post("/onboarding/known-words", onboardingHandler.KnownWords)
+		r.Post("/onboarding/starter-deck", onboardingHandler.StarterDeck)
 
 		// Cards
 		r.Post("/cards", cardsHandler.Create)

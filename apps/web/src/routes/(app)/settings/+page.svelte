@@ -5,12 +5,31 @@
     fetchFsrsSettings,
     saveFsrsSettings,
     fetchWorkloadPreview,
+    deleteAccount,
     apiFetch,
     type FsrsSettings,
     type WorkloadPreview,
   } from '$lib/api';
   import { lang } from '$lib/stores/lang';
   import { toasts } from '$lib/stores/toast';
+  import { currentUser } from '$lib/stores/user';
+
+  let deleteConfirm = '';
+  let deleting = false;
+
+  async function handleDeleteAccount() {
+    if (deleteConfirm !== 'delete my account') return;
+    deleting = true;
+    try {
+      await deleteAccount();
+      localStorage.removeItem('carve_access_token');
+      currentUser.set(null);
+      window.location.href = '/login';
+    } catch (err) {
+      toasts.add(err instanceof Error ? err.message : 'Account deletion failed');
+      deleting = false;
+    }
+  }
 
   let loading = true;
   let saving = false;
@@ -189,6 +208,29 @@
         {/if}
       </div>
     </div>
+    <div class="section danger-zone">
+      <h2>Danger zone</h2>
+      <p class="info-text">
+        Deleting your account permanently removes all your cards, review history, and settings.
+        This cannot be undone.
+      </p>
+      <p class="info-text">
+        Type <strong>delete my account</strong> to confirm.
+      </p>
+      <input
+        type="text"
+        class="confirm-input"
+        placeholder="delete my account"
+        bind:value={deleteConfirm}
+      />
+      <button
+        class="btn-danger"
+        on:click={handleDeleteAccount}
+        disabled={deleteConfirm !== 'delete my account' || deleting}
+      >
+        {deleting ? 'Deleting…' : 'Delete my account'}
+      </button>
+    </div>
   {/if}
 </main>
 
@@ -231,4 +273,34 @@
   .weight-cell { background: #13151a; border: 1px solid #2a2d36; border-radius: 6px; padding: 0.4rem 0.6rem; text-align: center; }
   .weight-index { display: block; font-size: 0.65rem; color: #6b7591; }
   .weight-val { font-size: 0.8rem; font-family: monospace; color: #b0bec5; }
+
+  .danger-zone { border-color: #4a1515; }
+  .danger-zone h2 { color: #ef5350; }
+
+  .confirm-input {
+    background: #13151a;
+    border: 1px solid #4a1515;
+    color: #e8eaf0;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    width: 100%;
+    max-width: 280px;
+    margin-bottom: 1rem;
+    outline: none;
+  }
+  .confirm-input:focus { border-color: #ef5350; }
+
+  .btn-danger {
+    background: transparent;
+    border: 1px solid #c62828;
+    color: #ef5350;
+    padding: 0.6rem 1.25rem;
+    border-radius: 7px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  .btn-danger:hover:not(:disabled) { background: #2d1515; color: #ff5252; }
+  .btn-danger:disabled { opacity: 0.4; cursor: not-allowed; }
 </style>

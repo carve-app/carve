@@ -190,6 +190,24 @@ export async function register(email: string, password: string, displayName: str
   });
 }
 
+export async function deleteAccount(): Promise<void> {
+  await apiFetch('/v1/users/me', { method: 'DELETE' });
+}
+
+export async function markKnownWords(language: string, lemmas: string[]): Promise<{ marked: number }> {
+  return apiFetch('/v1/onboarding/known-words', {
+    method: 'POST',
+    body: JSON.stringify({ language, lemmas }),
+  });
+}
+
+export async function subscribeStarterDeck(language: string): Promise<{ deck_id?: string; status: string }> {
+  return apiFetch('/v1/onboarding/starter-deck', {
+    method: 'POST',
+    body: JSON.stringify({ language }),
+  });
+}
+
 // ── Cards ─────────────────────────────────────────────────────────────────────
 
 export async function fetchCards(language = 'ja', limit = 50): Promise<CardsResponse> {

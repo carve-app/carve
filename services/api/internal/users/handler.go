@@ -51,6 +51,32 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, user)
 }
 
+// DELETE /users/me — soft-deletes the account and revokes all refresh tokens (GDPR).
+func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.ClaimsFromContext(r.Context())
+	if !ok {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	ctx := r.Context()
+	_, err := h.db.Exec(ctx,
+		`UPDATE users SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`,
+		claims.UserID,
+	)
+	if err != nil {
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	h.db.Exec(ctx,
+		`UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`,
+		claims.UserID,
+	)
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // PATCH /users/me
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	claims, ok := auth.ClaimsFromContext(r.Context())

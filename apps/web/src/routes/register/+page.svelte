@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { login, ApiError } from '$lib/api';
+  import { register, ApiError } from '$lib/api';
 
+  let displayName = '';
   let email = '';
   let password = '';
   let errorMessage = '';
@@ -12,15 +13,17 @@
     loading = true;
 
     try {
-      const res = await login(email, password);
+      const res = await register(email, password, displayName);
       localStorage.setItem('carve_access_token', res.access_token);
-      window.location.href = '/review';
+      window.location.href = '/onboarding';
     } catch (err) {
       if (err instanceof ApiError) {
         errorMessage =
-          err.status === 401
-            ? 'Invalid email or password.'
-            : `Login failed: ${err.message}`;
+          err.status === 409
+            ? 'An account with that email already exists.'
+            : err.status === 400
+            ? err.message
+            : `Registration failed: ${err.message}`;
       } else {
         errorMessage = 'Could not reach the server. Is it running?';
       }
@@ -32,9 +35,20 @@
 
 <main>
   <div class="card">
-    <h1>Log in to Carve</h1>
+    <h1>Create your account</h1>
 
     <form on:submit={handleSubmit}>
+      <label for="name">Name</label>
+      <input
+        id="name"
+        type="text"
+        bind:value={displayName}
+        placeholder="Your name"
+        autocomplete="name"
+        required
+        disabled={loading}
+      />
+
       <label for="email">Email</label>
       <input
         id="email"
@@ -51,8 +65,9 @@
         id="password"
         type="password"
         bind:value={password}
-        placeholder="••••••••"
-        autocomplete="current-password"
+        placeholder="At least 8 characters"
+        autocomplete="new-password"
+        minlength="8"
         required
         disabled={loading}
       />
@@ -62,27 +77,17 @@
       {/if}
 
       <button type="submit" disabled={loading}>
-        {loading ? 'Logging in…' : 'Log in'}
+        {loading ? 'Creating account…' : 'Create account'}
       </button>
     </form>
 
     <p class="footer">
-      <a href="/forgot-password">Forgot password?</a>
-    </p>
-    <p class="footer">
-      Don't have an account? <a href="/register">Sign up</a>
+      Already have an account? <a href="/login">Sign in</a>
     </p>
   </div>
 </main>
 
 <style>
-  :global(body) {
-    background: #13151a;
-    color: #e8eaf0;
-    font-family: system-ui, sans-serif;
-    margin: 0;
-  }
-
   main {
     display: flex;
     align-items: center;
@@ -130,13 +135,8 @@
     transition: border-color 0.15s;
   }
 
-  input:focus {
-    border-color: #4caf50;
-  }
-
-  input:disabled {
-    opacity: 0.6;
-  }
+  input:focus { border-color: #4caf50; }
+  input:disabled { opacity: 0.6; }
 
   .error {
     color: #ef9a9a;
@@ -157,19 +157,14 @@
     transition: background 0.15s;
   }
 
-  button:hover:not(:disabled) {
-    background: #43a047;
-  }
-
-  button:disabled {
-    opacity: 0.7;
-    cursor: not-allowed;
-  }
+  button:hover:not(:disabled) { background: #43a047; }
+  button:disabled { opacity: 0.7; cursor: not-allowed; }
 
   .footer {
     text-align: center;
     margin: 1.25rem 0 0;
     font-size: 0.85rem;
+    color: #9ba8c0;
   }
 
   .footer a { color: #4caf50; text-decoration: none; }
