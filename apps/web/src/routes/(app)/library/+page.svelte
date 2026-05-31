@@ -91,6 +91,9 @@
     </div>
     {#if addError}<p class="error">{addError}</p>{/if}
     {#if addSuccess}<p class="success">{addSuccess}</p>{/if}
+    <div class="import-link">
+      <a href="/import">Or import a file (.txt, .srt, .apkg, .csv)</a>
+    </div>
   </div>
 
   {#if state === 'loading'}
@@ -110,8 +113,13 @@
         <li class="item-card">
           <div class="item-main">
             <div class="item-top">
-              <a href={item.url} target="_blank" rel="noopener" class="item-title">{item.title ?? item.url}</a>
-              <button class="remove-btn" on:click={() => removeItem(item.id)} title="Remove">✕</button>
+              <a href="/library/{item.id}" class="item-title">{item.title ?? item.url}</a>
+              <div class="item-btns">
+                {#if item.url}
+                  <a href={item.url} target="_blank" rel="noopener" class="ext-link" title="Open original">↗</a>
+                {/if}
+                <button class="remove-btn" on:click={() => removeItem(item.id)} title="Remove">✕</button>
+              </div>
             </div>
             {#if item.url}
               <div class="item-url">{item.url}</div>
@@ -164,8 +172,14 @@
   .item-title { color: #e8eaf0; text-decoration: none; font-size: 0.95rem; font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item-title:hover { color: #4caf50; }
   .item-url { font-size: 0.75rem; color: #6b7591; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item-btns { display: flex; gap: 0.5rem; align-items: center; }
+  .ext-link { color: #4a5568; text-decoration: none; font-size: 0.85rem; }
+  .ext-link:hover { color: #9ba8c0; }
   .remove-btn { background: none; border: none; color: #6b7591; cursor: pointer; font-size: 0.9rem; padding: 0; flex-shrink: 0; }
   .remove-btn:hover { color: #ef5350; }
+  .import-link { margin-top: 0.75rem; font-size: 0.8rem; }
+  .import-link a { color: #6b7591; }
+  .import-link a:hover { color: #9ba8c0; }
 
   .item-score { text-align: center; min-width: 70px; }
   .score-pct { font-size: 1.5rem; font-weight: 700; line-height: 1.1; }

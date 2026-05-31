@@ -344,6 +344,102 @@ export async function fetchWorkloadPreview(language = 'ja', targetRetention: num
   return apiFetch<WorkloadPreview>(`/v1/settings/workload-preview?${params}`);
 }
 
+// ── Library reader ────────────────────────────────────────────────────────────
+
+export interface ReaderToken {
+  surface: string;
+  lemma: string;
+  reading_hira: string;
+  pos: string;
+  is_content_word: boolean;
+  user_status: 'known' | 'learning' | 'unknown';
+  frequency_rank: number | null;
+}
+
+export interface ReaderUnknownWord {
+  lemma: string;
+  reading: string;
+  frequency_rank: number | null;
+}
+
+export interface ReaderResponse {
+  id: string;
+  title: string;
+  url: string | null;
+  language: string;
+  tokens: ReaderToken[];
+  comprehension_pct: number | null;
+  unknown_words: ReaderUnknownWord[];
+}
+
+export async function fetchLibraryReader(id: string): Promise<ReaderResponse> {
+  return apiFetch<ReaderResponse>(`/v1/library/${id}/reader`);
+}
+
+export async function importLibraryFile(
+  file: File,
+  language: string,
+): Promise<{ id: string; title: string; language: string }> {
+  const token = getToken();
+  const form = new FormData();
+  form.append('file', file);
+  form.append('language', language);
+
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(`${API_BASE}/v1/library/import`, {
+    method: 'POST',
+    headers,
+    body: form,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export interface ImportResult {
+  imported: number;
+  skipped: number;
+  language: string;
+  type?: string;
+}
+
+export async function importAnki(file: File, language: string): Promise<ImportResult> {
+  return _importFile('/v1/import/anki', file, language);
+}
+
+export async function importMigakuCSV(file: File, language: string): Promise<ImportResult> {
+  return _importFile('/v1/import/migaku-csv', file, language);
+}
+
+export async function importYomitan(file: File, language: string): Promise<ImportResult> {
+  return _importFile('/v1/import/yomitan', file, language);
+}
+
+export async function importJPDBCSV(file: File, language: string): Promise<ImportResult> {
+  return _importFile('/v1/import/jpdb-csv', file, language);
+}
+
+async function _importFile(path: string, file: File, language: string): Promise<ImportResult> {
+  const token = getToken();
+  const form = new FormData();
+  form.append('file', file);
+  form.append('language', language);
+
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(`${API_BASE}${path}`, { method: 'POST', headers, body: form });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 // ── Export ────────────────────────────────────────────────────────────────────
 
 export function getExportUrl(): string {

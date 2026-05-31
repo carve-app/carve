@@ -4,11 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -366,4 +371,314 @@ func stripHTML(html string) string {
 	}
 	// Collapse whitespace.
 	return strings.Join(strings.Fields(sb.String()), " ")
+}
+
+// ── GET /v1/library/{id}/reader ───────────────────────────────────────────────
+// Returns tokenized text + unknown word list for in-browser reader mode.
+
+func (h *Handler) Read(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.ClaimsFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	id := chi.URLParam(r, "id")
+	ctx := r.Context()
+
+	// Fetch item with its content.
+	var pageURL, bodyText *string
+	var title, language string
+	err := h.db.QueryRow(ctx,
+		`SELECT ci.url, ci.title, ci.language_code, ci.body_text
+		 FROM user_library_items li
+		 JOIN content_items ci ON ci.id = li.content_id
+		 WHERE li.id = $1 AND li.user_id = $2`,
+		id, claims.UserID,
+	).Scan(&pageURL, &title, &language, &bodyText)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "item not found")
+		return
+	}
+
+	lang := language
+	if lang == "" {
+		lang = "ja"
+	}
+
+	// Get text: prefer stored body_text, fall back to fetching the URL.
+	var text string
+	if bodyText != nil {
+		text = *bodyText
+	}
+	if text == "" && pageURL != nil {
+		fetchCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		fetchReq, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, *pageURL, nil)
+		if err == nil {
+			fetchReq.Header.Set("User-Agent", "Carve/1.0 (+https://carve.app/bot)")
+			if resp, err := http.DefaultClient.Do(fetchReq); err == nil {
+				defer resp.Body.Close()
+				raw, _ := io.ReadAll(io.LimitReader(resp.Body, 500_000))
+				text = stripHTML(string(raw))
+			}
+		}
+	}
+
+	if text == "" {
+		writeError(w, http.StatusUnprocessableEntity, "could not extract text from item")
+		return
+	}
+
+	// Truncate to 50k runes for tokenizer.
+	if runes := []rune(text); len(runes) > 50_000 {
+		text = string(runes[:50_000])
+	}
+
+	knownLemmas, learningLemmas := h.fetchUserVocab(ctx, claims.UserID, lang)
+
+	// Call NLP tokenize.
+	nlpBody, _ := json.Marshal(map[string]any{
+		"text":            text,
+		"language":        lang,
+		"known_lemmas":    knownLemmas,
+		"learning_lemmas": learningLemmas,
+	})
+	nlpCtx, nlpCancel := context.WithTimeout(ctx, 120*time.Second)
+	defer nlpCancel()
+	nlpReq, err := http.NewRequestWithContext(nlpCtx, http.MethodPost,
+		h.nlpBaseURL+"/tokenize", bytes.NewReader(nlpBody))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	nlpReq.Header.Set("Content-Type", "application/json")
+	if secret := os.Getenv("NLP_INTERNAL_SECRET"); secret != "" {
+		nlpReq.Header.Set("X-Internal-Secret", secret)
+	}
+
+	nlpResp, err := http.DefaultClient.Do(nlpReq)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "nlp service unavailable")
+		return
+	}
+	defer nlpResp.Body.Close()
+
+	var nlpResult struct {
+		Tokens           []json.RawMessage `json:"tokens"`
+		ComprehensionPct *float64          `json:"comprehension_pct"`
+	}
+	if err := json.NewDecoder(nlpResp.Body).Decode(&nlpResult); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// Build unknown words sidebar: content words with status=unknown, sorted by frequency_rank.
+	type unknownWord struct {
+		Lemma    string  `json:"lemma"`
+		Reading  string  `json:"reading"`
+		FreqRank *int    `json:"frequency_rank"`
+	}
+	seen := map[string]bool{}
+	var unknown []unknownWord
+
+	type tokenShape struct {
+		Lemma         string `json:"lemma"`
+		Reading       string `json:"reading_hira"`
+		Status        string `json:"user_status"`
+		IsContentWord bool   `json:"is_content_word"`
+		FreqRank      *int   `json:"frequency_rank"`
+	}
+	for _, raw := range nlpResult.Tokens {
+		var tok tokenShape
+		if json.Unmarshal(raw, &tok) != nil {
+			continue
+		}
+		if tok.IsContentWord && tok.Status == "unknown" && !seen[tok.Lemma] {
+			seen[tok.Lemma] = true
+			unknown = append(unknown, unknownWord{
+				Lemma:    tok.Lemma,
+				Reading:  tok.Reading,
+				FreqRank: tok.FreqRank,
+			})
+		}
+	}
+
+	// Sort by frequency rank (lower = more common); unranked go last.
+	sort.Slice(unknown, func(i, j int) bool {
+		ri := unknown[i].FreqRank
+		rj := unknown[j].FreqRank
+		if ri == nil { return false }
+		if rj == nil { return true }
+		return *ri < *rj
+	})
+	if len(unknown) > 50 {
+		unknown = unknown[:50]
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":                id,
+		"title":             title,
+		"url":               pageURL,
+		"language":          lang,
+		"tokens":            nlpResult.Tokens,
+		"comprehension_pct": nlpResult.ComprehensionPct,
+		"unknown_words":     unknown,
+	})
+}
+
+// ── POST /v1/library/import ───────────────────────────────────────────────────
+// Accepts a file upload: .txt or .srt. Creates a content_item + user_library_item.
+
+func (h *Handler) ImportFile(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.ClaimsFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid multipart form")
+		return
+	}
+
+	language := r.FormValue("language")
+	if language == "" {
+		language = "ja"
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "file required")
+		return
+	}
+	defer file.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(file, 5<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read file")
+		return
+	}
+
+	filename := header.Filename
+	ext := strings.ToLower(filename)
+	var text, title string
+
+	switch {
+	case strings.HasSuffix(ext, ".txt"):
+		text = string(raw)
+		title = strings.TrimSuffix(filename, ".txt")
+	case strings.HasSuffix(ext, ".srt"):
+		text = parseSRT(string(raw))
+		title = strings.TrimSuffix(filename, ".srt")
+	default:
+		writeError(w, http.StatusBadRequest, "unsupported file type: use .txt or .srt")
+		return
+	}
+
+	if len([]rune(text)) > 500_000 {
+		writeError(w, http.StatusBadRequest, "file too large (max 500 000 characters)")
+		return
+	}
+
+	ctx := r.Context()
+	contentID := auth.NewID()
+	sourceType := "txt"
+	if strings.HasSuffix(strings.ToLower(filename), ".srt") {
+		sourceType = "srt"
+	}
+
+	_, err = h.db.Exec(ctx,
+		`INSERT INTO content_items (id, language_code, content_type, title, body_text, source_type)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		contentID, language, sourceType, title, text, sourceType,
+	)
+	if err != nil {
+		slog.Error("library import: insert content_item", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	itemID := auth.NewID()
+	_, err = h.db.Exec(ctx,
+		`INSERT INTO user_library_items (id, user_id, content_id)
+		 VALUES ($1, $2, $3)`,
+		itemID, claims.UserID, contentID,
+	)
+	if err != nil {
+		slog.Error("library import: insert user_library_item", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id":       itemID,
+		"title":    title,
+		"language": language,
+	})
+}
+
+// parseSRT strips timing/index lines and returns plain subtitle text.
+func parseSRT(raw string) string {
+	var sb strings.Builder
+	lines := strings.Split(raw, "\n")
+	timingRe := regexp.MustCompile(`^\d{2}:\d{2}:\d{2},\d{3} --> `)
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Skip sequence numbers (pure integers)
+		if _, err := strconv.Atoi(line); err == nil {
+			continue
+		}
+		// Skip timing lines
+		if timingRe.MatchString(line) {
+			continue
+		}
+		// Strip inline HTML tags (e.g. <i>, <b>)
+		cleaned := regexp.MustCompile(`<[^>]+>`).ReplaceAllString(line, "")
+		if cleaned != "" {
+			sb.WriteString(cleaned)
+			sb.WriteRune('\n')
+		}
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+// uploadMedia uploads a blob to the media service and returns its URL.
+func uploadMedia(mediaBase, path string, r io.Reader, ct string) (string, error) {
+	req, err := http.NewRequest(http.MethodPost, mediaBase+path, r)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", ct)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("media service returned %d", resp.StatusCode)
+	}
+	var res struct{ URL string `json:"url"` }
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return "", err
+	}
+	return mediaBase + res.URL, nil
+}
+
+// multipartField reads a named field from a multipart reader (used in import).
+func multipartField(mr *multipart.Reader, name string) ([]byte, *multipart.Part, error) {
+	for {
+		part, err := mr.NextPart()
+		if err != nil {
+			return nil, nil, err
+		}
+		if part.FormName() == name {
+			data, err := io.ReadAll(io.LimitReader(part, 50<<20))
+			return data, part, err
+		}
+		part.Close()
+	}
 }

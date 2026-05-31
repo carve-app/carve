@@ -17,6 +17,7 @@ import (
 	"github.com/carve-app/carve/services/api/internal/decks"
 	"github.com/carve-app/carve/services/api/internal/export"
 	"github.com/carve-app/carve/services/api/internal/immersion"
+	"github.com/carve-app/carve/services/api/internal/importer"
 	"github.com/carve-app/carve/services/api/internal/library"
 	"github.com/carve-app/carve/services/api/internal/nlp"
 	"github.com/carve-app/carve/services/api/internal/onboarding"
@@ -88,6 +89,7 @@ func main() {
 	billingHandler := billing.NewHandler(pool)
 	statsHandler := stats.NewHandler(pool)
 	libraryHandler := library.NewHandler(pool)
+	importerHandler := importer.NewHandler(pool)
 	outputHandler := output.NewHandler(pool)
 	onboardingHandler := onboarding.NewHandler(pool)
 
@@ -149,7 +151,15 @@ func main() {
 		// Library
 		r.Get("/library", libraryHandler.List)
 		r.Post("/library", libraryHandler.Add)
+		r.Get("/library/{id}/reader", libraryHandler.Read)
+		r.Post("/library/import", libraryHandler.ImportFile)
 		r.Delete("/library/{id}", libraryHandler.Delete)
+
+		// Import
+		r.Post("/import/anki", importerHandler.ImportAnki)
+		r.Post("/import/migaku-csv", importerHandler.ImportMigakuCSV)
+		r.Post("/import/yomitan", importerHandler.ImportYomitan)
+		r.Post("/import/jpdb-csv", importerHandler.ImportJPDBCSV)
 
 		// FSRS optimizer
 		r.Post("/settings/fsrs/optimize", settingsHandler.Optimize)
