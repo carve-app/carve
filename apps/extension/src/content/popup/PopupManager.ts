@@ -288,7 +288,7 @@ export class PopupManager {
   }
 }
 
-function escapeHtml(s: string): string {
+export function escapeHtml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -296,7 +296,7 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function buildFurigana(spans: FuriganaSpan[]): string {
+export function buildFurigana(spans: FuriganaSpan[]): string {
   return spans
     .map((s) => {
       if (!s.reading) return escapeHtml(s.text);
@@ -305,7 +305,7 @@ function buildFurigana(spans: FuriganaSpan[]): string {
     .join('');
 }
 
-function pitchLabel(accent: string): string {
+export function pitchLabel(accent: string): string {
   const n = parseInt(accent, 10);
   if (isNaN(n)) return `[${accent}]`;
   if (n === 0) return `[${accent}⓪]`;   // heiban
@@ -313,7 +313,7 @@ function pitchLabel(accent: string): string {
   return `[${accent}]`;                  // nakadaka / odaka
 }
 
-function getSurroundingSentence(el: HTMLElement): string | null {
+export function getSurroundingSentence(el: HTMLElement): string | null {
   const parent = el.closest('p, li, td, div, span[data-carve="processed"]');
   if (!parent) return null;
   const text = parent.textContent?.trim() ?? '';

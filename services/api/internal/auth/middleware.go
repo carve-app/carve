@@ -35,3 +35,9 @@ func ClaimsFromContext(ctx context.Context) (*Claims, bool) {
 	c, ok := ctx.Value(claimsKey).(*Claims)
 	return c, ok
 }
+
+// ContextWithClaims returns a copy of ctx with claims injected.
+// Intended for use in tests only.
+func ContextWithClaims(ctx context.Context, claims *Claims) context.Context {
+	return context.WithValue(ctx, claimsKey, claims)
+}
