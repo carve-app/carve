@@ -72,12 +72,16 @@ export async function createCard(params: {
   language_code: string;
   lemma: string;
   reading?: string;
+  definition?: string;
   sentence?: string;
   source_url?: string;
 }): Promise<{ id: string; lemma: string }> {
   const response = await apiFetch('/v1/cards', {
     method: 'POST',
-    body: JSON.stringify(params),
+    body: JSON.stringify({
+      ...params,
+      back_text: params.definition,
+    }),
   });
   return response.json();
 }

@@ -21,9 +21,11 @@ func main() {
 	if storageDir == "" {
 		storageDir = "/tmp/carve-media"
 	}
-	if err := os.MkdirAll(filepath.Join(storageDir, "screenshots"), 0o755); err != nil {
-		slog.Error("create storage dir", "error", err)
-		os.Exit(1)
+	for _, sub := range []string{"screenshots", "audio"} {
+		if err := os.MkdirAll(filepath.Join(storageDir, sub), 0o755); err != nil {
+			slog.Error("create storage dir", "error", err, "sub", sub)
+			os.Exit(1)
+		}
 	}
 
 	mux := http.NewServeMux()
@@ -82,6 +84,57 @@ func main() {
 			return
 		}
 		path := filepath.Join(storageDir, "screenshots", name)
+		http.ServeFile(w, r, path)
+	})
+
+	// POST /audio — store webm/ogg/mp3 audio.
+	mux.HandleFunc("POST /audio", func(w http.ResponseWriter, r *http.Request) {
+		ct := r.Header.Get("Content-Type")
+		var ext string
+		switch {
+		case strings.HasPrefix(ct, "audio/webm"):
+			ext = ".webm"
+		case strings.HasPrefix(ct, "audio/ogg"):
+			ext = ".ogg"
+		case strings.HasPrefix(ct, "audio/mpeg"):
+			ext = ".mp3"
+		default:
+			http.Error(w, `{"error":"unsupported content type"}`, http.StatusUnsupportedMediaType)
+			return
+		}
+
+		id := fmt.Sprintf("%d", time.Now().UnixNano())
+		path := filepath.Join(storageDir, "audio", id+ext)
+		f, err := os.Create(path)
+		if err != nil {
+			slog.Error("create audio file", "error", err)
+			http.Error(w, `{"error":"storage error"}`, http.StatusInternalServerError)
+			return
+		}
+		defer f.Close()
+
+		if _, err := io.Copy(f, io.LimitReader(r.Body, 20<<20)); err != nil {
+			slog.Error("write audio", "error", err)
+			http.Error(w, `{"error":"write error"}`, http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]string{
+			"id":  id,
+			"url": "/audio/" + id + ext,
+		})
+	})
+
+	// GET /audio/{id} — serve stored audio clip.
+	mux.HandleFunc("GET /audio/", func(w http.ResponseWriter, r *http.Request) {
+		name := filepath.Base(r.URL.Path)
+		if strings.Contains(name, "/") || strings.Contains(name, "..") {
+			http.NotFound(w, r)
+			return
+		}
+		path := filepath.Join(storageDir, "audio", name)
 		http.ServeFile(w, r, path)
 	})
 

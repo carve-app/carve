@@ -72,6 +72,7 @@ async function handleMessage(msg: Message): Promise<MessageResponse> {
           language_code: msg.languageCode,
           lemma: msg.lemma,
           reading: msg.reading,
+          definition: msg.definition,
           sentence: msg.sentence,
           source_url: msg.sourceUrl,
         });

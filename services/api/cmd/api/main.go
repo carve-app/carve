@@ -107,6 +107,7 @@ func main() {
 		r.Post("/cards", cardsHandler.Create)
 		r.Get("/cards", cardsHandler.List)
 		r.Delete("/cards/{id}", cardsHandler.Delete)
+		r.Post("/cards/{id}/media", cardsHandler.AttachMedia)
 
 		// Review
 		r.Get("/review/due-count", reviewHandler.DueCount)

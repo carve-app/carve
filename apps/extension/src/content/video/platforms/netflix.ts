@@ -1,67 +1,70 @@
-/// <reference types="chrome" />
-import type { VocabCache } from '../../../nlp/VocabCache';
-import type { PopupManager } from '../../popup/PopupManager';
-import type { Token } from '../../../shared/types';
+import type { SubtitleOverlay } from '../SubtitleOverlay';
+
+const NATIVE_SELECTOR = '.player-timedtext';
+// Netflix renders each span of dialogue in .player-timedtext-text-container spans
+const TEXT_SELECTOR = '.player-timedtext-text-container';
 
 export class NetflixHook {
-  constructor(
-    private lang: string,
-    private vocabCache: VocabCache,
-    private popupManager: PopupManager,
-  ) {}
+  private observer: MutationObserver | null = null;
+  private lastText = '';
+
+  constructor(private overlay: SubtitleOverlay) {}
 
   mount(): void {
-    const observer = new MutationObserver(() => {
-      const container = document.querySelector('.player-timedtext');
-      if (container) {
-        this.processSubtitles(container as Element);
-      }
-    });
-    observer.observe(document.body, { childList: true, subtree: true });
+    // Hide native subtitle (we render our own)
+    this.overlay.hideNativeContainer(NATIVE_SELECTOR);
+
+    this.observer = new MutationObserver(() => this.checkSubtitle());
+    this.observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+
+    // Process any already-visible subtitle
+    this.checkSubtitle();
   }
 
-  private async processSubtitles(container: Element): Promise<void> {
-    const text = container.textContent?.trim() ?? '';
-    if (!text) return;
-    // Only re-process if the text changed (reset data-carve-text cache)
-    if (container.getAttribute('data-carve-text') === text) return;
-    container.setAttribute('data-carve-text', text);
+  private checkSubtitle(): void {
+    const els = document.querySelectorAll<HTMLElement>(TEXT_SELECTOR);
+    if (!els.length) return;
 
-    const response = await chrome.runtime.sendMessage({
-      type: 'TOKENIZE',
-      text,
-      language: this.lang,
-      knownLemmas: this.vocabCache.getKnownLemmas(),
-      learningLemmas: this.vocabCache.getLearningLemmas(),
-    });
+    const text = Array.from(els)
+      .map(el => el.textContent?.trim() ?? '')
+      .filter(Boolean)
+      .join(' ');
 
-    if (!response?.tokens) return;
+    if (!text || text === this.lastText) return;
+    this.lastText = text;
 
-    container.setAttribute('data-carve', 'done');
-    container.innerHTML = '';
+    // Attempt to get timing from the video's text track
+    const { startMs, endMs } = this.getActiveCueTiming();
 
-    for (const tok of response.tokens as Token[]) {
-      const span = document.createElement('span');
-      span.setAttribute('data-carve', 'token');
-      span.setAttribute('data-lemma', tok.lemma);
-      span.setAttribute('data-reading', tok.reading_hira);
-      span.setAttribute('data-content', tok.is_content_word ? '1' : '0');
-      span.setAttribute(
-        'data-status',
-        tok.is_content_word ? this.vocabCache.getStatus(tok.lemma) : 'function',
-      );
-      if (tok.frequency_rank !== null) {
-        span.setAttribute('data-rank', String(tok.frequency_rank));
+    this.overlay.onCue({ text, startMs, endMs });
+  }
+
+  private getActiveCueTiming(): { startMs: number; endMs: number } {
+    const video = document.querySelector<HTMLVideoElement>('video');
+    if (!video) return defaultTiming();
+
+    for (let i = 0; i < video.textTracks.length; i++) {
+      const track = video.textTracks[i];
+      if (track.mode !== 'showing') continue;
+      if (track.activeCues && track.activeCues.length > 0) {
+        const cue = track.activeCues[0] as VTTCue;
+        return {
+          startMs: Math.round(cue.startTime * 1000),
+          endMs: Math.round(cue.endTime * 1000),
+        };
       }
-      span.textContent = tok.surface;
-
-      if (tok.is_content_word) {
-        span.addEventListener('mouseover', () => {
-          this.popupManager.showForElement(span);
-        });
-      }
-
-      container.appendChild(span);
     }
+    return defaultTiming();
   }
+
+  unmount(): void {
+    this.observer?.disconnect();
+    this.overlay.showNativeContainer(NATIVE_SELECTOR);
+  }
+}
+
+function defaultTiming(): { startMs: number; endMs: number } {
+  const video = document.querySelector<HTMLVideoElement>('video');
+  const t = video ? video.currentTime * 1000 : 0;
+  return { startMs: Math.max(0, t - 2000), endMs: t + 2000 };
 }

@@ -122,18 +122,8 @@ export class PopupManager {
       </div>
     `;
 
-    popup.querySelector('.btn-mine')?.addEventListener('click', async () => {
-      await chrome.runtime.sendMessage({
-        type: 'MINE_CARD',
-        lemma,
-        reading: entry?.reading ?? reading,
-        sentence: sentence ?? '',
-        sourceUrl: window.location.href,
-        languageCode: 'ja',
-      });
-      await this.vocabCache.markLearning(lemma);
-      tokenEl.setAttribute('data-status', 'learning');
-      this.hidePopup();
+    popup.querySelector('.btn-mine')?.addEventListener('click', () => {
+      this.showMineForm(popup, tokenEl, lemma, entry?.reading ?? reading, entry, sentence);
     });
 
     popup.querySelector('.btn-ignore')?.addEventListener('click', async () => {
@@ -180,6 +170,82 @@ export class PopupManager {
     popup.style.top = `${top}px`;
     popup.style.left = `${left}px`;
     popup.style.display = 'block';
+  }
+
+  private showMineForm(
+    popup: HTMLElement,
+    tokenEl: HTMLElement,
+    lemma: string,
+    reading: string,
+    entry: DictEntry | null,
+    sentence: string | null,
+  ): void {
+    const topDef = entry?.definitions?.[0]?.definition ?? '';
+    const escapedLemma = escapeHtml(lemma);
+    const escapedReading = escapeHtml(reading);
+    const escapedDef = escapeHtml(topDef);
+    const escapedSentence = escapeHtml(sentence ?? '');
+
+    popup.innerHTML = `
+      <div class="carve-mine-form">
+        <div class="carve-mine-title">Add card</div>
+        <label>Word</label>
+        <input class="carve-mine-input" id="mine-lemma" value="${escapedLemma}" />
+        <label>Reading</label>
+        <input class="carve-mine-input" id="mine-reading" value="${escapedReading}" />
+        <label>Definition</label>
+        <input class="carve-mine-input" id="mine-def" value="${escapedDef}" />
+        <label>Sentence</label>
+        <textarea class="carve-mine-input" id="mine-sentence" rows="2">${escapedSentence}</textarea>
+        <label>Notes <span style="color:#4a5568">(optional)</span></label>
+        <input class="carve-mine-input" id="mine-notes" placeholder="Add a note…" />
+        <div class="carve-mine-actions">
+          <button class="btn-mine-save">Save card</button>
+          <button class="btn-mine-cancel">Cancel</button>
+        </div>
+        <div class="carve-mine-status" id="mine-status"></div>
+      </div>
+    `;
+
+    popup.querySelector('.btn-mine-cancel')?.addEventListener('click', () => {
+      this.hidePopup();
+    });
+
+    popup.querySelector('.btn-mine-save')?.addEventListener('click', async () => {
+      const btn = popup.querySelector<HTMLButtonElement>('.btn-mine-save')!;
+      const statusEl = popup.querySelector<HTMLElement>('#mine-status')!;
+
+      const mineLemma = (popup.querySelector<HTMLInputElement>('#mine-lemma')?.value ?? lemma).trim();
+      const mineReading = (popup.querySelector<HTMLInputElement>('#mine-reading')?.value ?? reading).trim();
+      const mineDef = (popup.querySelector<HTMLInputElement>('#mine-def')?.value ?? topDef).trim();
+      const mineSentence = (popup.querySelector<HTMLTextAreaElement>('#mine-sentence')?.value ?? sentence ?? '').trim();
+
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+
+      const result = await chrome.runtime.sendMessage({
+        type: 'MINE_CARD',
+        lemma: mineLemma,
+        reading: mineReading,
+        definition: mineDef,
+        sentence: mineSentence,
+        sourceUrl: window.location.href,
+        languageCode: 'ja',
+      });
+
+      if (result?.cardId) {
+        await this.vocabCache.markLearning(mineLemma);
+        tokenEl.setAttribute('data-status', 'learning');
+        statusEl.textContent = '✓ Saved';
+        statusEl.style.color = '#4caf50';
+        setTimeout(() => this.hidePopup(), 900);
+      } else {
+        statusEl.textContent = result?.error ?? 'Failed to save';
+        statusEl.style.color = '#ef5350';
+        btn.disabled = false;
+        btn.textContent = 'Save card';
+      }
+    });
   }
 
   hidePopup(): void {

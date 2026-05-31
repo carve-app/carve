@@ -3,8 +3,11 @@ package cards
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -52,6 +55,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		LanguageCode    string   `json:"language_code"`
 		Lemma           string   `json:"lemma"`
 		Reading         string   `json:"reading"`
+		BackText        *string  `json:"back_text"`
 		Sentence        *string  `json:"sentence"`
 		SourceURL       *string  `json:"source_url"`
 		SourceTimestamp *float64 `json:"source_timestamp"`
@@ -95,11 +99,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var createdAt time.Time
 	err := h.db.QueryRow(ctx,
 		`INSERT INTO cards
-		    (id, user_id, language_code, front_text, front_reading, sentence, source_url, source_timestamp, fsrs_state)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'new')
+		    (id, user_id, language_code, front_text, front_reading, back_text, sentence, source_url, source_timestamp, fsrs_state)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'new')
 		 RETURNING created_at`,
 		id, claims.UserID, req.LanguageCode, req.Lemma, readingVal,
-		req.Sentence, req.SourceURL, req.SourceTimestamp,
+		req.BackText, req.Sentence, req.SourceURL, req.SourceTimestamp,
 	).Scan(&createdAt)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -223,6 +227,130 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		"limit":  limit,
 		"offset": offset,
 	})
+}
+
+// POST /v1/cards/{id}/media
+// Accepts multipart/form-data with optional 'image' (JPEG) and 'audio' (webm) parts,
+// uploads them to the media service, and stores the resulting URLs on the card.
+func (h *Handler) AttachMedia(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.ClaimsFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	cardID := chi.URLParam(r, "id")
+
+	// Verify ownership
+	var exists bool
+	if err := h.db.QueryRow(r.Context(),
+		`SELECT EXISTS(SELECT 1 FROM cards WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL)`,
+		cardID, claims.UserID,
+	).Scan(&exists); err != nil || !exists {
+		writeError(w, http.StatusNotFound, "card not found")
+		return
+	}
+
+	if err := r.ParseMultipartForm(20 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid multipart form")
+		return
+	}
+
+	mediaBase := os.Getenv("MEDIA_SERVICE_URL")
+	if mediaBase == "" {
+		mediaBase = "http://localhost:8002"
+	}
+
+	var imageURL, audioURL *string
+
+	if f, _, err := r.FormFile("image"); err == nil {
+		defer f.Close()
+		if url, err := uploadToMediaService(mediaBase+"/screenshots", f, "image/jpeg"); err == nil {
+			imageURL = &url
+		} else {
+			slog.Warn("card media: upload image", "error", err)
+		}
+	}
+
+	if f, _, err := r.FormFile("audio"); err == nil {
+		defer f.Close()
+		if url, err := uploadToMediaService(mediaBase+"/audio", f, "audio/webm"); err == nil {
+			audioURL = &url
+		} else {
+			slog.Warn("card media: upload audio", "error", err)
+		}
+	}
+
+	startMs := formInt(r, "subtitle_start_ms")
+	endMs := formInt(r, "subtitle_end_ms")
+	videoSrcURL := r.FormValue("video_source_url")
+	translation := r.FormValue("subtitle_translation")
+
+	_, err := h.db.Exec(r.Context(),
+		`UPDATE cards SET
+			front_image_url       = COALESCE($1, front_image_url),
+			front_audio_url       = COALESCE($2, front_audio_url),
+			video_source_url      = COALESCE(NULLIF($3,''), video_source_url),
+			subtitle_start_ms     = COALESCE($4, subtitle_start_ms),
+			subtitle_end_ms       = COALESCE($5, subtitle_end_ms),
+			subtitle_translation  = COALESCE(NULLIF($6,''), subtitle_translation)
+		 WHERE id = $7 AND user_id = $8`,
+		imageURL, audioURL, videoSrcURL, startMs, endMs, translation, cardID, claims.UserID,
+	)
+	if err != nil {
+		slog.Error("card media: update card", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"image_url": imageURL,
+		"audio_url": audioURL,
+	})
+}
+
+func uploadToMediaService(url string, body io.Reader, contentType string) (string, error) {
+	req, err := http.NewRequest(http.MethodPost, url, body)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", contentType)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("media service %s returned %d", url, resp.StatusCode)
+	}
+
+	var result struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+
+	mediaBase := os.Getenv("MEDIA_SERVICE_URL")
+	if mediaBase == "" {
+		mediaBase = "http://localhost:8002"
+	}
+	return mediaBase + result.URL, nil
+}
+
+func formInt(r *http.Request, field string) *int {
+	v := r.FormValue(field)
+	if v == "" {
+		return nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return nil
+	}
+	return &n
 }
 
 // DELETE /v1/cards/:id

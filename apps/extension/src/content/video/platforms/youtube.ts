@@ -1,81 +1,64 @@
-/// <reference types="chrome" />
-import type { VocabCache } from '../../../nlp/VocabCache';
-import type { PopupManager } from '../../popup/PopupManager';
-import type { Token } from '../../../shared/types';
+import type { SubtitleOverlay } from '../SubtitleOverlay';
+
+const NATIVE_SELECTOR = '.ytp-caption-window-container';
 
 export class YouTubeHook {
-  constructor(
-    private lang: string,
-    private vocabCache: VocabCache,
-    private popupManager: PopupManager,
-  ) {}
+  private observer: MutationObserver | null = null;
+  private lastText = '';
+
+  constructor(private overlay: SubtitleOverlay) {}
 
   mount(): void {
-    const observer = new MutationObserver((mutations) => {
-      for (const m of mutations) {
-        for (const node of Array.from(m.addedNodes)) {
-          if (node.nodeType !== Node.ELEMENT_NODE) continue;
-          const el = node as Element;
-          // Process new caption segments
-          const segments = el.classList.contains('ytp-caption-segment')
-            ? [el]
-            : Array.from(el.querySelectorAll('.ytp-caption-segment'));
-          for (const seg of segments) {
-            this.processSegment(seg);
-          }
-        }
-      }
-    });
+    this.overlay.hideNativeContainer(NATIVE_SELECTOR);
 
-    observer.observe(document.body, { childList: true, subtree: true });
+    this.observer = new MutationObserver(() => this.checkSubtitle());
+    this.observer.observe(document.body, { childList: true, subtree: true, characterData: true });
 
-    // Process any already-present segments
-    document.querySelectorAll('.ytp-caption-segment').forEach((seg) => {
-      this.processSegment(seg);
-    });
+    this.checkSubtitle();
   }
 
-  private async processSegment(segment: Element): Promise<void> {
-    const text = segment.textContent?.trim() ?? '';
-    if (!text) return;
-    if (segment.getAttribute('data-carve-text') === text) return;
-    segment.setAttribute('data-carve-text', text);
+  private checkSubtitle(): void {
+    const segments = document.querySelectorAll<HTMLElement>('.ytp-caption-segment');
+    if (!segments.length) return;
 
-    const response = await chrome.runtime.sendMessage({
-      type: 'TOKENIZE',
-      text,
-      language: this.lang,
-      knownLemmas: this.vocabCache.getKnownLemmas(),
-      learningLemmas: this.vocabCache.getLearningLemmas(),
-    });
+    const text = Array.from(segments)
+      .map(s => s.textContent?.trim() ?? '')
+      .filter(Boolean)
+      .join(' ');
 
-    if (!response?.tokens) return;
+    if (!text || text === this.lastText) return;
+    this.lastText = text;
 
-    segment.setAttribute('data-carve', 'done');
-    segment.innerHTML = '';
+    const { startMs, endMs } = this.getActiveCueTiming();
+    this.overlay.onCue({ text, startMs, endMs });
+  }
 
-    for (const tok of response.tokens as Token[]) {
-      const span = document.createElement('span');
-      span.setAttribute('data-carve', 'token');
-      span.setAttribute('data-lemma', tok.lemma);
-      span.setAttribute('data-reading', tok.reading_hira);
-      span.setAttribute('data-content', tok.is_content_word ? '1' : '0');
-      span.setAttribute(
-        'data-status',
-        tok.is_content_word ? this.vocabCache.getStatus(tok.lemma) : 'function',
-      );
-      if (tok.frequency_rank !== null) {
-        span.setAttribute('data-rank', String(tok.frequency_rank));
+  private getActiveCueTiming(): { startMs: number; endMs: number } {
+    const video = document.querySelector<HTMLVideoElement>('video.html5-main-video, video.video-stream');
+    if (!video) return defaultTiming();
+
+    for (let i = 0; i < video.textTracks.length; i++) {
+      const track = video.textTracks[i];
+      if (track.mode !== 'showing') continue;
+      if (track.activeCues && track.activeCues.length > 0) {
+        const cue = track.activeCues[0] as VTTCue;
+        return {
+          startMs: Math.round(cue.startTime * 1000),
+          endMs: Math.round(cue.endTime * 1000),
+        };
       }
-      span.textContent = tok.surface;
-
-      if (tok.is_content_word) {
-        span.addEventListener('mouseover', () => {
-          this.popupManager.showForElement(span);
-        });
-      }
-
-      segment.appendChild(span);
     }
+    return defaultTiming();
   }
+
+  unmount(): void {
+    this.observer?.disconnect();
+    this.overlay.showNativeContainer(NATIVE_SELECTOR);
+  }
+}
+
+function defaultTiming(): { startMs: number; endMs: number } {
+  const video = document.querySelector<HTMLVideoElement>('video.html5-main-video, video.video-stream');
+  const t = video ? video.currentTime * 1000 : 0;
+  return { startMs: Math.max(0, t - 2000), endMs: t + 2000 };
 }
