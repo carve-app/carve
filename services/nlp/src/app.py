@@ -210,17 +210,12 @@ def tokenize(
         ))
 
     if req.known_lemmas or req.learning_lemmas:
-        # Compute comprehension from content word coverage
-        content = [t for t in raw_tokens if t.is_content_word]
-        known_ct = sum(1 for t in content if t.lemma in known or t.lemma in learning)
-        total = len(content) or 1
-        pct = round(known_ct / total * 100, 1)
-        unknown = total - known_ct
+        scored = score_content(raw_tokens, known, learning)
         return TokenizeResponse(
             tokens=token_outs,
-            comprehension_pct=pct,
-            unknown_count=unknown,
-            recommended_mode="C",
+            comprehension_pct=scored.comprehension_pct,
+            unknown_count=scored.unknown_count,
+            recommended_mode=scored.recommended_mode,
         )
 
     return TokenizeResponse(

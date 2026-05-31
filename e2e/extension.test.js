@@ -175,9 +175,10 @@ async function testRubyPreservation(context, mockBase) {
   const page = await context.newPage();
   await page.goto(`${mockBase}/ruby-test`);
 
-  // Wait for both paragraphs to be annotated
-  await page.waitForSelector('#plain-para [data-carve="token"]', { timeout: 15_000 });
-  await page.waitForSelector('#ruby1 [data-carve="token"]', { timeout: 15_000 });
+  // Wait for both paragraphs to be annotated.
+  // Use state:'attached' because whitespace-only token spans are not 'visible'.
+  await page.waitForSelector('#plain-para [data-carve="token"]', { timeout: 15_000, state: 'attached' });
+  await page.waitForSelector('#ruby1 [data-carve="token"]', { timeout: 15_000, state: 'attached' });
   console.log('[page] both paragraphs annotated');
 
   // ── Ruby base text MUST be annotated (highlighted) ──────────────────────────
