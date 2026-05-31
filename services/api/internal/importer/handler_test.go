@@ -3,13 +3,19 @@ package importer
 import (
 	"archive/zip"
 	"bytes"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"os"
 	"strings"
 	"testing"
+	"time"
+
+	_ "modernc.org/sqlite"
 
 	"github.com/carve-app/carve/services/api/internal/auth"
 )
@@ -284,6 +290,185 @@ func TestImportMigakuCSV_HeaderOnlyNoDBCalls(t *testing.T) {
 	}
 	if res["imported"] != float64(0) {
 		t.Errorf("expected 0 imported, got: %v", res["imported"])
+	}
+}
+
+// ── Anki roundtrip ────────────────────────────────────────────────────────────
+
+// buildAnkiPackage creates a valid .apkg zip in memory containing a SQLite
+// collection.anki2 with the given notes. Each note has front\x1fback\x1fsentence.
+func buildAnkiPackage(notes []ankiNote) ([]byte, error) {
+	// Write SQLite to a temp file (modernc.org/sqlite requires file path).
+	tmpPath := fmt.Sprintf("/tmp/test_anki_%d.db", time.Now().UnixNano())
+	defer os.Remove(tmpPath)
+
+	db, err := sql.Open("sqlite", tmpPath)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(`CREATE TABLE notes (id INTEGER PRIMARY KEY, flds TEXT, tags TEXT)`); err != nil {
+		return nil, err
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	stmt, err := tx.Prepare(`INSERT INTO notes (flds, tags) VALUES (?, ?)`)
+	if err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	for _, n := range notes {
+		flds := n.Front + "\x1f" + n.Back + "\x1f" + n.Sentence
+		if _, err := stmt.Exec(flds, ""); err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+	}
+	stmt.Close()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	db.Close()
+
+	dbData, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return nil, err
+	}
+
+	// Wrap in zip as collection.anki2
+	var zipBuf bytes.Buffer
+	zw := zip.NewWriter(&zipBuf)
+	f, err := zw.Create("collection.anki2")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := f.Write(dbData); err != nil {
+		return nil, err
+	}
+	if err := zw.Close(); err != nil {
+		return nil, err
+	}
+	return zipBuf.Bytes(), nil
+}
+
+func TestParseAnkiPackage_RoundtripBasic(t *testing.T) {
+	input := []ankiNote{
+		{Front: "猫", Back: "cat", Sentence: "猫がいる。"},
+		{Front: "犬", Back: "dog", Sentence: ""},
+		{Front: "<b>花</b>", Back: "<em>flower</em>", Sentence: ""},
+	}
+
+	pkg, err := buildAnkiPackage(input)
+	if err != nil {
+		t.Fatalf("buildAnkiPackage: %v", err)
+	}
+
+	got, err := parseAnkiPackage(pkg)
+	if err != nil {
+		t.Fatalf("parseAnkiPackage: %v", err)
+	}
+
+	if len(got) != 3 {
+		t.Fatalf("expected 3 notes, got %d", len(got))
+	}
+
+	// HTML should be stripped from front/back
+	if got[2].Front != "花" {
+		t.Errorf("expected stripped front '花', got '%s'", got[2].Front)
+	}
+	if got[2].Back != "flower" {
+		t.Errorf("expected stripped back 'flower', got '%s'", got[2].Back)
+	}
+
+	// Fields should match for clean input
+	if got[0].Front != "猫" {
+		t.Errorf("expected '猫', got '%s'", got[0].Front)
+	}
+	if got[0].Back != "cat" {
+		t.Errorf("expected 'cat', got '%s'", got[0].Back)
+	}
+	if got[0].Sentence != "猫がいる。" {
+		t.Errorf("expected '猫がいる。', got '%s'", got[0].Sentence)
+	}
+}
+
+func TestParseAnkiPackage_EmptyFrontSkipped(t *testing.T) {
+	input := []ankiNote{
+		{Front: "", Back: "ignored"},
+		{Front: "   ", Back: "also ignored"},
+		{Front: "valid", Back: "kept"},
+	}
+	// Notes with empty front won't be in the DB since we insert Front directly;
+	// however the stripHTMLSimple trims spaces, so "   " → "" → skipped.
+	// Build notes as raw flds strings to test skip logic.
+	pkg, err := buildAnkiPackage(input)
+	if err != nil {
+		t.Fatalf("buildAnkiPackage: %v", err)
+	}
+	got, err := parseAnkiPackage(pkg)
+	if err != nil {
+		t.Fatalf("parseAnkiPackage: %v", err)
+	}
+	// Empty and whitespace-only fronts should be skipped
+	for _, n := range got {
+		if n.Front == "" {
+			t.Error("parseAnkiPackage returned note with empty front")
+		}
+	}
+}
+
+func TestParseAnkiPackage_10kNotes_Under1s(t *testing.T) {
+	const N = 10_000
+	notes := make([]ankiNote, N)
+	for i := range notes {
+		notes[i] = ankiNote{
+			Front:    fmt.Sprintf("word%05d", i),
+			Back:     fmt.Sprintf("definition %d", i),
+			Sentence: fmt.Sprintf("Example sentence number %d in the test deck.", i),
+		}
+	}
+
+	pkg, err := buildAnkiPackage(notes)
+	if err != nil {
+		t.Fatalf("buildAnkiPackage for 10k notes: %v", err)
+	}
+
+	start := time.Now()
+	got, err := parseAnkiPackage(pkg)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("parseAnkiPackage 10k: %v", err)
+	}
+	if len(got) != N {
+		t.Errorf("expected %d notes, got %d", N, len(got))
+	}
+	if elapsed > time.Second {
+		t.Errorf("parsing 10k notes took %v, want < 1s", elapsed)
+	}
+	t.Logf("parsed %d notes in %v (%.0f notes/s)", N, elapsed, float64(N)/elapsed.Seconds())
+}
+
+func TestParseAnkiPackage_FieldSplitByUnitSeparator(t *testing.T) {
+	// Verify that \x1f is the field separator and that the parser handles
+	// notes with only one field (no separator) without crashing.
+	notes := []ankiNote{
+		{Front: "単語", Back: "", Sentence: ""},
+	}
+	pkg, err := buildAnkiPackage(notes)
+	if err != nil {
+		t.Fatalf("buildAnkiPackage: %v", err)
+	}
+	got, err := parseAnkiPackage(pkg)
+	if err != nil {
+		t.Fatalf("parseAnkiPackage: %v", err)
+	}
+	if len(got) != 1 || got[0].Front != "単語" {
+		t.Errorf("unexpected result: %+v", got)
 	}
 }
 

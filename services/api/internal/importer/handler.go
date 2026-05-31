@@ -77,89 +77,30 @@ func (h *Handler) ImportAnki(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// .apkg is a zip archive containing collection.anki2 (SQLite)
-	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	notes, err := parseAnkiPackage(data)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid .apkg archive")
-		return
-	}
-
-	var dbData []byte
-	for _, f := range zr.File {
-		if f.Name == "collection.anki2" || f.Name == "collection.anki21" {
-			rc, err := f.Open()
-			if err != nil {
-				continue
-			}
-			dbData, _ = io.ReadAll(rc)
-			rc.Close()
-			break
+		if strings.Contains(err.Error(), "invalid .apkg") {
+			writeError(w, http.StatusBadRequest, "invalid .apkg archive")
+		} else if strings.Contains(err.Error(), "no collection") {
+			writeError(w, http.StatusBadRequest, "could not find collection database in .apkg")
+		} else {
+			writeError(w, http.StatusInternalServerError, "internal error")
 		}
-	}
-	if len(dbData) == 0 {
-		writeError(w, http.StatusBadRequest, "could not find collection database in .apkg")
 		return
 	}
-
-	// Write SQLite DB to a temp file (go-sqlite3 requires file path).
-	tmpFile := fmt.Sprintf("/tmp/anki_import_%s_%d.db", claims.UserID, time.Now().UnixNano())
-	if err := writeFile(tmpFile, dbData); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	defer removeFile(tmpFile)
-
-	db, err := sql.Open("sqlite", tmpFile)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not open collection database")
-		return
-	}
-	defer db.Close()
-
-	// Read notes (each note = one card worth of content).
-	rows, err := db.Query(`SELECT flds, tags FROM notes LIMIT 10000`)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "could not read cards from collection")
-		return
-	}
-	defer rows.Close()
 
 	ctx := r.Context()
 	imported := 0
 	skipped := 0
 
-	for rows.Next() {
-		var flds, tags string
-		if err := rows.Scan(&flds, &tags); err != nil {
-			continue
-		}
-
-		// Anki field separator is \x1f (Unit Separator).
-		fields := strings.Split(flds, "\x1f")
-		if len(fields) == 0 {
-			skipped++
-			continue
-		}
-
-		front := stripHTMLSimple(fields[0])
-		if front == "" {
-			skipped++
-			continue
-		}
-
+	for _, note := range notes {
 		var backPtr *string
-		if len(fields) > 1 {
-			back := stripHTMLSimple(fields[1])
-			if back != "" {
-				backPtr = &back
-			}
+		if note.Back != "" {
+			backPtr = &note.Back
 		}
 		var sentencePtr *string
-		if len(fields) > 2 {
-			sentence := stripHTMLSimple(fields[2])
-			if sentence != "" {
-				sentencePtr = &sentence
-			}
+		if note.Sentence != "" {
+			sentencePtr = &note.Sentence
 		}
 
 		id := auth.NewID()
@@ -168,10 +109,10 @@ func (h *Handler) ImportAnki(w http.ResponseWriter, r *http.Request) {
 			    (id, user_id, language_code, front_text, back_text, sentence, fsrs_state)
 			 VALUES ($1, $2, $3, $4, $5, $6, 'new')
 			 ON CONFLICT DO NOTHING`,
-			id, claims.UserID, language, front, backPtr, sentencePtr,
+			id, claims.UserID, language, note.Front, backPtr, sentencePtr,
 		)
 		if err != nil {
-			slog.Warn("anki import: insert card", "error", err, "front", front)
+			slog.Warn("anki import: insert card", "error", err, "front", note.Front)
 			skipped++
 			continue
 		}
@@ -456,6 +397,81 @@ func (h *Handler) ImportJPDBCSV(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+// ankiNote holds the parsed fields from a single Anki note row.
+type ankiNote struct {
+	Front    string
+	Back     string
+	Sentence string
+}
+
+// parseAnkiPackage extracts notes from an .apkg byte slice without touching the DB.
+// It writes the embedded SQLite to a temp file, queries notes, and returns them.
+func parseAnkiPackage(data []byte) ([]ankiNote, error) {
+	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, fmt.Errorf("invalid .apkg archive: %w", err)
+	}
+
+	var dbData []byte
+	for _, f := range zr.File {
+		if f.Name == "collection.anki2" || f.Name == "collection.anki21" {
+			rc, err := f.Open()
+			if err != nil {
+				continue
+			}
+			dbData, _ = io.ReadAll(rc)
+			rc.Close()
+			break
+		}
+	}
+	if len(dbData) == 0 {
+		return nil, fmt.Errorf("no collection database found in .apkg")
+	}
+
+	tmpFile := fmt.Sprintf("/tmp/anki_parse_%d.db", time.Now().UnixNano())
+	if err := writeFile(tmpFile, dbData); err != nil {
+		return nil, fmt.Errorf("write temp file: %w", err)
+	}
+	defer removeFile(tmpFile)
+
+	db, err := sql.Open("sqlite", tmpFile)
+	if err != nil {
+		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`SELECT flds, tags FROM notes LIMIT 10000`)
+	if err != nil {
+		return nil, fmt.Errorf("query notes: %w", err)
+	}
+	defer rows.Close()
+
+	var notes []ankiNote
+	for rows.Next() {
+		var flds, tags string
+		if err := rows.Scan(&flds, &tags); err != nil {
+			continue
+		}
+		fields := strings.Split(flds, "\x1f")
+		if len(fields) == 0 {
+			continue
+		}
+		front := stripHTMLSimple(fields[0])
+		if front == "" {
+			continue
+		}
+		var back, sentence string
+		if len(fields) > 1 {
+			back = stripHTMLSimple(fields[1])
+		}
+		if len(fields) > 2 {
+			sentence = stripHTMLSimple(fields[2])
+		}
+		notes = append(notes, ankiNote{Front: front, Back: back, Sentence: sentence})
+	}
+	return notes, rows.Err()
+}
 
 func stripHTMLSimple(s string) string {
 	var sb strings.Builder

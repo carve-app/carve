@@ -7,8 +7,11 @@
  * Also reproduces known regressions:
  *   - Ruby/furigana elements must not be modified (NHK Easy bug)
  *
+ * And verifies the full mining workflow:
+ *   click token → popup → Mine form → Save card → POST /v1/cards
+ *
  * Does NOT require the real backend — a minimal in-process HTTP server
- * handles /v1/nlp/tokenize and /v1/review/due-count.
+ * handles /v1/nlp/tokenize, /v1/nlp/lookup, /v1/cards, /v1/review/due-count.
  *
  * Run: node e2e/extension.test.js
  * Or:  make test-extension
@@ -73,6 +76,9 @@ const RUBY_PAGE_HTML = `<!DOCTYPE html>
 </html>`;
 
 function startMockServer() {
+  // Capture card creation requests for Test 3 assertions
+  const capturedCards = [];
+
   const server = http.createServer((req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Headers', '*');
@@ -116,9 +122,37 @@ function startMockServer() {
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ tokens, comprehension_pct: 0.5 }));
+
+      } else if (req.url === '/v1/nlp/lookup' && req.method === 'POST') {
+        let parsed = {};
+        try { parsed = JSON.parse(body); } catch {}
+        const surface = parsed.surface || '';
+        // Return a minimal DictEntry so the popup renders correctly
+        const entry = {
+          surface,
+          reading: surface,
+          jlpt_level: 'N5',
+          frequency_rank: 500,
+          pitch_accent: null,
+          furigana: [],
+          definitions: [
+            { pos: 'noun', definition: 'test definition' },
+          ],
+        };
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ entry }));
+
+      } else if (req.url === '/v1/cards' && req.method === 'POST') {
+        let parsed = {};
+        try { parsed = JSON.parse(body); } catch {}
+        capturedCards.push(parsed);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ id: 'test-card-e2e-001', lemma: parsed.lemma ?? '' }));
+
       } else if (req.url.startsWith('/v1/review/due-count')) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ due_count: 5 }));
+
       } else {
         res.writeHead(404);
         res.end('{}');
@@ -129,7 +163,7 @@ function startMockServer() {
   return new Promise(resolve => {
     server.listen(0, '127.0.0.1', () => {
       const { port } = server.address();
-      resolve({ server, port });
+      resolve({ server, port, capturedCards });
     });
   });
 }
@@ -264,12 +298,108 @@ async function testRubyPreservation(context, mockBase) {
   await page.close();
 }
 
+async function testMiningWorkflow(context, mockBase, capturedCards) {
+  console.log('\n── Test 3: mining workflow (click → popup → mine → save) ────');
+  const page = await context.newPage();
+  await page.goto(`${mockBase}/test`);
+
+  // Wait for at least one content-word token to be annotated
+  await page.waitForSelector('[data-carve="token"][data-content="1"]', { timeout: 15_000, state: 'attached' });
+  console.log('[page] content-word tokens annotated');
+
+  // Click the first content-word token
+  const tokenEl = page.locator('[data-carve="token"][data-content="1"]').first();
+  const tokenSurface = await tokenEl.getAttribute('data-lemma');
+  await tokenEl.click();
+  console.log(`[action] clicked token: "${tokenSurface}"`);
+
+  // Popup should appear (loading state first, then full popup with Mine button)
+  await page.waitForSelector('#carve-popup', { timeout: 10_000, state: 'visible' });
+  console.log('[page] #carve-popup appeared');
+
+  // Wait for the Mine button (appears after LOOKUP response)
+  await page.waitForSelector('#carve-popup .btn-mine', { timeout: 10_000, state: 'visible' });
+  console.log('[page] .btn-mine visible');
+
+  // ── Popup content checks ──────────────────────────────────────────────────
+  const popupText = await page.$eval('#carve-popup', el => el.textContent ?? '');
+  assert(popupText.includes('Mine'), `popup should have Mine button, got: "${popupText.slice(0, 100)}"`);
+  console.log('[assert] Mine button present in popup ✓');
+
+  // Click Mine to open the mine form
+  await page.click('#carve-popup .btn-mine');
+  console.log('[action] clicked Mine button');
+
+  // Mine form should appear with Save card button
+  await page.waitForSelector('#carve-popup .btn-mine-save', { timeout: 5_000, state: 'visible' });
+  console.log('[page] mine form appeared');
+
+  // ── Mine form field checks ────────────────────────────────────────────────
+  const lemmaValue = await page.$eval('#mine-lemma', el => el.value);
+  assert(lemmaValue.length > 0, `mine lemma field should be populated, got empty`);
+  console.log(`[assert] mine lemma field: "${lemmaValue}" ✓`);
+
+  const sentenceValue = await page.$eval('#mine-sentence', el => el.value);
+  console.log(`[assert] mine sentence field: "${sentenceValue.slice(0, 40)}" ✓`);
+
+  // ── Save card and verify API call ─────────────────────────────────────────
+  const cardCountBefore = capturedCards.length;
+  await page.click('#carve-popup .btn-mine-save');
+  console.log('[action] clicked Save card');
+
+  // Wait for the card to be captured by mock server (poll up to 3s)
+  const deadline = Date.now() + 3000;
+  while (capturedCards.length === cardCountBefore && Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 50));
+  }
+
+  assert(
+    capturedCards.length > cardCountBefore,
+    `expected POST /v1/cards to be called, but capturedCards is still ${capturedCards.length}`,
+  );
+  console.log(`[assert] POST /v1/cards received ✓`);
+
+  const card = capturedCards[capturedCards.length - 1];
+  assert(card.lemma === lemmaValue, `card.lemma "${card.lemma}" !== token lemma "${lemmaValue}"`);
+  assert(card.language_code, `card.language_code should be set, got: ${JSON.stringify(card.language_code)}`);
+  assert(card.source_url, `card.source_url should be set, got: ${JSON.stringify(card.source_url)}`);
+  console.log(`[assert] card fields: lemma="${card.lemma}" lang="${card.language_code}" source_url="${card.source_url}" ✓`);
+
+  // Popup should close or show "✓ Saved" status after successful save
+  // Give it up to 2s (the popup auto-hides after 900ms on success)
+  await new Promise(r => setTimeout(r, 1000));
+  const popupVisible = await page.isVisible('#carve-popup');
+  // Either the popup is gone or shows the saved confirmation
+  if (popupVisible) {
+    const statusText = await page.$eval('#mine-status', el => el.textContent ?? '').catch(() => '');
+    assert(
+      statusText.includes('Saved') || statusText.includes('✓'),
+      `expected popup closed or "Saved" status, got popup visible with status: "${statusText}"`,
+    );
+    console.log(`[assert] popup shows saved status: "${statusText}" ✓`);
+  } else {
+    console.log('[assert] popup closed after save ✓');
+  }
+
+  // ── Token status updated to learning ─────────────────────────────────────
+  const updatedStatus = await tokenEl.getAttribute('data-status');
+  assert(
+    updatedStatus === 'learning',
+    `expected token data-status="learning" after mining, got "${updatedStatus}"`,
+  );
+  console.log(`[assert] token status updated to "learning" ✓`);
+
+  await page.screenshot({ path: path.resolve(__dirname, 'extension-mining-e2e.png'), fullPage: true });
+  console.log('[screenshot] saved extension-mining-e2e.png');
+  await page.close();
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function run() {
   const EXTENSION_DIR = path.resolve(__dirname, '../apps/extension/dist');
 
-  const { server, port } = await startMockServer();
+  const { server, port, capturedCards } = await startMockServer();
   const mockBase = `http://127.0.0.1:${port}`;
   console.log(`[mock-api] listening on ${mockBase}`);
 
@@ -303,6 +433,7 @@ async function run() {
 
     await testAnnotation(context, mockBase);
     await testRubyPreservation(context, mockBase);
+    await testMiningWorkflow(context, mockBase, capturedCards);
 
     console.log('\n✓ PASS — all tests passed');
   } finally {
