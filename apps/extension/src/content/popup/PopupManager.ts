@@ -186,6 +186,17 @@ export class PopupManager {
     const escapedDef = escapeHtml(topDef);
     const escapedSentence = escapeHtml(sentence ?? '');
 
+    // Kick off translation in background — will fill in async
+    if (sentence) {
+      chrome.runtime.sendMessage({ type: 'TRANSLATE', text: sentence, sourceLanguage: 'ja' })
+        .then((result) => {
+          const t = result?.translation as string | null;
+          const el = popup.querySelector<HTMLInputElement>('#mine-translation');
+          if (el && t) el.value = t;
+        })
+        .catch(() => {/* optional field — ignore */});
+    }
+
     popup.innerHTML = `
       <div class="carve-mine-form">
         <div class="carve-mine-title">Add card</div>
@@ -197,6 +208,8 @@ export class PopupManager {
         <input class="carve-mine-input" id="mine-def" value="${escapedDef}" />
         <label>Sentence</label>
         <textarea class="carve-mine-input" id="mine-sentence" rows="2">${escapedSentence}</textarea>
+        <label>Translation <span style="color:#4a5568">(auto-filling…)</span></label>
+        <input class="carve-mine-input" id="mine-translation" placeholder="Fetching translation…" />
         <label>Notes <span style="color:#4a5568">(optional)</span></label>
         <input class="carve-mine-input" id="mine-notes" placeholder="Add a note…" />
         <div class="carve-mine-actions">
@@ -219,6 +232,7 @@ export class PopupManager {
       const mineReading = (popup.querySelector<HTMLInputElement>('#mine-reading')?.value ?? reading).trim();
       const mineDef = (popup.querySelector<HTMLInputElement>('#mine-def')?.value ?? topDef).trim();
       const mineSentence = (popup.querySelector<HTMLTextAreaElement>('#mine-sentence')?.value ?? sentence ?? '').trim();
+      const mineTranslation = (popup.querySelector<HTMLInputElement>('#mine-translation')?.value ?? '').trim();
 
       btn.disabled = true;
       btn.textContent = 'Saving…';
@@ -228,16 +242,27 @@ export class PopupManager {
         lemma: mineLemma,
         reading: mineReading,
         definition: mineDef,
+        translation: mineTranslation,
         sentence: mineSentence,
         sourceUrl: window.location.href,
         languageCode: 'ja',
       });
+
+      const isVideoPage = /netflix\.com\/watch|youtube\.com\/watch|youtu\.be\//.test(window.location.href);
 
       if (result?.cardId) {
         await this.vocabCache.markLearning(mineLemma);
         tokenEl.setAttribute('data-status', 'learning');
         statusEl.textContent = '✓ Saved';
         statusEl.style.color = '#4caf50';
+
+        if (!isVideoPage) {
+          chrome.runtime.sendMessage({
+            type: 'ATTACH_PAGE_SCREENSHOT',
+            cardId: result.cardId,
+          }).catch(() => {/* non-fatal */});
+        }
+
         setTimeout(() => this.hidePopup(), 900);
       } else {
         statusEl.textContent = result?.error ?? 'Failed to save';

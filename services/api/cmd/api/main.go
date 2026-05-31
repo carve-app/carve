@@ -106,6 +106,7 @@ func main() {
 		// Cards
 		r.Post("/cards", cardsHandler.Create)
 		r.Get("/cards", cardsHandler.List)
+		r.Get("/cards/{id}", cardsHandler.Get)
 		r.Delete("/cards/{id}", cardsHandler.Delete)
 		r.Post("/cards/{id}/media", cardsHandler.AttachMedia)
 
@@ -171,6 +172,7 @@ func main() {
 		r.Post("/tokenize", nlpProxy.Tokenize)
 		r.Post("/lookup", nlpProxy.Lookup)
 		r.Post("/score-content", nlpProxy.ScoreContent)
+		r.Post("/translate", nlpProxy.Translate)
 	})
 
 	port := os.Getenv("PORT")

@@ -17,6 +17,9 @@ importers:
       '@types/chrome':
         specifier: ^0.0.320
         version: 0.0.320
+      '@types/node':
+        specifier: ^25.9.1
+        version: 25.9.1
       typescript:
         specifier: ^5.8.0
         version: 5.9.3

@@ -401,3 +401,57 @@ def score_text(
         recommended_mode=s.recommended_mode,
         top_unknown_lemmas=s.top_unknown_lemmas,
     )
+
+
+class TranslateRequest(BaseModel):
+    text: str
+    source_language: str = "ja"
+    target_language: str = "en"
+
+
+class TranslateResponse(BaseModel):
+    translation: str | None = None
+    source_language: str
+    target_language: str
+
+
+@app.post("/translate", response_model=TranslateResponse)
+def translate(
+    req: TranslateRequest,
+    x_internal_secret: Annotated[str | None, Header()] = None,
+) -> TranslateResponse:
+    """
+    Translate a sentence.  Currently returns the top-3 definitions of each
+    content word as a gloss — a lightweight placeholder until a proper MT
+    service (DeepL / Google / Claude) is wired up.
+    """
+    _check_auth(x_internal_secret)
+
+    if not req.text.strip():
+        return TranslateResponse(
+            translation=None,
+            source_language=req.source_language,
+            target_language=req.target_language,
+        )
+
+    # Build a word-gloss from the dictionary for Japanese text
+    gloss_parts: list[str] = []
+    if req.source_language == "ja":
+        result = _ja_tokenizer.tokenize(req.text)
+        for tok in result.tokens:
+            if not tok.is_content_word:
+                continue
+            entry = _dict_service.lookup(tok.lemma, req.source_language)
+            if entry and entry.definitions:
+                top_def = entry.definitions[0].definition
+                gloss_parts.append(f"{tok.surface}[{top_def}]")
+        translation = " ".join(gloss_parts) if gloss_parts else None
+    else:
+        # Other languages: no MT yet
+        translation = None
+
+    return TranslateResponse(
+        translation=translation,
+        source_language=req.source_language,
+        target_language=req.target_language,
+    )

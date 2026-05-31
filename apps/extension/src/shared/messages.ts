@@ -4,7 +4,7 @@ import type { CachedReviewCard } from './storage';
 export type Message =
   | { type: 'TOKENIZE'; text: string; language: string; knownLemmas: string[]; learningLemmas: string[] }
   | { type: 'LOOKUP'; surface: string; language: string }
-  | { type: 'MINE_CARD'; lemma: string; reading: string; definition?: string; sentence: string; sourceUrl: string; languageCode: string }
+  | { type: 'MINE_CARD'; lemma: string; reading: string; definition?: string; translation?: string; sentence: string; sourceUrl: string; languageCode: string }
   | { type: 'IGNORE_WORD'; lemma: string; languageCode: string }
   | { type: 'LOG_IMMERSION'; languageCode: string; sessionType: string; durationSec: number; startedAt: string; url: string }
   | { type: 'GET_AUTH_STATE' }
@@ -14,7 +14,9 @@ export type Message =
   | { type: 'SET_SITE_ENABLED'; enabled: boolean }
   | { type: 'GET_COMPREHENSION' }
   | { type: 'SET_OVERLAY'; enabled: boolean }
-  | { type: 'CAPTURE_SCREENSHOT'; cardId?: string };
+  | { type: 'CAPTURE_SCREENSHOT'; cardId?: string }
+  | { type: 'ATTACH_PAGE_SCREENSHOT'; cardId: string }
+  | { type: 'TRANSLATE'; text: string; sourceLanguage: string };
 
 export type MessageResponse =
   | { type: 'TOKENIZE_RESULT'; tokens: Token[]; comprehension_pct: number | null }
@@ -26,4 +28,6 @@ export type MessageResponse =
   | { type: 'DUE_COUNT'; count: number }
   | { type: 'CACHED_REVIEW_CARDS'; cards: CachedReviewCard[] }
   | { type: 'COMPREHENSION_RESULT'; pct: number | null; total: number }
-  | { type: 'SCREENSHOT_RESULT'; success: boolean; url?: string; error?: string };
+  | { type: 'SCREENSHOT_RESULT'; success: boolean; url?: string; error?: string }
+  | { type: 'ATTACH_SCREENSHOT_RESULT'; success: boolean }
+  | { type: 'TRANSLATE_RESULT'; translation: string | null };

@@ -52,13 +52,14 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		LanguageCode    string   `json:"language_code"`
-		Lemma           string   `json:"lemma"`
-		Reading         string   `json:"reading"`
-		BackText        *string  `json:"back_text"`
-		Sentence        *string  `json:"sentence"`
-		SourceURL       *string  `json:"source_url"`
-		SourceTimestamp *float64 `json:"source_timestamp"`
+		LanguageCode        string   `json:"language_code"`
+		Lemma               string   `json:"lemma"`
+		Reading             string   `json:"reading"`
+		BackText            *string  `json:"back_text"`
+		SubtitleTranslation *string  `json:"subtitle_translation"`
+		Sentence            *string  `json:"sentence"`
+		SourceURL           *string  `json:"source_url"`
+		SourceTimestamp     *float64 `json:"source_timestamp"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
@@ -99,11 +100,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var createdAt time.Time
 	err := h.db.QueryRow(ctx,
 		`INSERT INTO cards
-		    (id, user_id, language_code, front_text, front_reading, back_text, sentence, source_url, source_timestamp, fsrs_state)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'new')
+		    (id, user_id, language_code, front_text, front_reading, back_text, subtitle_translation, sentence, source_url, source_timestamp, fsrs_state)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'new')
 		 RETURNING created_at`,
 		id, claims.UserID, req.LanguageCode, req.Lemma, readingVal,
-		req.BackText, req.Sentence, req.SourceURL, req.SourceTimestamp,
+		req.BackText, req.SubtitleTranslation, req.Sentence, req.SourceURL, req.SourceTimestamp,
 	).Scan(&createdAt)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -227,6 +228,62 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		"limit":  limit,
 		"offset": offset,
 	})
+}
+
+// GET /v1/cards/{id}
+func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.ClaimsFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	cardID := chi.URLParam(r, "id")
+
+	var c struct {
+		ID                  string     `json:"id"`
+		LanguageCode        string     `json:"language_code"`
+		FrontText           string     `json:"front_text"`
+		BackText            *string    `json:"back_text"`
+		Sentence            *string    `json:"sentence"`
+		Translation         *string    `json:"subtitle_translation"`
+		SourceURL           *string    `json:"source_url"`
+		VideoSourceURL      *string    `json:"video_source_url"`
+		FrontAudioURL       *string    `json:"audio_url"`
+		FrontImageURL       *string    `json:"image_url"`
+		SubtitleStartMs     *int       `json:"subtitle_start_ms"`
+		SubtitleEndMs       *int       `json:"subtitle_end_ms"`
+		FsrsState           string     `json:"fsrs_state"`
+		FsrsDue             *time.Time `json:"fsrs_due"`
+		FsrsStability       *float64   `json:"stability"`
+		FsrsDifficulty      *float64   `json:"difficulty"`
+		FsrsReps            int        `json:"reps"`
+		FsrsLapses          int        `json:"lapses"`
+		CreatedAt           time.Time  `json:"created_at"`
+	}
+
+	err := h.db.QueryRow(r.Context(),
+		`SELECT id, language_code, front_text, back_text, sentence, subtitle_translation,
+		        source_url, video_source_url, front_audio_url, front_image_url,
+		        subtitle_start_ms, subtitle_end_ms,
+		        fsrs_state, fsrs_due, fsrs_stability, fsrs_difficulty, fsrs_reps, fsrs_lapses,
+		        created_at
+		 FROM cards
+		 WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
+		cardID, claims.UserID,
+	).Scan(
+		&c.ID, &c.LanguageCode, &c.FrontText, &c.BackText, &c.Sentence, &c.Translation,
+		&c.SourceURL, &c.VideoSourceURL, &c.FrontAudioURL, &c.FrontImageURL,
+		&c.SubtitleStartMs, &c.SubtitleEndMs,
+		&c.FsrsState, &c.FsrsDue, &c.FsrsStability, &c.FsrsDifficulty, &c.FsrsReps, &c.FsrsLapses,
+		&c.CreatedAt,
+	)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "card not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, c)
 }
 
 // POST /v1/cards/{id}/media

@@ -73,19 +73,21 @@
     <ul class="card-list">
       {#each cards as card (card.id)}
         <li class="card">
-          <div class="card-top">
-            <span class="lemma">{card.front_text}</span>
-            <span class="badge badge-{card.fsrs_state}">
-              {STATE_LABELS[card.fsrs_state] ?? card.fsrs_state}
-            </span>
-          </div>
-          {#if card.back_text}
-            <p class="back-text">{card.back_text}</p>
-          {/if}
-          {#if card.sentence}
-            <p class="sentence">{card.sentence}</p>
-          {/if}
-          <p class="date">{relativeDate(card.created_at)}</p>
+          <a href="/cards/{card.id}" class="card-link">
+            <div class="card-top">
+              <span class="lemma">{card.front_text}</span>
+              <span class="badge badge-{card.fsrs_state}">
+                {STATE_LABELS[card.fsrs_state] ?? card.fsrs_state}
+              </span>
+            </div>
+            {#if card.back_text}
+              <p class="back-text">{card.back_text}</p>
+            {/if}
+            {#if card.sentence}
+              <p class="sentence">{card.sentence}</p>
+            {/if}
+            <p class="date">{relativeDate(card.created_at)}</p>
+          </a>
         </li>
       {/each}
     </ul>
@@ -126,8 +128,16 @@
   .card {
     background: #1e2128;
     border-radius: 8px;
-    padding: 1rem 1.25rem;
     border: 1px solid #2a2d36;
+    transition: border-color 0.15s;
+  }
+  .card:hover { border-color: #4a5568; }
+
+  .card-link {
+    display: block;
+    padding: 1rem 1.25rem;
+    text-decoration: none;
+    color: inherit;
   }
 
   .card-top { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.4rem; }

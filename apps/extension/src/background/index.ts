@@ -1,6 +1,6 @@
 /// <reference types="chrome" />
-import { nlpTokenize, nlpLookup, createCard, logImmersion, getDueCount, getReviewSession, submitReviewEvent } from '../shared/api';
-import { getAccessToken, storageGet, storageSet, type OfflineReviewEvent, type CachedReviewCard } from '../shared/storage';
+import { nlpTokenize, nlpLookup, createCard, logImmersion, getDueCount, getReviewSession, submitReviewEvent, translateText } from '../shared/api';
+import { getAccessToken, getApiBaseUrl, storageGet, storageSet, type OfflineReviewEvent, type CachedReviewCard } from '../shared/storage';
 import type { Message, MessageResponse } from '../shared/messages';
 
 // Handle messages from content scripts
@@ -73,6 +73,7 @@ async function handleMessage(msg: Message): Promise<MessageResponse> {
           lemma: msg.lemma,
           reading: msg.reading,
           definition: msg.definition,
+          translation: msg.translation,
           sentence: msg.sentence,
           source_url: msg.sourceUrl,
         });
@@ -131,6 +132,41 @@ async function handleMessage(msg: Message): Promise<MessageResponse> {
       // Try immediate sync; if offline it stays queued
       syncOfflineQueue().catch(() => {});
       return { type: 'MINE_CARD_RESULT', success: true };
+    }
+
+    case 'TRANSLATE': {
+      try {
+        const result = await translateText(msg.text, msg.sourceLanguage);
+        return { type: 'TRANSLATE_RESULT', translation: result.translation ?? null };
+      } catch {
+        return { type: 'TRANSLATE_RESULT', translation: null };
+      }
+    }
+
+    case 'ATTACH_PAGE_SCREENSHOT': {
+      try {
+        const dataUrl: string = await new Promise((resolve, reject) => {
+          chrome.tabs.captureVisibleTab({ format: 'jpeg', quality: 80 }, (url) => {
+            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+            else resolve(url);
+          });
+        });
+        const blob = dataURLToBlob(dataUrl);
+        const base = await getApiBaseUrl();
+        const token = await getAccessToken();
+        if (!token) return { type: 'ATTACH_SCREENSHOT_RESULT', success: false };
+
+        const form = new FormData();
+        form.append('image', blob, 'screenshot.jpg');
+        const resp = await fetch(`${base}/v1/cards/${msg.cardId}/media`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+          body: form,
+        });
+        return { type: 'ATTACH_SCREENSHOT_RESULT', success: resp.ok };
+      } catch {
+        return { type: 'ATTACH_SCREENSHOT_RESULT', success: false };
+      }
     }
 
     case 'CAPTURE_SCREENSHOT': {

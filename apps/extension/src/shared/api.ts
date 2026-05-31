@@ -73,14 +73,20 @@ export async function createCard(params: {
   lemma: string;
   reading?: string;
   definition?: string;
+  translation?: string;
   sentence?: string;
   source_url?: string;
 }): Promise<{ id: string; lemma: string }> {
   const response = await apiFetch('/v1/cards', {
     method: 'POST',
     body: JSON.stringify({
-      ...params,
+      language_code: params.language_code,
+      lemma: params.lemma,
+      reading: params.reading,
       back_text: params.definition,
+      subtitle_translation: params.translation,
+      sentence: params.sentence,
+      source_url: params.source_url,
     }),
   });
   return response.json();
@@ -117,6 +123,21 @@ export async function logImmersion(params: {
     method: 'POST',
     body: JSON.stringify(params),
   });
+}
+
+/**
+ * Translate text via the NLP API.
+ */
+export async function translateText(
+  text: string,
+  sourceLanguage = 'ja',
+  targetLanguage = 'en',
+): Promise<{ translation: string | null }> {
+  const response = await apiFetch('/v1/nlp/translate', {
+    method: 'POST',
+    body: JSON.stringify({ text, source_language: sourceLanguage, target_language: targetLanguage }),
+  });
+  return response.json();
 }
 
 /**

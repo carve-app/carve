@@ -90,3 +90,9 @@ func (p *Proxy) Lookup(w http.ResponseWriter, r *http.Request) {
 func (p *Proxy) ScoreContent(w http.ResponseWriter, r *http.Request) {
 	p.forward(w, r, "/score-text")
 }
+
+// POST /v1/nlp/translate — proxies to NLP /translate.
+// Returns {translation: null} if the upstream is unavailable.
+func (p *Proxy) Translate(w http.ResponseWriter, r *http.Request) {
+	p.forward(w, r, "/translate")
+}

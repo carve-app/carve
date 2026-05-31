@@ -210,6 +210,32 @@ export async function subscribeStarterDeck(language: string): Promise<{ deck_id?
 
 // ── Cards ─────────────────────────────────────────────────────────────────────
 
+export interface CardDetail {
+  id: string;
+  language_code: string;
+  front_text: string;
+  back_text: string | null;
+  sentence: string | null;
+  subtitle_translation: string | null;
+  source_url: string | null;
+  video_source_url: string | null;
+  audio_url: string | null;
+  image_url: string | null;
+  subtitle_start_ms: number | null;
+  subtitle_end_ms: number | null;
+  fsrs_state: FsrsState;
+  fsrs_due: string | null;
+  stability: number | null;
+  difficulty: number | null;
+  reps: number;
+  lapses: number;
+  created_at: string;
+}
+
+export async function fetchCard(id: string): Promise<CardDetail> {
+  return apiFetch<CardDetail>(`/v1/cards/${id}`);
+}
+
 export async function fetchCards(language = 'ja', limit = 50): Promise<CardsResponse> {
   const params = new URLSearchParams({ language, limit: String(limit) });
   return apiFetch<CardsResponse>(`/v1/cards?${params}`);

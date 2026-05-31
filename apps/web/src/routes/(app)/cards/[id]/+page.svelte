@@ -1,0 +1,284 @@
+<script lang="ts">
+  import { onMount } from 'svelte';
+  import { page } from '$app/stores';
+  import { goto } from '$app/navigation';
+  import { fetchCard, apiFetch, type CardDetail } from '$lib/api';
+  import { toasts } from '$lib/stores/toast';
+
+  let card: CardDetail | null = null;
+  let loading = true;
+  let deleting = false;
+
+  const STATE_LABELS: Record<string, string> = {
+    new: 'New', learning: 'Learning', review: 'Review', relearning: 'Re-learning',
+  };
+
+  onMount(async () => {
+    const id = $page.params.id;
+    try {
+      card = await fetchCard(id);
+    } catch {
+      toasts.add('Card not found');
+      goto('/cards');
+    }
+    loading = false;
+  });
+
+  async function deleteCard() {
+    if (!card) return;
+    deleting = true;
+    try {
+      await apiFetch(`/v1/cards/${card.id}`, { method: 'DELETE' });
+      goto('/cards');
+    } catch (err) {
+      toasts.add(err instanceof Error ? err.message : 'Delete failed');
+      deleting = false;
+    }
+  }
+
+  function playAudio() {
+    (document.getElementById('detail-audio') as HTMLAudioElement | null)?.play();
+  }
+
+  function formatMs(ms: number | null): string {
+    if (ms == null) return '—';
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const rem = s % 60;
+    return `${m}:${String(rem).padStart(2, '0')}`;
+  }
+
+  function relativeDate(iso: string): string {
+    const diff = Date.now() - new Date(iso).getTime();
+    const days = Math.floor(diff / 86_400_000);
+    if (days === 0) return 'today';
+    if (days === 1) return 'yesterday';
+    if (days < 30) return `${days} days ago`;
+    return new Date(iso).toLocaleDateString();
+  }
+</script>
+
+<main>
+  {#if loading}
+    <p class="msg">Loading…</p>
+
+  {:else if card}
+    <div class="header">
+      <a href="/cards" class="back">← Cards</a>
+      <span class="badge badge-{card.fsrs_state}">{STATE_LABELS[card.fsrs_state] ?? card.fsrs_state}</span>
+    </div>
+
+    <div class="card-hero">
+      <div class="front-word">{card.front_text}</div>
+      {#if card.audio_url}
+        <audio id="detail-audio" src={card.audio_url} preload="auto"></audio>
+        <button class="audio-btn" on:click={playAudio} title="Play audio">▶ Play</button>
+      {/if}
+    </div>
+
+    {#if card.image_url}
+      <img class="context-img" src={card.image_url} alt="context screenshot" />
+    {/if}
+
+    <div class="fields">
+      {#if card.back_text}
+        <div class="field">
+          <div class="field-label">Definition</div>
+          <div class="field-value">{card.back_text}</div>
+        </div>
+      {/if}
+
+      {#if card.sentence}
+        <div class="field">
+          <div class="field-label">Sentence</div>
+          <div class="field-value sentence">{card.sentence}</div>
+        </div>
+      {/if}
+
+      {#if card.subtitle_translation}
+        <div class="field">
+          <div class="field-label">Translation</div>
+          <div class="field-value translation">{card.subtitle_translation}</div>
+        </div>
+      {/if}
+
+      {#if card.source_url || card.video_source_url}
+        <div class="field">
+          <div class="field-label">Source</div>
+          <div class="field-value">
+            <a href={card.video_source_url ?? card.source_url ?? '#'} target="_blank" rel="noopener" class="source-link">
+              {card.video_source_url ?? card.source_url}
+            </a>
+          </div>
+        </div>
+      {/if}
+
+      {#if card.subtitle_start_ms != null}
+        <div class="field">
+          <div class="field-label">Timestamp</div>
+          <div class="field-value">{formatMs(card.subtitle_start_ms)} – {formatMs(card.subtitle_end_ms)}</div>
+        </div>
+      {/if}
+
+      <div class="field">
+        <div class="field-label">SRS stats</div>
+        <div class="field-value meta-row">
+          <span>Reps: {card.reps}</span>
+          <span>Lapses: {card.lapses}</span>
+          {#if card.stability != null}
+            <span>Stability: {card.stability.toFixed(1)}d</span>
+          {/if}
+          {#if card.difficulty != null}
+            <span>Difficulty: {card.difficulty.toFixed(2)}</span>
+          {/if}
+        </div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">Added</div>
+        <div class="field-value">{relativeDate(card.created_at)}</div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="btn-danger" on:click={deleteCard} disabled={deleting}>
+        {deleting ? 'Deleting…' : 'Delete card'}
+      </button>
+    </div>
+  {/if}
+</main>
+
+<style>
+  main { max-width: 640px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+
+  .msg { color: #9ba8c0; text-align: center; margin-top: 3rem; }
+
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .back {
+    color: #9ba8c0;
+    text-decoration: none;
+    font-size: 0.9rem;
+  }
+  .back:hover { color: #e8eaf0; }
+
+  .badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .badge-new        { background: #263851; color: #64b5f6; }
+  .badge-learning   { background: #2a3320; color: #aed581; }
+  .badge-review     { background: #1e3320; color: #4caf50; }
+  .badge-relearning { background: #3a2010; color: #ffb74d; }
+
+  .card-hero {
+    text-align: center;
+    padding: 2rem 1rem 1.5rem;
+    background: #1e2128;
+    border: 1px solid #2a2d36;
+    border-radius: 12px;
+    margin-bottom: 1rem;
+  }
+
+  .front-word {
+    font-size: 3rem;
+    font-weight: 600;
+    color: #e8eaf0;
+    letter-spacing: -0.02em;
+  }
+
+  .audio-btn {
+    margin-top: 0.75rem;
+    background: #1a2d1a;
+    border: 1px solid #2a3d2a;
+    color: #4caf50;
+    padding: 0.4rem 1rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .audio-btn:hover { background: #22382a; }
+
+  .context-img {
+    width: 100%;
+    border-radius: 8px;
+    border: 1px solid #2a2d36;
+    margin-bottom: 1rem;
+    max-height: 280px;
+    object-fit: cover;
+    object-position: center;
+  }
+
+  .fields {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .field {
+    padding: 0.75rem 0;
+    border-bottom: 1px solid #1e2128;
+  }
+
+  .field-label {
+    font-size: 0.72rem;
+    color: #4a5568;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.25rem;
+  }
+
+  .field-value {
+    color: #c8d0e0;
+    font-size: 0.95rem;
+    line-height: 1.5;
+  }
+
+  .sentence { font-style: italic; color: #9ba8c0; }
+  .translation { color: #7a8aa6; }
+
+  .source-link {
+    color: #4caf50;
+    text-decoration: none;
+    font-size: 0.82rem;
+    word-break: break-all;
+  }
+  .source-link:hover { text-decoration: underline; }
+
+  .meta-row {
+    display: flex;
+    gap: 1.25rem;
+    flex-wrap: wrap;
+    font-size: 0.88rem;
+    color: #6b7591;
+  }
+
+  .actions {
+    margin-top: 2rem;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .btn-danger {
+    background: transparent;
+    border: 1px solid #c62828;
+    color: #ef5350;
+    padding: 0.55rem 1.1rem;
+    border-radius: 7px;
+    font-size: 0.88rem;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .btn-danger:hover:not(:disabled) { background: #2d1515; }
+  .btn-danger:disabled { opacity: 0.4; cursor: not-allowed; }
+</style>
