@@ -1,9 +1,9 @@
 .PHONY: help setup \
         colima-start infra-up infra-down infra-logs \
         dev dev-api dev-nlp dev-web \
-        test-nlp test-api test-extension test-all \
+        test-nlp test-api test-extension test-promo test-all \
         import-jmdict import-tatoeba migrate \
-        lint build clean \
+        lint build clean record-promo \
         docker-up docker-down docker-logs
 
 PYTHON  := services/nlp/.venv/bin/python3.13
@@ -40,7 +40,9 @@ help:
 	@echo "  make test-nlp       — NLP correctness + API tests"
 	@echo "  make test-api       — Go API unit tests"
 	@echo "  make test-extension — Chrome extension e2e (Playwright, no backend needed)"
+	@echo "  make test-promo     — promo demo flow CI smoke test (no video)"
 	@echo "  make test-all       — all tests"
+	@echo "  make record-promo   — record marketing video (demo/promo-<date>.webm)"
 	@echo ""
 	@echo "Other:"
 	@echo "  make lint           — Go vet + Python compile check"
@@ -165,7 +167,18 @@ test-extension:
 	cd e2e && node extension.test.js
 	@echo "✓ Extension e2e test passed"
 
-test-all: test-nlp test-api test-extension
+test-promo:
+	@echo "→ Running promo demo flow (CI mode — no video saved)..."
+	cd e2e && node ../demo/record-promo.js --ci
+	@echo "✓ Promo demo flow passed"
+
+record-promo:
+	@echo "→ Recording promotional demo video..."
+	@echo "   Output: demo/promo-<date>.webm"
+	cd e2e && node ../demo/record-promo.js
+	@echo "✓ Video saved in demo/"
+
+test-all: test-nlp test-api test-extension test-promo
 	@echo "✓ All tests passed — Phase 0 gate cleared"
 
 # ── Database ──────────────────────────────────────────────────────────────────
