@@ -51,3 +51,6 @@ apps/web/.svelte-kit/
 
 # Logs
 *.log
+demo/promo-*.webm
+demo/promo-*.mp4
+demo/videos/
