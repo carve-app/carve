@@ -1,4 +1,4 @@
-/// <reference types="chrome" />
+import { browser } from '../../shared/browser';
 
 const FLUSH_INTERVAL_MS = 30_000;
 const MIN_SESSION_SEC = 5;
@@ -98,9 +98,9 @@ export class ImmersionTracker {
 
     if (synchronous && typeof navigator.sendBeacon === 'function') {
       // Best-effort sync send — fall back to async message on failure
-      chrome.runtime.sendMessage(payload).catch(() => {});
+      browser.runtime.sendMessage(payload).catch(() => {});
     } else {
-      chrome.runtime.sendMessage(payload).catch(() => {});
+      browser.runtime.sendMessage(payload).catch(() => {});
     }
   }
 

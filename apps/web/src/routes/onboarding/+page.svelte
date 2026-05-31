@@ -15,6 +15,7 @@
     { code: 'ja',    flag: '🇯🇵', name: 'Japanese',              native: '日本語' },
     { code: 'zh-cn', flag: '🇨🇳', name: 'Chinese (Simplified)', native: '中文'   },
     { code: 'ko',    flag: '🇰🇷', name: 'Korean',               native: '한국어' },
+    { code: 'en',    flag: '🇬🇧', name: 'English',              native: 'English' },
   ];
 
   const WORD_GROUPS: Record<string, { label: string; words: string[] }[]> = {
@@ -63,6 +64,29 @@
         words: ['공부하다', '일하다', '시작하다', '끝나다', '생각하다', '알다', '모르다',
                 '중요하다', '어렵다', '재미있다', '시간', '방법', '이유', '결과', '문화',
                 '사회', '여행', '음악', '영화', '역사'],
+      },
+    ],
+    en: [
+      {
+        label: 'Intermediate — CEFR B1',
+        words: ['achieve', 'attempt', 'consider', 'mention', 'realize', 'suggest',
+                'manage', 'increase', 'improve', 'recognize', 'experience', 'opportunity',
+                'situation', 'culture', 'society', 'environment', 'common', 'difficult',
+                'necessary', 'recently'],
+      },
+      {
+        label: 'Upper-intermediate — CEFR B2',
+        words: ['assume', 'demonstrate', 'establish', 'evaluate', 'illustrate', 'imply',
+                'pursue', 'reveal', 'undertake', 'witness', 'consequence', 'criterion',
+                'phenomenon', 'tendency', 'sustainable', 'thorough', 'inevitable',
+                'controversial', 'inherent', 'arguably'],
+      },
+      {
+        label: 'Advanced — CEFR C1/C2',
+        words: ['acquiesce', 'circumvent', 'corroborate', 'delineate', 'eschew',
+                'exacerbate', 'mitigate', 'obfuscate', 'reconcile', 'underscore',
+                'aberration', 'caveat', 'discrepancy', 'hegemony', 'paradigm',
+                'predicament', 'quintessential', 'salient', 'tantamount', 'ubiquitous'],
       },
     ],
   };
@@ -170,7 +194,7 @@
               <span class="lang-native">{opt.native}</span>
             </button>
           {/each}
-          <div class="lang-card disabled" title="Coming in Phase 5">
+          <div class="lang-card disabled" title="Coming next">
             <span class="lang-flag">🌐</span>
             <span class="lang-name">More soon</span>
             <span class="lang-native">ES, FR, DE…</span>
@@ -222,12 +246,20 @@
                 <div class="deck-desc">High-frequency words · Official deck</div>
               </div>
             </div>
-          {:else}
+          {:else if language === 'ko'}
             <div class="deck-card">
               <div class="deck-icon">🇰🇷</div>
               <div class="deck-info">
                 <div class="deck-name">TOPIK 1 Core Vocabulary</div>
                 <div class="deck-desc">Essential vocabulary · Official deck</div>
+              </div>
+            </div>
+          {:else if language === 'en'}
+            <div class="deck-card">
+              <div class="deck-icon">🇬🇧</div>
+              <div class="deck-info">
+                <div class="deck-name">CEFR B2 Academic Word List</div>
+                <div class="deck-desc">High-utility vocabulary for advanced learners · Official deck</div>
               </div>
             </div>
           {/if}

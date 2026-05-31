@@ -42,9 +42,12 @@ jobs:
       - name: Run correctness test suite (Phase 0 gate)
         working-directory: services/nlp
         run: |
-          python -m pytest tests/test_correctness.py -v \
-            --tb=short \
-            -q
+          python -m pytest \
+            tests/test_correctness.py \
+            tests/test_correctness_zh.py \
+            tests/test_correctness_ko.py \
+            tests/test_correctness_en.py \
+            -v --tb=short -q
 
       - name: Run API tests
         working-directory: services/nlp
@@ -144,10 +147,13 @@ jobs:
           go build -o /dev/null ./cmd/media
           echo "✓ Media service build succeeded"
 
-  # ── Chrome Extension ──────────────────────────────────────────────────────
+  # ── Browser Extension ─────────────────────────────────────────────────────
   extension:
-    name: Chrome Extension
+    name: Browser Extension (${{ matrix.browser }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        browser: [chrome, firefox, safari]
 
     steps:
       - uses: actions/checkout@v4
@@ -167,19 +173,26 @@ jobs:
         working-directory: apps/extension
         run: npm run typecheck
 
-      - name: Build
+      - name: Build (${{ matrix.browser }})
         working-directory: apps/extension
-        run: npm run build
+        run: npm run build:${{ matrix.browser }}
 
-      - name: Verify dist artifacts
+      - name: Verify dist artifacts (${{ matrix.browser }})
         working-directory: apps/extension
         run: |
-          test -f dist/manifest.json
-          test -f dist/background/index.js
-          test -f dist/content/index.js
-          test -f dist/popup/app.js
-          test -f dist/popup/index.html
-          echo "✓ Extension build artifacts present"
+          test -f dist/${{ matrix.browser }}/manifest.json
+          test -f dist/${{ matrix.browser }}/background/index.js
+          test -f dist/${{ matrix.browser }}/content/index.js
+          test -f dist/${{ matrix.browser }}/popup/app.js
+          test -f dist/${{ matrix.browser }}/popup/index.html
+          echo "✓ ${{ matrix.browser }} extension artifacts present"
+
+      - name: Upload extension artifact (${{ matrix.browser }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-${{ matrix.browser }}
+          path: apps/extension/dist/${{ matrix.browser }}/
+          retention-days: 7
 
   # ── Web App (SvelteKit) ───────────────────────────────────────────────────
   web:
@@ -224,11 +237,17 @@ jobs:
           cache: npm
           cache-dependency-path: apps/extension/package-lock.json
 
-      - name: Build extension
-        working-directory: apps/extension
-        run: |
-          npm ci
-          npm run build
+      - name: Download Chrome extension artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: extension-chrome
+          path: apps/extension/dist/chrome
+
+      - name: Download Firefox extension artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: extension-firefox
+          path: apps/extension/dist/firefox
 
       - name: Install e2e dependencies
         working-directory: e2e
@@ -238,7 +257,7 @@ jobs:
         working-directory: e2e
         run: npx playwright install chromium --with-deps
 
-      - name: Run extension e2e test
+      - name: Run extension e2e tests
         working-directory: e2e
         run: node extension.test.js
 

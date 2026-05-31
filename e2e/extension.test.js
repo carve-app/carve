@@ -394,10 +394,37 @@ async function testMiningWorkflow(context, mockBase, capturedCards) {
   await page.close();
 }
 
+// ── Manifest validation ───────────────────────────────────────────────────────
+
+function testManifestFiles() {
+  console.log('\n── Test 0: manifest validation ──────────────────────────────');
+  const fs = require('fs');
+  const DIST = path.resolve(__dirname, '../apps/extension/dist');
+
+  for (const browser of ['chrome', 'firefox', 'safari']) {
+    const manifestPath = path.join(DIST, browser, 'manifest.json');
+    if (!fs.existsSync(manifestPath)) {
+      console.log(`[skip] ${browser} dist not found — skipping manifest check`);
+      continue;
+    }
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    assert(manifest.manifest_version === 3, `${browser}: expected manifest_version 3`);
+    assert(manifest.background, `${browser}: missing background field`);
+    if (browser === 'firefox') {
+      assert(manifest.background.scripts, `firefox: background must use 'scripts', not service_worker`);
+      assert(!manifest.background.service_worker, `firefox: must not use service_worker`);
+      assert(manifest.browser_specific_settings?.gecko?.id, `firefox: missing gecko.id`);
+    } else {
+      assert(manifest.background.service_worker, `${browser}: background must use service_worker`);
+    }
+    console.log(`[assert] ${browser} manifest valid ✓`);
+  }
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function run() {
-  const EXTENSION_DIR = path.resolve(__dirname, '../apps/extension/dist');
+  const EXTENSION_DIR = path.resolve(__dirname, '../apps/extension/dist/chrome');
 
   const { server, port, capturedCards } = await startMockServer();
   const mockBase = `http://127.0.0.1:${port}`;
@@ -413,6 +440,8 @@ async function run() {
       '--no-sandbox',
     ],
   });
+
+  testManifestFiles();
 
   try {
     let sw = context.serviceWorkers().find(w => w.url().includes('background'));

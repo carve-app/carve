@@ -39,6 +39,9 @@ export interface Card {
   due: string | null;
   reps: number;
   lapses: number;
+  suspended: boolean;
+  is_leech: boolean;
+  tags: string[];
   created_at: string;
 }
 
@@ -166,6 +169,33 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
   return res.json() as Promise<T>;
 }
 
+/**
+ * Upload a multipart form. The browser sets the Content-Type with the boundary,
+ * so we omit it here and only pass the Authorization header.
+ */
+export async function postMultipart<T>(path: string, form: FormData): Promise<T> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    body: form,
+    headers,
+  });
+
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      message = body.error ?? body.detail ?? body.message ?? message;
+    } catch { /* ignore */ }
+    throw new ApiError(res.status, message);
+  }
+
+  return res.json() as Promise<T>;
+}
+
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
 export async function fetchUser(): Promise<User> {
@@ -229,6 +259,10 @@ export interface CardDetail {
   difficulty: number | null;
   reps: number;
   lapses: number;
+  suspended: boolean;
+  is_leech: boolean;
+  notes: string | null;
+  tags: string[];
   created_at: string;
 }
 
@@ -236,9 +270,68 @@ export async function fetchCard(id: string): Promise<CardDetail> {
   return apiFetch<CardDetail>(`/v1/cards/${id}`);
 }
 
+export interface CardListParams {
+  language?: string;
+  limit?: number;
+  offset?: number;
+  search?: string;
+  state?: FsrsState | '';
+  suspended?: boolean | null;
+  is_leech?: boolean | null;
+  sort?: 'created' | 'due' | 'lapses' | 'alpha' | 'last_reviewed';
+}
+
 export async function fetchCards(language = 'ja', limit = 50): Promise<CardsResponse> {
   const params = new URLSearchParams({ language, limit: String(limit) });
   return apiFetch<CardsResponse>(`/v1/cards?${params}`);
+}
+
+export async function fetchCardsFiltered(p: CardListParams): Promise<CardsResponse> {
+  const params = new URLSearchParams();
+  if (p.language) params.set('language', p.language);
+  if (p.limit != null) params.set('limit', String(p.limit));
+  if (p.offset != null) params.set('offset', String(p.offset));
+  if (p.search) params.set('search', p.search);
+  if (p.state) params.set('state', p.state);
+  if (p.suspended != null) params.set('suspended', String(p.suspended));
+  if (p.is_leech != null) params.set('is_leech', String(p.is_leech));
+  if (p.sort) params.set('sort', p.sort);
+  return apiFetch<CardsResponse>(`/v1/cards?${params}`);
+}
+
+export async function updateCard(id: string, fields: {
+  front_text?: string;
+  front_reading?: string;
+  back_text?: string;
+  sentence?: string;
+  subtitle_translation?: string;
+  notes?: string;
+  tags?: string[];
+  deck_id?: string;
+}): Promise<void> {
+  await apiFetch(`/v1/cards/${id}`, { method: 'PATCH', body: JSON.stringify(fields) });
+}
+
+export async function suspendCard(id: string): Promise<void> {
+  await apiFetch(`/v1/cards/${id}/suspend`, { method: 'POST' });
+}
+
+export async function unsuspendCard(id: string): Promise<void> {
+  await apiFetch(`/v1/cards/${id}/unsuspend`, { method: 'POST' });
+}
+
+export async function buryCard(id: string): Promise<void> {
+  await apiFetch(`/v1/cards/${id}/bury`, { method: 'POST' });
+}
+
+export async function bulkCards(
+  action: 'suspend' | 'unsuspend' | 'bury' | 'delete',
+  ids: string[],
+): Promise<{ affected: number }> {
+  return apiFetch('/v1/cards/bulk', {
+    method: 'POST',
+    body: JSON.stringify({ action, ids }),
+  });
 }
 
 // ── Review ────────────────────────────────────────────────────────────────────
@@ -266,6 +359,16 @@ export async function submitReviewEvent(
 
 export async function fetchIntervals(cardId: string): Promise<IntervalsResponse> {
   return apiFetch<IntervalsResponse>(`/v1/review/intervals?card_id=${encodeURIComponent(cardId)}`);
+}
+
+export interface UndoResponse {
+  card_id: string;
+  prior_state: string;
+  undone_at: string;
+}
+
+export async function undoReview(): Promise<UndoResponse> {
+  return apiFetch<UndoResponse>('/v1/review/undo', { method: 'POST' });
 }
 
 export async function fetchForecast(language = 'ja', days = 14): Promise<ForecastResponse> {

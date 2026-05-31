@@ -3,8 +3,10 @@ import { viteStaticCopy } from 'vite-plugin-static-copy';
 import { resolve } from 'path';
 
 type Target = 'background' | 'content' | 'popup';
+type Browser = 'chrome' | 'firefox' | 'safari';
 
 const TARGET = (process.env.BUILD_TARGET ?? 'background') as Target;
+const BROWSER = (process.env.BROWSER ?? 'chrome') as Browser;
 
 const entries: Record<Target, { input: string; outFile: string }> = {
   background: {
@@ -22,13 +24,14 @@ const entries: Record<Target, { input: string; outFile: string }> = {
 };
 
 const { input, outFile } = entries[TARGET];
+const outDir = `dist/${BROWSER}`;
 
 export default defineConfig({
   define: {
     __WEB_BASE__: JSON.stringify(process.env.WEB_BASE ?? 'http://localhost:5173'),
   },
   build: {
-    outDir: 'dist',
+    outDir,
     emptyOutDir: TARGET === 'background',
     rollupOptions: {
       input,
@@ -46,7 +49,7 @@ export default defineConfig({
       ? [
           viteStaticCopy({
             targets: [
-              { src: 'src/manifest.json', dest: '.' },
+              { src: `src/manifest.${BROWSER}.json`, dest: '.', rename: 'manifest.json' },
               { src: 'src/icons/*', dest: 'icons' },
               { src: 'src/popup-page/popup.html', dest: 'popup', rename: 'index.html' },
               { src: 'src/wasm/ja_tokenizer_bg.wasm', dest: 'wasm' },

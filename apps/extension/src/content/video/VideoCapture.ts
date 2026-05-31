@@ -1,4 +1,4 @@
-/// <reference types="chrome" />
+import { browser } from '../../shared/browser';
 
 export interface CaptureResult {
   imageBlob: Blob | null;
@@ -132,8 +132,8 @@ export async function uploadCardMedia(
   opts: { sourceUrl?: string; subtitleTranslation?: string } = {},
 ): Promise<void> {
   const [{ accessToken }, { apiBaseUrl }] = await Promise.all([
-    chrome.storage.local.get('accessToken'),
-    chrome.storage.local.get('apiBaseUrl'),
+    browser.storage.local.get('accessToken'),
+    browser.storage.local.get('apiBaseUrl'),
   ]);
   const base = (apiBaseUrl as string | undefined) ?? 'http://localhost:8080';
   const token = accessToken as string | undefined;

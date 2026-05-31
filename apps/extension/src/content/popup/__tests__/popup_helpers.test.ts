@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { escapeHtml, buildFurigana, pitchLabel, getSurroundingSentence } from '../PopupManager';
+import {
+  escapeHtml,
+  buildFurigana,
+  pitchLabel,
+  pitchSvg,
+  buildFuriganaWithMode,
+  getSurroundingSentence,
+} from '../PopupManager';
 
 // ── escapeHtml ────────────────────────────────────────────────────────────────
 
@@ -184,5 +191,125 @@ describe('getSurroundingSentence', () => {
     document.body.appendChild(parent);
     const result = getSurroundingSentence(el);
     expect(result!.length).toBeLessThanOrEqual(200);
+  });
+});
+
+// ── pitchSvg ──────────────────────────────────────────────────────────────────
+
+describe('pitchSvg', () => {
+  it('returns empty string for non-numeric accent', () => {
+    expect(pitchSvg('LHL', 3)).toBe('');
+  });
+
+  it('returns empty string for 0 morae', () => {
+    expect(pitchSvg('0', 0)).toBe('');
+  });
+
+  it('returns SVG string for valid accent', () => {
+    const svg = pitchSvg('0', 3);
+    expect(svg).toContain('<svg');
+    expect(svg).toContain('</svg>');
+  });
+
+  it('includes polyline element', () => {
+    expect(pitchSvg('2', 4)).toContain('<polyline');
+  });
+
+  it('heiban (0): mora 1 is low, mora 2+ are high', () => {
+    // For accent=0, morae=3: levels = [false, true, true]
+    // Points: (3, 16), (13, 3), (23, 3)
+    const svg = pitchSvg('0', 3);
+    expect(svg).toContain('aria-label="Pitch accent 0"');
+    // mora 1 low → y=16
+    expect(svg).toContain('3,16');
+    // mora 2 high → y=3
+    expect(svg).toContain('13,3');
+  });
+
+  it('atamadaka (1): mora 1 is high, rest are low', () => {
+    const svg = pitchSvg('1', 3);
+    expect(svg).toContain('aria-label="Pitch accent 1"');
+    // mora 1 high → y=3
+    expect(svg).toContain('3,3');
+    // mora 2 low → y=16
+    expect(svg).toContain('13,16');
+  });
+
+  it('nakadaka (2): low, high, low for morae=3', () => {
+    const svg = pitchSvg('2', 3);
+    // mora 1 low (i=0, i>0 is false)
+    expect(svg).toContain('3,16');
+    // mora 2 high (i=1, 1>0 && 1<2 = true)
+    expect(svg).toContain('13,3');
+    // mora 3 low (i=2, 2<2 is false)
+    expect(svg).toContain('23,16');
+  });
+
+  it('uses different colors for heiban vs atamadaka', () => {
+    const heiban = pitchSvg('0', 2);
+    const atama = pitchSvg('1', 2);
+    // both are valid SVG but should differ
+    expect(heiban).not.toBe(atama);
+  });
+
+  it('generates one circle per mora', () => {
+    const svg = pitchSvg('0', 4);
+    const circleCount = (svg.match(/<circle/g) ?? []).length;
+    expect(circleCount).toBe(4);
+  });
+});
+
+// ── buildFuriganaWithMode ─────────────────────────────────────────────────────
+
+describe('buildFuriganaWithMode', () => {
+  const spans = [
+    { text: '東京', reading: 'とうきょう' },
+    { text: 'の', reading: '' },
+  ];
+
+  it('mode=always shows ruby for all spans with readings', () => {
+    const html = buildFuriganaWithMode(spans, 'always', 'unknown');
+    expect(html).toContain('<ruby>東京<rt>とうきょう</rt></ruby>');
+  });
+
+  it('mode=off shows plain text only, no ruby', () => {
+    const html = buildFuriganaWithMode(spans, 'off', 'unknown');
+    expect(html).not.toContain('<ruby');
+    expect(html).toContain('東京');
+  });
+
+  it('mode=unknown-only shows ruby only for unknown words', () => {
+    const htmlUnknown = buildFuriganaWithMode(spans, 'unknown-only', 'unknown');
+    expect(htmlUnknown).toContain('<ruby>東京<rt>とうきょう</rt></ruby>');
+
+    const htmlKnown = buildFuriganaWithMode(spans, 'unknown-only', 'known');
+    expect(htmlKnown).not.toContain('<ruby');
+  });
+
+  it('mode=kanji-only shows ruby only for kanji-containing spans', () => {
+    const html = buildFuriganaWithMode(spans, 'kanji-only', 'known');
+    expect(html).toContain('<ruby>東京<rt>とうきょう</rt></ruby>');
+  });
+
+  it('mode=kanji-only does not show ruby for hiragana/katakana', () => {
+    const kanaSpans = [{ text: 'ねこ', reading: 'ねこ' }];
+    const html = buildFuriganaWithMode(kanaSpans, 'kanji-only', 'unknown');
+    expect(html).not.toContain('<ruby');
+  });
+
+  it('always escapes HTML entities in text and reading', () => {
+    const dangerSpans = [{ text: '<b>', reading: '"xss"' }];
+    const html = buildFuriganaWithMode(dangerSpans, 'always', 'unknown');
+    expect(html).toContain('&lt;b&gt;');
+    expect(html).toContain('&quot;xss&quot;');
+    expect(html).not.toContain('<b>');
+  });
+
+  it('span without reading renders as plain text in any mode', () => {
+    const noReading = [{ text: 'の' }];
+    for (const mode of ['always', 'off', 'unknown-only', 'kanji-only'] as const) {
+      const html = buildFuriganaWithMode(noReading, mode, 'unknown');
+      expect(html).toBe('の');
+    }
   });
 });

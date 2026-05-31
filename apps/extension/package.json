@@ -4,8 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "BUILD_TARGET=background vite build --watch --mode development",
-    "build": "BUILD_TARGET=background vite build && BUILD_TARGET=content vite build && BUILD_TARGET=popup vite build",
+    "dev": "BROWSER=chrome BUILD_TARGET=background vite build --watch --mode development",
+    "build": "npm run build:chrome && npm run build:firefox && npm run build:safari",
+    "build:chrome": "BROWSER=chrome BUILD_TARGET=background vite build && BROWSER=chrome BUILD_TARGET=content vite build && BROWSER=chrome BUILD_TARGET=popup vite build",
+    "build:firefox": "BROWSER=firefox BUILD_TARGET=background vite build && BROWSER=firefox BUILD_TARGET=content vite build && BROWSER=firefox BUILD_TARGET=popup vite build",
+    "build:safari": "BROWSER=safari BUILD_TARGET=background vite build && BROWSER=safari BUILD_TARGET=content vite build && BROWSER=safari BUILD_TARGET=popup vite build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vitest run",

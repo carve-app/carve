@@ -11,14 +11,15 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-// ── Stub chrome API before importing the module ───────────────────────────────
-const mockSendMessage = vi.fn().mockResolvedValue({ tokens: [] });
+// ── Stub browser API via vi.mock so it's available at import time ─────────────
+// vi.hoisted runs before any imports; vi.mock is hoisted automatically.
+const mockSendMessage = vi.hoisted(() => vi.fn().mockResolvedValue({ tokens: [] }));
 
-(globalThis as any).chrome = {
-  runtime: {
-    sendMessage: mockSendMessage,
+vi.mock('../../../shared/browser', () => ({
+  browser: {
+    runtime: { sendMessage: mockSendMessage },
   },
-};
+}));
 
 // ── Stub VocabCache ───────────────────────────────────────────────────────────
 const mockVocabCache = {

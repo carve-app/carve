@@ -1,4 +1,4 @@
-/// <reference types="chrome" />
+import { browser } from '../shared/browser';
 import initWasm, { init, tokenize as wasmTokenizeText } from '../wasm/ja_tokenizer.js';
 import type { Token } from '../shared/types';
 
@@ -17,7 +17,7 @@ let _initPromise: Promise<void> | null = null;
 function ensureInit(): Promise<void> {
   if (!_initPromise) {
     _initPromise = (async () => {
-      const wasmUrl = chrome.runtime.getURL('wasm/ja_tokenizer_bg.wasm');
+      const wasmUrl = browser.runtime.getURL('wasm/ja_tokenizer_bg.wasm');
       await initWasm(fetch(wasmUrl));
       init(new Uint8Array());
     })();

@@ -1,10 +1,10 @@
-/// <reference types="chrome" />
+import { browser } from '../shared/browser';
 import { nlpTokenize, nlpLookup, createCard, logImmersion, getDueCount, getReviewSession, submitReviewEvent, translateText } from '../shared/api';
 import { getAccessToken, getApiBaseUrl, storageGet, storageSet, type OfflineReviewEvent, type CachedReviewCard } from '../shared/storage';
 import type { Message, MessageResponse } from '../shared/messages';
 
 // Handle messages from content scripts
-chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
+browser.runtime.onMessage.addListener((message: Message, _sender, sendResponse) => {
   handleMessage(message)
     .then(sendResponse)
     .catch((err: Error) => {
@@ -14,15 +14,15 @@ chrome.runtime.onMessage.addListener((message: Message, _sender, sendResponse) =
 });
 
 // Create alarms on install/update — not every service worker wake-up
-chrome.runtime.onInstalled.addListener(async () => {
-  chrome.alarms.create('refresh_due_count', { periodInMinutes: 30 });
-  chrome.alarms.create('sync_offline_queue', { periodInMinutes: 5 });
-  chrome.alarms.create('cache_review_cards', { periodInMinutes: 60 });
+browser.runtime.onInstalled.addListener(async () => {
+  browser.alarms.create('refresh_due_count', { periodInMinutes: 30 });
+  browser.alarms.create('sync_offline_queue', { periodInMinutes: 5 });
+  browser.alarms.create('cache_review_cards', { periodInMinutes: 60 });
   await updateBadge();
   await cacheReviewCards();
 });
 
-chrome.alarms.onAlarm.addListener(async (alarm) => {
+browser.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'refresh_due_count') {
     await updateBadge();
   } else if (alarm.name === 'sync_offline_queue') {
@@ -146,8 +146,8 @@ async function handleMessage(msg: Message): Promise<MessageResponse> {
     case 'ATTACH_PAGE_SCREENSHOT': {
       try {
         const dataUrl: string = await new Promise((resolve, reject) => {
-          chrome.tabs.captureVisibleTab({ format: 'jpeg', quality: 80 }, (url) => {
-            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+          browser.tabs.captureVisibleTab({ format: 'jpeg', quality: 80 }, (url) => {
+            if (browser.runtime.lastError) reject(new Error(browser.runtime.lastError.message));
             else resolve(url);
           });
         });
@@ -172,8 +172,8 @@ async function handleMessage(msg: Message): Promise<MessageResponse> {
     case 'CAPTURE_SCREENSHOT': {
       try {
         const dataUrl: string = await new Promise((resolve, reject) => {
-          chrome.tabs.captureVisibleTab({ format: 'png' }, (url) => {
-            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+          browser.tabs.captureVisibleTab({ format: 'png' }, (url) => {
+            if (browser.runtime.lastError) reject(new Error(browser.runtime.lastError.message));
             else resolve(url);
           });
         });
@@ -207,12 +207,18 @@ function dataURLToBlob(dataUrl: string): Blob {
   return new Blob([bytes], { type: mime });
 }
 
+async function getTargetLanguage(): Promise<string> {
+  const r = await browser.storage.local.get('targetLanguage');
+  return (r['targetLanguage'] as string | undefined) ?? 'ja';
+}
+
 async function updateBadge(): Promise<number> {
   try {
-    const count = await getDueCount('ja');
+    const lang = await getTargetLanguage();
+    const count = await getDueCount(lang);
     await storageSet('dueCount', count);
-    chrome.action.setBadgeText({ text: count > 0 ? String(count) : '' });
-    chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
+    browser.action.setBadgeText({ text: count > 0 ? String(count) : '' });
+    browser.action.setBadgeBackgroundColor({ color: '#4CAF50' });
     return count;
   } catch {
     return 0;
@@ -261,7 +267,8 @@ async function cacheReviewCards(): Promise<void> {
   const token = await getAccessToken();
   if (!token) return;
   try {
-    const session = await getReviewSession('ja', 50);
+    const lang = await getTargetLanguage();
+    const session = await getReviewSession(lang, 50);
     const cards: CachedReviewCard[] = (session.cards ?? []).map((c: any) => ({
       id: c.id,
       front_text: c.front_text,

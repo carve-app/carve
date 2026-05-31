@@ -1,4 +1,4 @@
-/// <reference types="chrome" />
+import { browser } from '../../shared/browser';
 import type { VocabCache } from '../../nlp/VocabCache';
 import type { DictEntry, FuriganaSpan } from '../../shared/types';
 
@@ -41,7 +41,7 @@ export class PopupManager {
     // Show loading state immediately
     this.showLoadingPopup(tokenEl, surface, readingHira, status);
 
-    const response = await chrome.runtime.sendMessage({
+    const response = await browser.runtime.sendMessage({
       type: 'LOOKUP',
       surface: lemma,
       language: 'ja',
@@ -102,8 +102,9 @@ export class PopupManager {
     const freqHtml = entry?.frequency_rank
       ? `<span style="font-size:11px;color:#6b7a99"> #${entry.frequency_rank}</span>`
       : '';
+    const morae = (entry?.reading ?? reading).length || 1;
     const pitchHtml = entry?.pitch_accent != null
-      ? `<span class="carve-pitch" title="NHK pitch accent">${escapeHtml(pitchLabel(entry.pitch_accent))}</span>`
+      ? pitchSvg(entry.pitch_accent, morae)
       : '';
 
     const sentence = getSurroundingSentence(tokenEl);
@@ -127,7 +128,7 @@ export class PopupManager {
     });
 
     popup.querySelector('.btn-ignore')?.addEventListener('click', async () => {
-      await chrome.runtime.sendMessage({
+      await browser.runtime.sendMessage({
         type: 'IGNORE_WORD',
         lemma,
         languageCode: 'ja',
@@ -188,7 +189,7 @@ export class PopupManager {
 
     // Kick off translation in background — will fill in async
     if (sentence) {
-      chrome.runtime.sendMessage({ type: 'TRANSLATE', text: sentence, sourceLanguage: 'ja' })
+      browser.runtime.sendMessage({ type: 'TRANSLATE', text: sentence, sourceLanguage: 'ja' })
         .then((result) => {
           const t = result?.translation as string | null;
           const el = popup.querySelector<HTMLInputElement>('#mine-translation');
@@ -237,7 +238,7 @@ export class PopupManager {
       btn.disabled = true;
       btn.textContent = 'Saving…';
 
-      const result = await chrome.runtime.sendMessage({
+      const result = await browser.runtime.sendMessage({
         type: 'MINE_CARD',
         lemma: mineLemma,
         reading: mineReading,
@@ -257,7 +258,7 @@ export class PopupManager {
         statusEl.style.color = '#4caf50';
 
         if (!isVideoPage) {
-          chrome.runtime.sendMessage({
+          browser.runtime.sendMessage({
             type: 'ATTACH_PAGE_SCREENSHOT',
             cardId: result.cardId,
           }).catch(() => {/* non-fatal */});
@@ -308,9 +309,87 @@ export function buildFurigana(spans: FuriganaSpan[]): string {
 export function pitchLabel(accent: string): string {
   const n = parseInt(accent, 10);
   if (isNaN(n)) return `[${accent}]`;
-  if (n === 0) return `[${accent}⓪]`;   // heiban
-  if (n === 1) return `[${accent}①]`;   // atamadaka
-  return `[${accent}]`;                  // nakadaka / odaka
+  if (n === 0) return `[${accent}⓪]`;
+  if (n === 1) return `[${accent}①]`;
+  return `[${accent}]`;
+}
+
+/**
+ * Renders an inline SVG pitch contour over the mora of a word.
+ *
+ * Pitch accent encoding (NHK):
+ *   0 = heiban   (L H H H…)  — rises on mora 2, stays high, no drop
+ *   1 = atamadaka (H L L L…) — high only on mora 1, drops to low
+ *   N = nakadaka/odaka        — rises on mora 2, drops AFTER mora N
+ *
+ * The contour is drawn as a polyline: each mora gets a dot; the line
+ * connects them at high (y=4) or low (y=16) levels.
+ */
+export function pitchSvg(accent: string, morae: number): string {
+  const n = parseInt(accent, 10);
+  if (isNaN(n) || morae < 1) return '';
+
+  const W = 10; // px per mora
+  const H = 22; // total SVG height
+  const hi = 3;
+  const lo = 16;
+
+  // Build per-mora pitch level: true = high, false = low
+  const levels: boolean[] = [];
+  for (let i = 0; i < morae; i++) {
+    if (n === 0) {
+      // heiban: mora 1 is low, all others are high
+      levels.push(i > 0);
+    } else if (n === 1) {
+      // atamadaka: mora 1 is high, rest are low
+      levels.push(i === 0);
+    } else {
+      // nakadaka / odaka: mora 1 low, mora 2…N high, rest low
+      levels.push(i > 0 && i < n);
+    }
+  }
+
+  const totalW = W * morae + 6;
+  const points = levels
+    .map((high, i) => `${i * W + 3},${high ? hi : lo}`)
+    .join(' ');
+
+  // Color by accent type for quick visual recognition
+  const colors: Record<number, string> = { 0: '#4caf50', 1: '#e57373' };
+  const color = n < 2 ? (colors[n] ?? '#64b5f6') : '#64b5f6';
+
+  return `<svg class="carve-pitch-svg" width="${totalW}" height="${H}"
+    viewBox="0 0 ${totalW} ${H}" aria-label="Pitch accent ${accent}"
+    style="vertical-align:middle;margin-left:4px">
+    <polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>
+    ${levels.map((high, i) =>
+      `<circle cx="${i * W + 3}" cy="${high ? hi : lo}" r="2" fill="${color}"/>`
+    ).join('')}
+  </svg>`;
+}
+
+/** Returns furigana HTML respecting the current furigana mode setting. */
+export type FuriganaMode = 'always' | 'unknown-only' | 'kanji-only' | 'off';
+
+export function buildFuriganaWithMode(
+  spans: Array<{ text: string; reading?: string }>,
+  mode: FuriganaMode,
+  wordStatus: 'unknown' | 'learning' | 'known',
+): string {
+  if (mode === 'off') return spans.map(s => escapeHtml(s.text)).join('');
+
+  return spans
+    .map((s) => {
+      if (!s.reading) return escapeHtml(s.text);
+      const isKanji = /[一-龯]/.test(s.text);
+      const showRuby =
+        mode === 'always' ||
+        (mode === 'unknown-only' && wordStatus === 'unknown') ||
+        (mode === 'kanji-only' && isKanji);
+      if (!showRuby) return escapeHtml(s.text);
+      return `<ruby>${escapeHtml(s.text)}<rt>${escapeHtml(s.reading)}</rt></ruby>`;
+    })
+    .join('');
 }
 
 export function getSurroundingSentence(el: HTMLElement): string | null {

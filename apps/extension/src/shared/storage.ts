@@ -1,4 +1,4 @@
-/// <reference types="chrome" />
+import { browser } from './browser';
 
 export interface OfflineReviewEvent {
   card_id: string;
@@ -37,51 +37,33 @@ export interface StorageData {
   cachedReviewAt?: number;                    // timestamp of last cache
 }
 
-/**
- * Get a value from chrome.storage.local.
- */
 export async function storageGet<K extends keyof StorageData>(
   key: K,
 ): Promise<StorageData[K] | undefined> {
-  const result = await chrome.storage.local.get(key);
+  const result = await browser.storage.local.get(key);
   return result[key] as StorageData[K] | undefined;
 }
 
-/**
- * Set a value in chrome.storage.local.
- */
 export async function storageSet<K extends keyof StorageData>(
   key: K,
   value: StorageData[K],
 ): Promise<void> {
-  await chrome.storage.local.set({ [key]: value });
+  await browser.storage.local.set({ [key]: value });
 }
 
-/**
- * Get access token from chrome.storage.local (persists across extension reloads).
- */
 export async function getAccessToken(): Promise<string | null> {
-  const result = await chrome.storage.local.get('accessToken');
+  const result = await browser.storage.local.get('accessToken');
   return (result['accessToken'] as string | undefined) ?? null;
 }
 
-/**
- * Set access token in chrome.storage.local.
- */
 export async function setAccessToken(token: string): Promise<void> {
-  await chrome.storage.local.set({ accessToken: token });
+  await browser.storage.local.set({ accessToken: token });
 }
 
-/**
- * Clear auth token from local storage.
- */
 export async function clearSession(): Promise<void> {
-  await chrome.storage.local.remove('accessToken');
+  await browser.storage.local.remove('accessToken');
 }
 
-/**
- * Get API base URL (default: http://localhost:8080).
- */
 export async function getApiBaseUrl(): Promise<string> {
   const url = await storageGet('apiBaseUrl');
   return url ?? 'http://localhost:8080';

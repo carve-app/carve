@@ -24,6 +24,7 @@ from .scorer import score_content
 from .tokenizer import JapaneseTokenizer
 from .tokenizer_zh import ChineseTokenizer
 from .tokenizer_ko import KoreanTokenizer
+from .tokenizer_en import EnglishTokenizer
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ _dict_service = DictionaryService()
 _ja_tokenizer = JapaneseTokenizer()
 _zh_tokenizer = ChineseTokenizer()
 _ko_tokenizer = KoreanTokenizer()
+_en_tokenizer = EnglishTokenizer()
 
 
 @asynccontextmanager
@@ -154,6 +156,9 @@ def tokenize(
     elif req.language == "ko":
         ko_result = _ko_tokenizer.tokenize(req.text)
         raw_tokens = ko_result.tokens
+    elif req.language == "en":
+        en_result = _en_tokenizer.tokenize(req.text)
+        raw_tokens = en_result.tokens
     else:
         raise HTTPException(status_code=422, detail=f"Language '{req.language}' not yet supported")
 
@@ -175,6 +180,10 @@ def tokenize(
         elif req.language == "ko":
             reading = t.romanization
             reading_hira = t.romanization
+        elif req.language == "en":
+            # English: 'reading' is the lowercased orthographic form
+            reading = t.reading
+            reading_hira = t.reading
         else:
             reading = surface
             reading_hira = surface
@@ -269,6 +278,14 @@ def lookup(
             reading = t.romanization
             reading_hira = t.romanization
         furigana = [{"text": req.surface, "reading": reading or ""}]
+    elif req.language == "en":
+        en_result = _en_tokenizer.tokenize(req.surface)
+        if en_result.tokens:
+            t = en_result.tokens[0]
+            lemma = t.lemma
+            reading = t.reading
+            reading_hira = t.reading
+        furigana = [{"text": req.surface, "reading": ""}]
     else:
         raise HTTPException(status_code=422, detail=f"Language '{req.language}' not yet supported")
 
@@ -372,6 +389,22 @@ def score_text(
     elif req.language == "ko":
         ko_result = _ko_tokenizer.tokenize(req.text)
         content = [t for t in ko_result.tokens if t.is_content_word]
+        known_ct = sum(1 for t in content if t.lemma in known or t.lemma in learning)
+        total = len(content) or 1
+        pct = round(known_ct / total * 100, 1)
+        from .scorer import ContentScore
+        s = ContentScore(
+            comprehension_pct=pct,
+            difficulty_score=round(1.0 - pct / 100, 2),
+            total_content_words=total,
+            unknown_count=total - known_ct,
+            learning_count=0,
+            recommended_mode="mining_read" if pct >= 90 else "study_read" if pct >= 80 else "too_hard",
+            top_unknown_lemmas=[t.lemma for t in content if t.lemma not in known and t.lemma not in learning][:10],
+        )
+    elif req.language == "en":
+        en_result = _en_tokenizer.tokenize(req.text)
+        content = [t for t in en_result.tokens if t.is_content_word]
         known_ct = sum(1 for t in content if t.lemma in known or t.lemma in learning)
         total = len(content) or 1
         pct = round(known_ct / total * 100, 1)

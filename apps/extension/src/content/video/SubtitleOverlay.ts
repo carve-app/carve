@@ -1,4 +1,4 @@
-/// <reference types="chrome" />
+import { browser } from '../../shared/browser';
 import type { VocabCache } from '../../nlp/VocabCache';
 import type { PopupManager } from '../popup/PopupManager';
 import type { Token } from '../../shared/types';
@@ -97,7 +97,7 @@ export class SubtitleOverlay {
     targetEl.innerHTML = '<span class="cso-hint">Tokenizing…</span>';
 
     // Tokenize via background
-    const response = await chrome.runtime.sendMessage({
+    const response = await browser.runtime.sendMessage({
       type: 'TOKENIZE',
       text: cue.text,
       language: this.lang,
@@ -185,7 +185,7 @@ export class SubtitleOverlay {
 
     try {
       // Create card via background (to reuse existing API path)
-      const result = await chrome.runtime.sendMessage({
+      const result = await browser.runtime.sendMessage({
         type: 'MINE_CARD',
         lemma,
         reading,

@@ -1,16 +1,28 @@
 <script lang="ts">
+  const API_BASE: string = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080';
+
   let submitted = false;
   let email = '';
   let loading = false;
+  let errorMsg = '';
 
-  function handleSubmit(e: SubmitEvent) {
+  async function handleSubmit(e: SubmitEvent) {
     e.preventDefault();
+    errorMsg = '';
     loading = true;
-    // Simulate — email infra not yet wired up.
-    setTimeout(() => {
-      loading = false;
+    try {
+      await fetch(`${API_BASE}/v1/auth/forgot`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      // Always show success regardless of whether email exists (no enumeration).
       submitted = true;
-    }, 600);
+    } catch {
+      errorMsg = 'Could not reach the server. Please try again.';
+    } finally {
+      loading = false;
+    }
   }
 </script>
 
@@ -25,6 +37,7 @@
     {:else}
       <h1>Reset your password</h1>
       <p class="info">Enter your email and we'll send you a reset link.</p>
+      {#if errorMsg}<div class="error-msg">{errorMsg}</div>{/if}
       <form on:submit={handleSubmit}>
         <label for="email">Email</label>
         <input
@@ -130,4 +143,14 @@
   }
   .footer a { color: #9ba8c0; text-decoration: none; }
   .footer a:hover { color: #e8eaf0; }
+
+  .error-msg {
+    background: rgba(239, 83, 80, 0.12);
+    border: 1px solid rgba(239, 83, 80, 0.3);
+    color: #ef9a9a;
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.85rem;
+    margin-bottom: 0.5rem;
+  }
 </style>

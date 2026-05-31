@@ -1,4 +1,4 @@
-/// <reference types="chrome" />
+import { browser } from '../../shared/browser';
 import type { VocabCache } from '../../nlp/VocabCache';
 import type { PopupManager } from '../popup/PopupManager';
 import type { Token } from '../../shared/types';
@@ -35,6 +35,23 @@ export class PageAnnotator {
     this.observer.observe(document.body, { childList: true, subtree: true });
   }
 
+  private scriptMatcher(): (text: string) => boolean {
+    switch (this.lang) {
+      case 'ja':
+        return (t) => /[぀-ヿ一-鿿]/.test(t);
+      case 'zh-cn':
+      case 'zh-tw':
+      case 'zh':
+        return (t) => /[一-鿿]/.test(t);
+      case 'ko':
+        return (t) => /[가-힣]/.test(t);
+      case 'en':
+        return (t) => /[A-Za-z]{2,}/.test(t) && t.trim().length >= 3;
+      default:
+        return (t) => /\S{2,}/.test(t);
+    }
+  }
+
   private scheduleAnnotation(root: Element): void {
     requestIdleCallback(() => this.annotateElement(root), { timeout: 2000 });
   }
@@ -47,6 +64,7 @@ export class PageAnnotator {
   }
 
   private collectTextNodes(root: Element): Text[] {
+    const langHasScript = this.scriptMatcher();
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode: (node) => {
         const parent = node.parentElement;
@@ -54,7 +72,7 @@ export class PageAnnotator {
         if (parent.closest('[data-carve]')) return NodeFilter.FILTER_REJECT;
         if (SKIP_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
         const text = node.textContent ?? '';
-        if (!/[぀-ヿ一-鿿]/.test(text)) return NodeFilter.FILTER_REJECT;
+        if (!langHasScript(text)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       },
     });
@@ -87,7 +105,7 @@ export class PageAnnotator {
     };
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        return await chrome.runtime.sendMessage(msg);
+        return await browser.runtime.sendMessage(msg);
       } catch (e: unknown) {
         const errMsg = e instanceof Error ? e.message : '';
         const isChannelClosed = errMsg.includes('message channel closed') || errMsg.includes('Extension context');

@@ -19,6 +19,7 @@ import (
 	"github.com/carve-app/carve/services/api/internal/immersion"
 	"github.com/carve-app/carve/services/api/internal/importer"
 	"github.com/carve-app/carve/services/api/internal/library"
+	"github.com/carve-app/carve/services/api/internal/metrics"
 	"github.com/carve-app/carve/services/api/internal/nlp"
 	"github.com/carve-app/carve/services/api/internal/onboarding"
 	"github.com/carve-app/carve/services/api/internal/output"
@@ -51,6 +52,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(chimw.RealIP)
 	r.Use(chimw.RequestID)
+	r.Use(metrics.HTTPMiddleware)
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.Timeout(30 * time.Second))
@@ -68,6 +70,10 @@ func main() {
 		fmt.Fprintln(w, `{"status":"ok","service":"api"}`)
 	})
 
+	// Prometheus metrics — unauthenticated; intended for scraping inside the
+	// VPC. Add an auth proxy in production.
+	r.Get("/metrics", metrics.Handler)
+
 	// Auth routes (no auth middleware)
 	authHandler := auth.NewHandler(pool)
 	r.Route("/v1/auth", func(r chi.Router) {
@@ -75,6 +81,8 @@ func main() {
 		r.Post("/login", authHandler.Login)
 		r.Post("/refresh", authHandler.Refresh)
 		r.Post("/logout", authHandler.Logout)
+		r.Post("/forgot", authHandler.ForgotPassword)
+		r.Post("/reset", authHandler.ResetPassword)
 	})
 
 	// Protected routes
@@ -107,15 +115,21 @@ func main() {
 
 		// Cards
 		r.Post("/cards", cardsHandler.Create)
+		r.Post("/cards/bulk", cardsHandler.Bulk)
 		r.Get("/cards", cardsHandler.List)
 		r.Get("/cards/{id}", cardsHandler.Get)
+		r.Patch("/cards/{id}", cardsHandler.Update)
 		r.Delete("/cards/{id}", cardsHandler.Delete)
 		r.Post("/cards/{id}/media", cardsHandler.AttachMedia)
+		r.Post("/cards/{id}/suspend", cardsHandler.Suspend)
+		r.Post("/cards/{id}/unsuspend", cardsHandler.Unsuspend)
+		r.Post("/cards/{id}/bury", cardsHandler.Bury)
 
 		// Review
 		r.Get("/review/due-count", reviewHandler.DueCount)
 		r.Get("/review/session", reviewHandler.Session)
 		r.Post("/review/events", reviewHandler.SubmitEvent)
+		r.Post("/review/undo", reviewHandler.Undo)
 		r.Get("/review/intervals", reviewHandler.Intervals)
 		r.Get("/review/forecast", reviewHandler.Forecast)
 		r.Get("/review/notifications", reviewHandler.Notifications)
@@ -169,6 +183,7 @@ func main() {
 		r.Post("/output/submit", outputHandler.Submit)
 		r.Get("/output/shadowing", outputHandler.ShadowingQueue)
 		r.Post("/output/shadowing/{id}/complete", outputHandler.CompleteShadowing)
+		r.Post("/output/transcribe", outputHandler.Transcribe)
 
 	})
 

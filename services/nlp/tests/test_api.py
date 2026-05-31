@@ -93,8 +93,18 @@ class TestTokenize:
         assert any(t["user_status"] == "unknown" for t in content)
 
     def test_unsupported_language(self):
-        r = client.post("/tokenize", json={"text": "hello", "language": "en"})
+        r = client.post("/tokenize", json={"text": "hello", "language": "fr"})
         assert r.status_code == 422
+
+    def test_english_tokenize(self):
+        r = client.post("/tokenize", json={"text": "The cats were running quickly.", "language": "en"})
+        assert r.status_code == 200
+        tokens = r.json()["tokens"]
+        lemmas = {t["lemma"] for t in tokens}
+        # plural collapses, past-progressive collapses
+        assert "cat" in lemmas
+        assert "run" in lemmas
+        assert "quickly" in lemmas or "quick" in lemmas
 
     def test_migaku_failure_case_gozaimasen(self):
         """ございません must return correct full reading."""
@@ -156,7 +166,7 @@ class TestLookup:
             assert "reading" in span
 
     def test_lookup_unsupported_language(self):
-        r = client.post("/lookup", json={"surface": "hello", "language": "en"})
+        r = client.post("/lookup", json={"surface": "bonjour", "language": "fr"})
         assert r.status_code == 422
 
     def test_lookup_kana_only(self):

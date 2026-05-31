@@ -22,7 +22,7 @@
   let mineSuccess: string | null = null;
 
   onMount(async () => {
-    const id = $page.params.id;
+    const id = $page.params.id ?? '';
     try {
       const data = await fetchLibraryReader(id);
       title = data.title;

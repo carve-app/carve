@@ -1,4 +1,3 @@
-/// <reference types="chrome" />
 import { storageGet, storageSet } from '../shared/storage';
 
 export class VocabCache {

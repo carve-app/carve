@@ -10,6 +10,7 @@ import (
 
 	"github.com/carve-app/carve/services/api/internal/auth"
 	"github.com/carve-app/carve/services/api/internal/fsrs"
+	"github.com/carve-app/carve/services/api/internal/metrics"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -298,6 +299,7 @@ func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result := fsrs.Schedule(p, cs, fsrs.Rating(req.Rating), reviewedAt)
+	metrics.IncCounter("fsrs_event_total")
 
 	// Persist updated card state
 	_, err = h.db.Exec(ctx,
@@ -327,15 +329,18 @@ func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Store review event
+	// Store review event with prior state snapshot (needed for undo).
 	eventID := auth.NewID()
 	_, err = h.db.Exec(ctx,
 		`INSERT INTO review_events
 		   (id, card_id, user_id, reviewed_at, rating, time_taken_ms,
-		    stability_after, difficulty_after, due_after, retrievability_at_review)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		    stability_after, difficulty_after, due_after, retrievability_at_review,
+		    prior_fsrs_state, prior_fsrs_stability, prior_fsrs_difficulty,
+		    prior_fsrs_due, prior_fsrs_reps, prior_fsrs_lapses)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
 		eventID, req.CardID, claims.UserID, reviewedAt, req.Rating, req.TimeMS,
 		result.Stability, result.Difficulty, result.Due, result.Retrievability,
+		card.State, card.Stability, card.Difficulty, card.LastReview, card.Reps, card.Lapses,
 	)
 	if err != nil {
 		slog.Error("insert review event", "error", err)
@@ -553,6 +558,88 @@ func (h *Handler) MarkNotificationRead(w http.ResponseWriter, r *http.Request) {
 		id, claims.UserID,
 	)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ── POST /v1/review/undo ──────────────────────────────────────────────────────
+// Reverts the most-recent review event for the authenticated user, provided it
+// was submitted within the last 10 minutes. Restores the card to its prior FSRS
+// state using the snapshot stored in review_events.
+
+func (h *Handler) Undo(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.ClaimsFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Find the latest event within the undo window.
+	var event struct {
+		ID              string
+		CardID          string
+		PriorState      string
+		PriorStability  *float64
+		PriorDifficulty *float64
+		PriorDue        *time.Time
+		PriorReps       int
+		PriorLapses     int
+		ReviewedAt      time.Time
+	}
+	err := h.db.QueryRow(ctx,
+		`SELECT id, card_id,
+		        COALESCE(prior_fsrs_state, 'new'),
+		        prior_fsrs_stability, prior_fsrs_difficulty, prior_fsrs_due,
+		        COALESCE(prior_fsrs_reps, 0), COALESCE(prior_fsrs_lapses, 0),
+		        reviewed_at
+		 FROM review_events
+		 WHERE user_id = $1
+		   AND reviewed_at > now() - INTERVAL '10 minutes'
+		 ORDER BY reviewed_at DESC
+		 LIMIT 1`,
+		claims.UserID,
+	).Scan(
+		&event.ID, &event.CardID,
+		&event.PriorState, &event.PriorStability, &event.PriorDifficulty,
+		&event.PriorDue, &event.PriorReps, &event.PriorLapses,
+		&event.ReviewedAt,
+	)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "no recent review event to undo")
+		return
+	}
+
+	// Restore card to prior state and delete the event in one transaction.
+	_, err = h.db.Exec(ctx,
+		`WITH deleted AS (
+		     DELETE FROM review_events WHERE id = $1 AND user_id = $2
+		 )
+		 UPDATE cards SET
+		     fsrs_state      = $3,
+		     fsrs_stability  = $4,
+		     fsrs_difficulty = $5,
+		     fsrs_due        = $6,
+		     fsrs_reps       = $7,
+		     fsrs_lapses     = $8,
+		     suspended       = FALSE,
+		     updated_at      = now()
+		 WHERE id = $9 AND user_id = $2`,
+		event.ID, claims.UserID,
+		event.PriorState, event.PriorStability, event.PriorDifficulty,
+		event.PriorDue, event.PriorReps, event.PriorLapses,
+		event.CardID,
+	)
+	if err != nil {
+		slog.Error("review undo", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"card_id":     event.CardID,
+		"undone_at":   time.Now().UTC(),
+		"prior_state": event.PriorState,
+	})
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

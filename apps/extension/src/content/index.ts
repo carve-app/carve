@@ -1,4 +1,4 @@
-/// <reference types="chrome" />
+import { browser } from '../shared/browser';
 import { VocabCache } from '../nlp/VocabCache';
 import { PageAnnotator } from './annotator/PageAnnotator';
 import { PopupManager } from './popup/PopupManager';
@@ -10,7 +10,7 @@ let annotator: PageAnnotator | null = null;
 let overlayVisible = false;
 
 async function isSiteDisabled(): Promise<boolean> {
-  const result = await chrome.storage.local.get('disabledDomains');
+  const result = await browser.storage.local.get('disabledDomains');
   const disabled: string[] = result['disabledDomains'] ?? [];
   return disabled.includes(location.hostname);
 }
@@ -31,7 +31,7 @@ function teardown(): void {
 async function init(): Promise<void> {
   if (await isSiteDisabled()) return;
 
-  const lang = detectLanguage();
+  const lang = await detectLanguage();
   if (!lang) return;
 
   injectStyles();
@@ -49,13 +49,28 @@ async function init(): Promise<void> {
   annotator.start();
 }
 
-function detectLanguage(): string | null {
-  const htmlLang = document.documentElement.lang?.slice(0, 2).toLowerCase();
-  if (htmlLang === 'ja') return 'ja';
-
+async function detectLanguage(): Promise<string | null> {
+  const htmlLang = document.documentElement.lang?.slice(0, 5).toLowerCase();
   const text = document.body?.textContent?.slice(0, 2000) ?? '';
-  const cjkCount = (text.match(/[぀-ヿ一-鿿]/g) ?? []).length;
-  if (cjkCount > 50) return 'ja';
+  const kanaCount = (text.match(/[぀-ヿ]/g) ?? []).length;
+  const cjkCount = (text.match(/[一-鿿]/g) ?? []).length;
+  const hangulCount = (text.match(/[가-힣]/g) ?? []).length;
+
+  // 1. Strong script-based signals override any user preference.
+  if (htmlLang?.startsWith('ja') || kanaCount > 20) return 'ja';
+  if (htmlLang?.startsWith('ko') || hangulCount > 30) return 'ko';
+  if (htmlLang?.startsWith('zh') || (cjkCount > 50 && kanaCount === 0 && hangulCount === 0)) return 'zh-cn';
+
+  // 2. For English (and other Latin-script pages) require explicit opt-in:
+  //    the user must have selected English as their target in the popup or
+  //    enabled "annotate this site" via per-domain settings.
+  const result = await browser.storage.local.get(['targetLanguage', 'annotateLatinSites']);
+  const target = result['targetLanguage'] as string | undefined;
+  const annotateLatin = result['annotateLatinSites'] as boolean | undefined;
+
+  if (target === 'en' && (annotateLatin || htmlLang?.startsWith('en'))) {
+    return 'en';
+  }
 
   return null;
 }
@@ -93,7 +108,7 @@ function showOverlay(): void {
   `;
   el.querySelector('#carve-overlay-close')?.addEventListener('click', () => {
     hideOverlay();
-    chrome.storage.local.set({ overlayEnabled: false });
+    browser.storage.local.set({ overlayEnabled: false });
   });
   overlayVisible = true;
 }
@@ -112,7 +127,7 @@ function toggleOverlay(): void {
 }
 
 // Listen for messages from the popup or background script.
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'SET_SITE_ENABLED') {
     if (msg.enabled) { init(); } else { teardown(); }
     sendResponse({});

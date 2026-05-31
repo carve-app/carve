@@ -129,7 +129,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GET /v1/cards?language=ja&limit=50&offset=0
+// GET /v1/cards?language=ja&limit=50&offset=0&search=...&state=review&suspended=false&is_leech=false&sort=created
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	claims, ok := auth.ClaimsFromContext(r.Context())
 	if !ok {
@@ -161,27 +161,75 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	search := q.Get("search")
+	stateFilter := q.Get("state")
+	suspendedFilter := q.Get("suspended") // "true" | "false" | ""
+	isLeechFilter := q.Get("is_leech")    // "true" | "false" | ""
+	sortBy := q.Get("sort")               // created | due | lapses | alpha
+
+	// Build WHERE conditions incrementally.
+	args := []any{claims.UserID, language}
+	where := "user_id = $1 AND language_code = $2 AND deleted_at IS NULL"
+
+	if search != "" {
+		args = append(args, search)
+		where += fmt.Sprintf(` AND to_tsvector('simple',
+			coalesce(front_text,'') || ' ' || coalesce(front_reading,'') || ' ' ||
+			coalesce(back_text,'') || ' ' || coalesce(sentence,'')
+		) @@ plainto_tsquery('simple', $%d)`, len(args))
+	}
+	if stateFilter != "" {
+		args = append(args, stateFilter)
+		where += fmt.Sprintf(` AND fsrs_state = $%d`, len(args))
+	}
+	switch suspendedFilter {
+	case "true":
+		where += " AND suspended = TRUE"
+	case "false":
+		where += " AND suspended = FALSE"
+	}
+	switch isLeechFilter {
+	case "true":
+		where += " AND is_leech = TRUE"
+	case "false":
+		where += " AND is_leech = FALSE"
+	}
+
+	orderBy := "created_at DESC"
+	switch sortBy {
+	case "due":
+		orderBy = "COALESCE(fsrs_due, '2099-01-01') ASC"
+	case "lapses":
+		orderBy = "fsrs_lapses DESC, created_at DESC"
+	case "alpha":
+		orderBy = "front_text ASC"
+	case "last_reviewed":
+		orderBy = "COALESCE(fsrs_last_review, created_at) DESC"
+	}
+
 	ctx := r.Context()
 
+	countArgs := make([]any, len(args))
+	copy(countArgs, args)
 	var total int
 	if err := h.db.QueryRow(ctx,
-		`SELECT COUNT(*) FROM cards
-		 WHERE user_id = $1 AND language_code = $2 AND deleted_at IS NULL`,
-		claims.UserID, language,
+		fmt.Sprintf(`SELECT COUNT(*) FROM cards WHERE %s`, where),
+		countArgs...,
 	).Scan(&total); err != nil {
 		slog.Error("count cards", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
+	args = append(args, limit, offset)
 	rows, err := h.db.Query(ctx,
-		`SELECT id, front_text, COALESCE(back_text,''), sentence, source_url,
-		        fsrs_state, fsrs_due, created_at
+		fmt.Sprintf(`SELECT id, front_text, COALESCE(back_text,''), sentence, source_url,
+		        fsrs_state, fsrs_due, created_at, suspended, is_leech, tags
 		 FROM cards
-		 WHERE user_id = $1 AND language_code = $2 AND deleted_at IS NULL
-		 ORDER BY created_at DESC
-		 LIMIT $3 OFFSET $4`,
-		claims.UserID, language, limit, offset,
+		 WHERE %s
+		 ORDER BY %s
+		 LIMIT $%d OFFSET $%d`, where, orderBy, len(args)-1, len(args)),
+		args...,
 	)
 	if err != nil {
 		slog.Error("list cards query", "error", err)
@@ -200,21 +248,28 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		FsrsState string     `json:"fsrs_state"`
 		FsrsDue   *time.Time `json:"fsrs_due"`
 		CreatedAt time.Time  `json:"created_at"`
+		Suspended bool       `json:"suspended"`
+		IsLeech   bool       `json:"is_leech"`
+		Tags      []string   `json:"tags"`
 	}
 
-	cards := []cardRow{}
+	cardList := []cardRow{}
 	for rows.Next() {
 		var c cardRow
 		if err := rows.Scan(
 			&c.ID, &c.FrontText, &c.BackText, &c.Sentence,
 			&c.SourceURL, &c.FsrsState, &c.FsrsDue, &c.CreatedAt,
+			&c.Suspended, &c.IsLeech, &c.Tags,
 		); err != nil {
 			slog.Error("scan card row", "error", err)
 			writeError(w, http.StatusInternalServerError, "internal error")
 			return
 		}
+		if c.Tags == nil {
+			c.Tags = []string{}
+		}
 		c.Lemma = c.FrontText
-		cards = append(cards, c)
+		cardList = append(cardList, c)
 	}
 	if err := rows.Err(); err != nil {
 		slog.Error("rows error listing cards", "error", err)
@@ -223,7 +278,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"cards":  cards,
+		"cards":  cardList,
 		"total":  total,
 		"limit":  limit,
 		"offset": offset,
@@ -259,6 +314,10 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		FsrsDifficulty      *float64   `json:"difficulty"`
 		FsrsReps            int        `json:"reps"`
 		FsrsLapses          int        `json:"lapses"`
+		Suspended           bool       `json:"suspended"`
+		IsLeech             bool       `json:"is_leech"`
+		Notes               *string    `json:"notes"`
+		Tags                []string   `json:"tags"`
 		CreatedAt           time.Time  `json:"created_at"`
 	}
 
@@ -267,6 +326,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		        source_url, video_source_url, front_audio_url, front_image_url,
 		        subtitle_start_ms, subtitle_end_ms,
 		        fsrs_state, fsrs_due, fsrs_stability, fsrs_difficulty, fsrs_reps, fsrs_lapses,
+		        suspended, is_leech, notes, COALESCE(tags, '{}'),
 		        created_at
 		 FROM cards
 		 WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`,
@@ -276,6 +336,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		&c.SourceURL, &c.VideoSourceURL, &c.FrontAudioURL, &c.FrontImageURL,
 		&c.SubtitleStartMs, &c.SubtitleEndMs,
 		&c.FsrsState, &c.FsrsDue, &c.FsrsStability, &c.FsrsDifficulty, &c.FsrsReps, &c.FsrsLapses,
+		&c.Suspended, &c.IsLeech, &c.Notes, &c.Tags,
 		&c.CreatedAt,
 	)
 	if err != nil {
@@ -408,6 +469,174 @@ func formInt(r *http.Request, field string) *int {
 		return nil
 	}
 	return &n
+}
+
+// PATCH /v1/cards/{id}
+func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.ClaimsFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	cardID := chi.URLParam(r, "id")
+
+	var req struct {
+		BackText    *string  `json:"back_text"`
+		Sentence    *string  `json:"sentence"`
+		Translation *string  `json:"subtitle_translation"`
+		FrontText   *string  `json:"front_text"`
+		FrontReading *string `json:"front_reading"`
+		Notes       *string  `json:"notes"`
+		Tags        []string `json:"tags"`
+		DeckID      *string  `json:"deck_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+
+	tag, err := h.db.Exec(r.Context(),
+		`UPDATE cards SET
+			back_text             = COALESCE($1, back_text),
+			sentence              = COALESCE($2, sentence),
+			subtitle_translation  = COALESCE($3, subtitle_translation),
+			front_text            = COALESCE($4, front_text),
+			front_reading         = COALESCE($5, front_reading),
+			notes                 = COALESCE($6, notes),
+			tags                  = COALESCE($7::text[], tags),
+			deck_id               = COALESCE($8::uuid, deck_id),
+			updated_at            = now()
+		 WHERE id = $9 AND user_id = $10 AND deleted_at IS NULL`,
+		req.BackText, req.Sentence, req.Translation,
+		req.FrontText, req.FrontReading, req.Notes,
+		tagsArg(req.Tags), req.DeckID,
+		cardID, claims.UserID,
+	)
+	if err != nil {
+		slog.Error("update card", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "card not found")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// tagsArg converts a Go string slice to a pointer for COALESCE logic:
+// nil slice → nil (no update), empty or populated → pointer to the value.
+func tagsArg(tags []string) interface{} {
+	if tags == nil {
+		return nil
+	}
+	return tags
+}
+
+// POST /v1/cards/{id}/suspend
+func (h *Handler) Suspend(w http.ResponseWriter, r *http.Request) {
+	h.setLifecycleFlag(w, r, "suspended", true)
+}
+
+// POST /v1/cards/{id}/unsuspend
+func (h *Handler) Unsuspend(w http.ResponseWriter, r *http.Request) {
+	h.setLifecycleFlag(w, r, "suspended", false)
+}
+
+// POST /v1/cards/{id}/bury
+func (h *Handler) Bury(w http.ResponseWriter, r *http.Request) {
+	h.setLifecycleFlag(w, r, "buried", true)
+}
+
+func (h *Handler) setLifecycleFlag(w http.ResponseWriter, r *http.Request, col string, val bool) {
+	claims, ok := auth.ClaimsFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	cardID := chi.URLParam(r, "id")
+
+	var query string
+	switch col {
+	case "suspended":
+		if val {
+			query = `UPDATE cards SET suspended = TRUE, updated_at = now() WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`
+		} else {
+			query = `UPDATE cards SET suspended = FALSE, updated_at = now() WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`
+		}
+	case "buried":
+		query = `UPDATE cards SET buried = TRUE, updated_at = now() WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`
+	default:
+		writeError(w, http.StatusBadRequest, "unknown lifecycle flag")
+		return
+	}
+
+	tag, err := h.db.Exec(r.Context(), query, cardID, claims.UserID)
+	if err != nil {
+		slog.Error("lifecycle update", "col", col, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "card not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{col: val})
+}
+
+// POST /v1/cards/bulk
+// Body: {"action": "suspend"|"unsuspend"|"bury"|"delete", "ids": [...]}
+func (h *Handler) Bulk(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.ClaimsFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	var req struct {
+		Action string   `json:"action"`
+		IDs    []string `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "ids required")
+		return
+	}
+	if len(req.IDs) > 500 {
+		writeError(w, http.StatusBadRequest, "too many ids (max 500)")
+		return
+	}
+
+	var query string
+	switch req.Action {
+	case "suspend":
+		query = `UPDATE cards SET suspended = TRUE, updated_at = now() WHERE user_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`
+	case "unsuspend":
+		query = `UPDATE cards SET suspended = FALSE, updated_at = now() WHERE user_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`
+	case "bury":
+		query = `UPDATE cards SET buried = TRUE, updated_at = now() WHERE user_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`
+	case "delete":
+		query = `UPDATE cards SET deleted_at = now() WHERE user_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`
+	default:
+		writeError(w, http.StatusBadRequest, "unknown action")
+		return
+	}
+
+	tag, err := h.db.Exec(r.Context(), query, claims.UserID, req.IDs)
+	if err != nil {
+		slog.Error("bulk card action", "action", req.Action, "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"affected": tag.RowsAffected()})
 }
 
 // DELETE /v1/cards/:id
