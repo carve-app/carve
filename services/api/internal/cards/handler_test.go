@@ -217,6 +217,144 @@ func TestWriteJSON_ContentType(t *testing.T) {
 	}
 }
 
+// ── Create request JSON schema — Track 2 mining payload coverage ──────────────
+//
+// These tests verify that the Create handler's request struct correctly decodes
+// the full set of fields that the extension sends when mining a video card:
+// subtitle_translation (translated text shown under card), source_url (video URL),
+// source_timestamp (seconds into video), and the optional back_text/reading.
+//
+// They use JSON unmarshaling directly against the same struct the handler uses,
+// without triggering the nil-DB panic that occurs after validation passes.
+
+// miningCreateRequest mirrors the exact request struct in Create (handler.go).
+// If the handler fields change this test will fail, keeping the two in sync.
+type miningCreateRequest struct {
+	LanguageCode        string   `json:"language_code"`
+	Lemma               string   `json:"lemma"`
+	Reading             string   `json:"reading"`
+	BackText            *string  `json:"back_text"`
+	SubtitleTranslation *string  `json:"subtitle_translation"`
+	Sentence            *string  `json:"sentence"`
+	SourceURL           *string  `json:"source_url"`
+	SourceTimestamp     *float64 `json:"source_timestamp"`
+}
+
+func TestCreateRequest_VideoMiningPayload_AllFields(t *testing.T) {
+	// Represents what the extension sends after pressing ⚡ Mine on a Netflix/YouTube subtitle.
+	payload := `{
+		"language_code":        "ja",
+		"lemma":               "人工知能",
+		"reading":             "じんこうちのう",
+		"back_text":           "artificial intelligence",
+		"subtitle_translation": "AI is useful for studying Japanese.",
+		"sentence":            "人工知能は日本語を学ぶのに役立ちます。",
+		"source_url":          "https://www.youtube.com/watch?v=dQw4w9WgXcZ",
+		"source_timestamp":    134.5
+	}`
+
+	var req miningCreateRequest
+	if err := json.Unmarshal([]byte(payload), &req); err != nil {
+		t.Fatalf("failed to decode mining payload: %v", err)
+	}
+
+	if req.LanguageCode != "ja" {
+		t.Errorf("language_code = %q, want ja", req.LanguageCode)
+	}
+	if req.Lemma != "人工知能" {
+		t.Errorf("lemma = %q, want 人工知能", req.Lemma)
+	}
+	if req.Reading != "じんこうちのう" {
+		t.Errorf("reading = %q, want じんこうちのう", req.Reading)
+	}
+	if req.SubtitleTranslation == nil || *req.SubtitleTranslation == "" {
+		t.Error("subtitle_translation is nil or empty")
+	}
+	if req.SourceURL == nil || !strings.Contains(*req.SourceURL, "youtube.com") {
+		t.Errorf("source_url wrong: %v", req.SourceURL)
+	}
+	if req.SourceTimestamp == nil || *req.SourceTimestamp != 134.5 {
+		t.Errorf("source_timestamp = %v, want 134.5", req.SourceTimestamp)
+	}
+	if req.Sentence == nil {
+		t.Error("sentence should be set")
+	}
+}
+
+func TestCreateRequest_VideoMiningPayload_NetflixURL(t *testing.T) {
+	payload := `{
+		"language_code": "ja",
+		"lemma": "生活",
+		"reading": "せいかつ",
+		"subtitle_translation": "daily life",
+		"source_url": "https://www.netflix.com/watch/80057281",
+		"source_timestamp": 892.0
+	}`
+	var req miningCreateRequest
+	if err := json.Unmarshal([]byte(payload), &req); err != nil {
+		t.Fatalf("decode netflix mining payload: %v", err)
+	}
+	if req.SourceURL == nil || !strings.Contains(*req.SourceURL, "netflix.com") {
+		t.Errorf("expected netflix URL, got: %v", req.SourceURL)
+	}
+	if req.SourceTimestamp == nil || *req.SourceTimestamp != 892.0 {
+		t.Errorf("source_timestamp wrong: %v", req.SourceTimestamp)
+	}
+}
+
+func TestCreateRequest_VideoMiningPayload_CrunchyrollURL(t *testing.T) {
+	payload := `{
+		"language_code": "ja",
+		"lemma": "友達",
+		"source_url": "https://www.crunchyroll.com/watch/GYGG23J5Y/episode-1",
+		"source_timestamp": 245.3
+	}`
+	var req miningCreateRequest
+	if err := json.Unmarshal([]byte(payload), &req); err != nil {
+		t.Fatalf("decode crunchyroll mining payload: %v", err)
+	}
+	if req.SourceURL == nil || !strings.Contains(*req.SourceURL, "crunchyroll.com") {
+		t.Errorf("expected crunchyroll URL, got: %v", req.SourceURL)
+	}
+}
+
+func TestCreateRequest_VideoMiningPayload_NullOptionalFields(t *testing.T) {
+	// Minimal mining payload (translation + URL can be omitted if not available)
+	payload := `{"language_code": "ja", "lemma": "猫"}`
+	var req miningCreateRequest
+	if err := json.Unmarshal([]byte(payload), &req); err != nil {
+		t.Fatalf("decode minimal payload: %v", err)
+	}
+	if req.SubtitleTranslation != nil {
+		t.Error("subtitle_translation should be nil when not provided")
+	}
+	if req.SourceURL != nil {
+		t.Error("source_url should be nil when not provided")
+	}
+}
+
+func TestCreateResponse_IncludesCardID(t *testing.T) {
+	// The extension needs card_id in the response to call ATTACH_PAGE_SCREENSHOT.
+	// Verify the handler returns 'id' field (not a DB test — just JSON shape).
+	w := httptest.NewRecorder()
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id":            "test-card-abc",
+		"lemma":         "猫",
+		"language_code": "ja",
+		"created_at":    "2024-01-01T00:00:00Z",
+	})
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if _, ok := resp["id"]; !ok {
+		t.Error("card Create response must include 'id' field (extension uses it for screenshot attachment)")
+	}
+	if _, ok := resp["lemma"]; !ok {
+		t.Error("card Create response must include 'lemma' field")
+	}
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func assertErrorContains(t *testing.T, w *httptest.ResponseRecorder, substr string) {

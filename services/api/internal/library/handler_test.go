@@ -3,6 +3,7 @@ package library
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/carve-app/carve/services/api/internal/auth"
 )
+
+func intPtr2(n int) *int { return &n }
 
 // ── parseSRT ──────────────────────────────────────────────────────────────────
 
@@ -214,6 +217,169 @@ func TestImportFile_NoFile(t *testing.T) {
 
 // TestImportFile_TxtType and TestImportFile_SrtType are integration tests
 // that require a real DB. File-type validation is covered by TestImportFile_WrongFileType.
+
+// ── Reader token schema → card creation parity (Track 3) ─────────────────────
+//
+// The reader returns NLP tokens. The extension reads those tokens and constructs
+// a MINE_CARD message → background SW → POST /v1/cards.
+// These tests verify that the token fields the reader exposes are sufficient to
+// populate all required and optional card creation fields — "parity" means a card
+// mined from the reader has the same fidelity as a card mined from a video.
+
+// readerToken mirrors the JSON fields the library Read handler plucks from the
+// NLP service response and forwards to the extension. (tokenShape in handler.go)
+type readerToken struct {
+	Surface       string  `json:"surface"`
+	Lemma         string  `json:"lemma"`
+	ReadingHira   string  `json:"reading_hira"`
+	Pos           string  `json:"pos"`
+	IsContentWord bool    `json:"is_content_word"`
+	UserStatus    string  `json:"user_status"`
+	FrequencyRank *int    `json:"frequency_rank"`
+}
+
+func TestReaderTokenSchema_HasRequiredMiningFields(t *testing.T) {
+	// Simulate the JSON the NLP service sends for a single token.
+	raw := `{
+		"surface":        "人工知能",
+		"lemma":          "人工知能",
+		"reading_hira":   "じんこうちのう",
+		"pos":            "名詞",
+		"is_content_word": true,
+		"user_status":    "unknown",
+		"frequency_rank": 4200
+	}`
+	var tok readerToken
+	if err := json.Unmarshal([]byte(raw), &tok); err != nil {
+		t.Fatalf("unmarshal reader token: %v", err)
+	}
+
+	// These four fields are non-negotiable: without them the extension cannot
+	// create a card or colour-code the underline.
+	if tok.Lemma == "" {
+		t.Error("lemma must be non-empty — used as card front_text")
+	}
+	if tok.ReadingHira == "" {
+		t.Error("reading_hira must be non-empty — used as card front_reading")
+	}
+	if tok.UserStatus == "" {
+		t.Error("user_status must be non-empty — used for underline colour")
+	}
+	if !tok.IsContentWord {
+		t.Error("is_content_word must be true — only content words are clickable")
+	}
+}
+
+func TestReaderTokenSchema_MapsToCardCreateRequest(t *testing.T) {
+	// Verify that a reader token provides everything needed for a card Create call.
+	tok := readerToken{
+		Surface:       "生活",
+		Lemma:         "生活",
+		ReadingHira:   "せいかつ",
+		IsContentWord: true,
+		UserStatus:    "unknown",
+		FrequencyRank: intPtr2(1500),
+	}
+	const sourceURL = "https://carve.app/reader/item-123"
+	const sentence  = "私たちの生活を大きく変える。"
+	const langCode  = "ja"
+
+	// card Create payload as the extension would send it
+	cardPayload := map[string]any{
+		"language_code": langCode,
+		"lemma":         tok.Lemma,        // front_text
+		"reading":       tok.ReadingHira,  // front_reading
+		"sentence":      sentence,
+		"source_url":    sourceURL,
+	}
+
+	if cardPayload["lemma"] == "" {
+		t.Error("lemma must be derivable from token.Lemma")
+	}
+	if cardPayload["reading"] == "" {
+		t.Error("reading must be derivable from token.ReadingHira")
+	}
+	if cardPayload["source_url"] == "" {
+		t.Error("source_url must be the reader page URL")
+	}
+}
+
+func TestReaderTokenSchema_UnknownStatusOnly_ContentWordsClickable(t *testing.T) {
+	// The extension only shows the popup for tokens with data-content="1".
+	// Verify the schema: non-content words are not marked clickable.
+	tokens := []struct {
+		raw     string
+		wantCW  bool
+	}{
+		{`{"lemma":"猫","is_content_word":true,"user_status":"unknown"}`,  true},
+		{`{"lemma":"は","is_content_word":false,"user_status":"known"}`,   false},
+		{`{"lemma":"を","is_content_word":false,"user_status":"known"}`,   false},
+		{`{"lemma":"走る","is_content_word":true,"user_status":"learning"}`, true},
+	}
+	for _, tc := range tokens {
+		var tok readerToken
+		if err := json.Unmarshal([]byte(tc.raw), &tok); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if tok.IsContentWord != tc.wantCW {
+			t.Errorf("lemma=%q: is_content_word=%v, want %v", tok.Lemma, tok.IsContentWord, tc.wantCW)
+		}
+	}
+}
+
+func TestReaderResponse_TokensPassedThrough(t *testing.T) {
+	// The Read handler writes nlpResult.Tokens directly to the response without
+	// re-encoding. Verify that a JSON-round-trip through []json.RawMessage
+	// preserves all token fields the extension depends on.
+	tokensJSON := `[
+		{"surface":"猫","lemma":"猫","reading_hira":"ねこ","pos":"名詞","is_content_word":true,"user_status":"unknown","frequency_rank":3200},
+		{"surface":"は","lemma":"は","reading_hira":"は","pos":"助詞","is_content_word":false,"user_status":"known","frequency_rank":null}
+	]`
+	var rawTokens []json.RawMessage
+	if err := json.Unmarshal([]byte(tokensJSON), &rawTokens); err != nil {
+		t.Fatalf("unmarshal raw tokens: %v", err)
+	}
+
+	// Simulate what the Read handler does: pass tokens through to response
+	resp := map[string]any{
+		"id":     "item-123",
+		"tokens": rawTokens,
+	}
+	encoded, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+
+	var decoded struct {
+		ID     string            `json:"id"`
+		Tokens []json.RawMessage `json:"tokens"`
+	}
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	if len(decoded.Tokens) != 2 {
+		t.Errorf("expected 2 tokens, got %d", len(decoded.Tokens))
+	}
+
+	// Verify first token still has all required fields after pass-through
+	var firstTok readerToken
+	if err := json.Unmarshal(decoded.Tokens[0], &firstTok); err != nil {
+		t.Fatalf("unmarshal first token: %v", err)
+	}
+	if firstTok.Lemma != "猫" {
+		t.Errorf("lemma corrupted: %q", firstTok.Lemma)
+	}
+	if firstTok.ReadingHira != "ねこ" {
+		t.Errorf("reading_hira corrupted: %q", firstTok.ReadingHira)
+	}
+	if firstTok.UserStatus != "unknown" {
+		t.Errorf("user_status corrupted: %q", firstTok.UserStatus)
+	}
+	if !firstTok.IsContentWord {
+		t.Error("is_content_word corrupted")
+	}
+}
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

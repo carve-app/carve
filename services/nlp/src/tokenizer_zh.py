@@ -65,7 +65,7 @@ def _is_traditional(text: str) -> bool:
 def _tone_from_pinyin(py: str) -> int:
     """Extract tone number from a pinyin syllable with diacritics."""
     tone_map = {
-        "ā": 1, "á": 1, "ǎ": 3, "à": 4,
+        "ā": 1, "á": 2, "ǎ": 3, "à": 4,
         "ē": 1, "é": 2, "ě": 3, "è": 4,
         "ī": 1, "í": 2, "ǐ": 3, "ì": 4,
         "ō": 1, "ó": 2, "ǒ": 3, "ò": 4,

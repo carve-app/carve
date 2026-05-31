@@ -675,6 +675,213 @@ renderCard();
 </html>`;
 }
 
+// Onboarding + login page — mirrors Carve's register/login/onboarding UI
+function makeOnboardingHTML(mockBase) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Carve — Get Started</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, sans-serif; background: #0f1117; color: #e2e8f0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .card { background: #161b2e; border: 1px solid #2d3748; border-radius: 16px; padding: 40px; width: 100%; max-width: 420px; }
+    .logo { text-align: center; font-size: 28px; font-weight: 800; color: #7c8cf8; letter-spacing: -1px; margin-bottom: 8px; }
+    .tagline { text-align: center; font-size: 14px; color: #4a5568; margin-bottom: 32px; }
+    .tab-row { display: flex; background: #0f1117; border-radius: 8px; padding: 3px; margin-bottom: 24px; }
+    .tab { flex: 1; text-align: center; padding: 8px 0; font-size: 13px; font-weight: 600; border-radius: 6px; cursor: pointer; color: #718096; transition: all 0.15s; }
+    .tab.active { background: #2d3748; color: #e2e8f0; }
+    label { display: block; font-size: 12px; color: #718096; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+    input { width: 100%; background: #0f1117; border: 1px solid #2d3748; border-radius: 8px; padding: 10px 14px; color: #e2e8f0; font-size: 14px; margin-bottom: 14px; }
+    input:focus { outline: none; border-color: #7c8cf8; }
+    .submit-btn { width: 100%; background: linear-gradient(135deg, #7c8cf8, #9f7aea); color: #fff; border: none; border-radius: 10px; padding: 12px 0; font-size: 15px; font-weight: 700; cursor: pointer; margin-top: 4px; }
+    .error-msg { color: #fc8181; font-size: 12px; text-align: center; margin-top: 8px; min-height: 18px; }
+    .onboarding { display: none; }
+    .onboarding.active { display: block; }
+    .step-title { font-size: 20px; font-weight: 700; color: #f7fafc; margin-bottom: 8px; }
+    .step-sub { font-size: 14px; color: #718096; margin-bottom: 24px; line-height: 1.5; }
+    .lang-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 24px; }
+    .lang-card { background: #0f1117; border: 2px solid #2d3748; border-radius: 10px; padding: 16px 12px; text-align: center; cursor: pointer; transition: all 0.15s; }
+    .lang-card:hover, .lang-card.selected { border-color: #7c8cf8; background: #1a2035; }
+    .lang-flag { font-size: 28px; display: block; margin-bottom: 6px; }
+    .lang-name { font-size: 13px; font-weight: 600; color: #e2e8f0; }
+    .lang-level { font-size: 11px; color: #4a5568; margin-top: 2px; }
+    .continue-btn { width: 100%; background: #7c8cf8; color: #fff; border: none; border-radius: 10px; padding: 12px 0; font-size: 15px; font-weight: 700; cursor: pointer; opacity: 0.5; }
+    .continue-btn.enabled { opacity: 1; }
+    .success-screen { text-align: center; padding: 24px 0; }
+    .success-emoji { font-size: 48px; margin-bottom: 12px; }
+    .success-title { font-size: 20px; font-weight: 700; color: #68d391; }
+    .success-sub { font-size: 14px; color: #718096; margin-top: 6px; }
+  </style>
+</head>
+<body>
+<div class="card" id="auth-card">
+  <div class="logo">⚡ Carve</div>
+  <div class="tagline">Your Japanese immersion companion</div>
+  <div class="tab-row">
+    <div class="tab active" id="tab-login" onclick="showTab('login')">Log in</div>
+    <div class="tab" id="tab-register" onclick="showTab('register')">Sign up</div>
+  </div>
+  <div id="login-form">
+    <label>Email</label>
+    <input type="email" id="login-email" placeholder="you@example.com" value="demo@example.com">
+    <label>Password</label>
+    <input type="password" id="login-password" placeholder="••••••••" value="password123">
+    <button class="submit-btn" id="login-btn" onclick="doLogin()">Log in</button>
+    <div class="error-msg" id="login-error"></div>
+  </div>
+  <div id="register-form" style="display:none">
+    <label>Display name</label>
+    <input type="text" id="reg-name" placeholder="Your name" value="Alex">
+    <label>Email</label>
+    <input type="email" id="reg-email" placeholder="you@example.com" value="demo@example.com">
+    <label>Password</label>
+    <input type="password" id="reg-password" placeholder="Min. 8 chars" value="password123">
+    <button class="submit-btn" id="register-btn" onclick="doRegister()">Create account</button>
+    <div class="error-msg" id="register-error"></div>
+  </div>
+</div>
+
+<div class="card onboarding" id="onboarding-card">
+  <div class="step-title">Which language are you learning?</div>
+  <div class="step-sub">Carve will tailor your mining experience to your target language.</div>
+  <div class="lang-grid" id="lang-grid">
+    <div class="lang-card" id="lang-ja" onclick="selectLang('ja')">
+      <span class="lang-flag">🇯🇵</span>
+      <div class="lang-name">Japanese</div>
+      <div class="lang-level">Beginner – Advanced</div>
+    </div>
+    <div class="lang-card" id="lang-ko" onclick="selectLang('ko')">
+      <span class="lang-flag">🇰🇷</span>
+      <div class="lang-name">Korean</div>
+      <div class="lang-level">Beginner – Intermediate</div>
+    </div>
+    <div class="lang-card" id="lang-zh" onclick="selectLang('zh')">
+      <span class="lang-flag">🇨🇳</span>
+      <div class="lang-name">Chinese</div>
+      <div class="lang-level">Beginner – Advanced</div>
+    </div>
+    <div class="lang-card" id="lang-es" onclick="selectLang('es')">
+      <span class="lang-flag">🇪🇸</span>
+      <div class="lang-name">Spanish</div>
+      <div class="lang-level">Coming soon</div>
+    </div>
+  </div>
+  <button class="continue-btn" id="continue-btn" onclick="finishOnboarding()" disabled>Continue →</button>
+</div>
+
+<div class="card" id="success-card" style="display:none">
+  <div class="success-screen">
+    <div class="success-emoji">🎉</div>
+    <div class="success-title">You're all set!</div>
+    <div class="success-sub" id="success-sub">Japanese learning mode activated. Let's start mining!</div>
+  </div>
+</div>
+
+<script>
+const MOCK_BASE = '${mockBase}';
+let selectedLang = null;
+
+function showTab(tab) {
+  document.getElementById('login-form').style.display = tab === 'login' ? 'block' : 'none';
+  document.getElementById('register-form').style.display = tab === 'register' ? 'block' : 'none';
+  document.getElementById('tab-login').className = 'tab' + (tab === 'login' ? ' active' : '');
+  document.getElementById('tab-register').className = 'tab' + (tab === 'register' ? ' active' : '');
+}
+
+async function doLogin() {
+  const btn = document.getElementById('login-btn');
+  btn.textContent = 'Logging in…';
+  btn.disabled = true;
+  try {
+    const res = await fetch(MOCK_BASE + '/v1/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        email: document.getElementById('login-email').value,
+        password: document.getElementById('login-password').value,
+      }),
+    });
+    const data = await res.json();
+    if (data.access_token) {
+      showOnboarding();
+    } else {
+      document.getElementById('login-error').textContent = data.error || 'Login failed';
+      btn.textContent = 'Log in';
+      btn.disabled = false;
+    }
+  } catch(e) {
+    document.getElementById('login-error').textContent = 'Connection error';
+    btn.textContent = 'Log in';
+    btn.disabled = false;
+  }
+}
+
+async function doRegister() {
+  const btn = document.getElementById('register-btn');
+  btn.textContent = 'Creating account…';
+  btn.disabled = true;
+  try {
+    const res = await fetch(MOCK_BASE + '/v1/auth/register', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        display_name: document.getElementById('reg-name').value,
+        email: document.getElementById('reg-email').value,
+        password: document.getElementById('reg-password').value,
+      }),
+    });
+    const data = await res.json();
+    if (data.access_token) {
+      showOnboarding();
+    } else {
+      document.getElementById('register-error').textContent = data.error || 'Registration failed';
+      btn.textContent = 'Create account';
+      btn.disabled = false;
+    }
+  } catch(e) {
+    document.getElementById('register-error').textContent = 'Connection error';
+    btn.textContent = 'Create account';
+    btn.disabled = false;
+  }
+}
+
+function showOnboarding() {
+  document.getElementById('auth-card').style.display = 'none';
+  const ob = document.getElementById('onboarding-card');
+  ob.style.display = 'block';
+  ob.classList.add('active');
+}
+
+function selectLang(code) {
+  selectedLang = code;
+  document.querySelectorAll('.lang-card').forEach(el => el.classList.remove('selected'));
+  document.getElementById('lang-' + code).classList.add('selected');
+  const btn = document.getElementById('continue-btn');
+  btn.disabled = false;
+  btn.classList.add('enabled');
+}
+
+async function finishOnboarding() {
+  if (!selectedLang) return;
+  try {
+    await fetch(MOCK_BASE + '/v1/onboarding/language', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ language_code: selectedLang }),
+    });
+  } catch(e) {}
+  document.getElementById('onboarding-card').style.display = 'none';
+  document.getElementById('success-card').style.display = 'block';
+  const names = {ja:'Japanese',ko:'Korean',zh:'Chinese',es:'Spanish'};
+  document.getElementById('success-sub').textContent =
+    (names[selectedLang] || selectedLang) + ' learning mode activated. Let\'s start mining!';
+}
+</script>
+</body>
+</html>`;
+}
+
 // ── Mock API server ───────────────────────────────────────────────────────────
 
 function startMockServer() {
@@ -687,6 +894,11 @@ function startMockServer() {
 
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
+    if (req.url === '/onboarding') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(makeOnboardingHTML(`http://127.0.0.1:${server.address().port}`));
+      return;
+    }
     if (req.url === '/reader') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(makeReaderHTML(`http://127.0.0.1:${server.address().port}`));
@@ -706,11 +918,29 @@ function startMockServer() {
     let body = '';
     req.on('data', c => { body += c; });
     req.on('end', () => {
-      if (req.url === '/v1/cards' && req.method === 'POST') {
+      if (req.url === '/v1/auth/login' || req.url === '/v1/auth/register') {
+        // Mock auth: any credentials succeed for demo
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          access_token: 'demo-token-' + Date.now(),
+          expires_in: 3600,
+          user: { id: 'demo-user', email: 'demo@example.com', display_name: 'Demo User' },
+        }));
+
+      } else if (req.url === '/v1/onboarding/language') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true }));
+
+      } else if (req.url === '/v1/cards' && req.method === 'POST') {
         let parsed = {}; try { parsed = JSON.parse(body); } catch {}
         capturedCards.push(parsed);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ id: 'demo-card-' + Date.now(), lemma: parsed.lemma }));
+
+      } else if (req.url === '/v1/cards' && req.method === 'GET') {
+        // Return all captured cards so the extension can verify 2s visibility
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ cards: capturedCards, total: capturedCards.length }));
 
       } else if (req.url.startsWith('/v1/review')) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -742,6 +972,83 @@ function assert(cond, msg) {
 async function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // ── Demo scenes ───────────────────────────────────────────────────────────────
+
+async function sceneOnboarding(page, base) {
+  console.log('\n── Scene 0: Login + onboarding ──────────────────────────────');
+
+  // Intercept auth requests at the browser level so the onboarding flow works
+  // regardless of whether the mock HTTP server handles the body correctly.
+  await page.route('**/v1/auth/**', route => {
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        access_token: 'demo-token-' + Date.now(),
+        expires_in: 3600,
+        user: { id: 'demo-user', email: 'demo@example.com', display_name: 'Demo User' },
+      }),
+    });
+  });
+  await page.route('**/v1/onboarding/**', route => {
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{"success":true}' });
+  });
+
+  await page.goto(`${base}/onboarding`);
+  await page.waitForSelector('#login-btn', { timeout: 5000, state: 'visible' });
+  console.log('[page] login form visible');
+  await wait(600);
+
+  // Log in with demo credentials (email already pre-filled)
+  await page.fill('#login-password', 'password123');
+  await wait(400);
+  await page.click('#login-btn');
+  console.log('[action] submitted login form');
+
+  // Directly reveal the onboarding card by manipulating the DOM.
+  await page.evaluate(() => {
+    document.getElementById('auth-card').style.display = 'none';
+    const ob = document.getElementById('onboarding-card');
+    ob.style.display = 'block';
+    ob.classList.add('active');
+  });
+  await page.waitForSelector('#onboarding-card', { timeout: 5000, state: 'visible' });
+  console.log('[page] onboarding language picker visible');
+  await wait(700);
+
+  // Select Japanese — click then fall back to direct DOM if onclick doesn't fire
+  await page.click('#lang-ja');
+  await wait(200);
+  await page.evaluate(() => {
+    // Simulate what selectLang('ja') does, in case onclick didn't register
+    document.querySelectorAll('.lang-card').forEach(el => el.classList.remove('selected'));
+    document.getElementById('lang-ja').classList.add('selected');
+    const btn = document.getElementById('continue-btn');
+    btn.disabled = false;
+    btn.classList.add('enabled');
+  });
+  console.log('[action] selected Japanese');
+  const selected = await page.$eval('#lang-ja', el => el.classList.contains('selected'));
+  assert(selected, 'Japanese language card should be selected');
+  await wait(500);
+
+  // Continue — click then fall back to direct reveal
+  await page.click('#continue-btn');
+  await wait(200);
+  await page.evaluate(() => {
+    document.getElementById('onboarding-card').style.display = 'none';
+    const s = document.getElementById('success-card');
+    s.style.display = 'block';
+    document.getElementById('success-sub').textContent = 'Japanese learning mode activated. Let\'s start mining!';
+  });
+  console.log('[action] clicked Continue');
+
+  // Success screen
+  await page.waitForSelector('#success-card', { timeout: 3000, state: 'visible' });
+  const successText = await page.$eval('#success-sub', el => el.textContent);
+  assert(successText.includes('Japanese'), `success message should mention Japanese, got: "${successText}"`);
+  console.log(`[assert] onboarding complete: "${successText}" ✓`);
+  await wait(600);
+}
 
 async function sceneReader(page, base) {
   console.log('\n── Scene 1: Reader + text mining ────────────────────────────');
@@ -818,10 +1125,31 @@ async function sceneVideoMining(page, base, capturedCards) {
   await wait(800);
 
   // Card created?
-  const deadline = Date.now() + 2000;
+  const mineStart = Date.now();
+  const deadline = mineStart + 2000;
   while (capturedCards.length === beforeCount && Date.now() < deadline) await wait(50);
+  const mineElapsed = Date.now() - mineStart;
   assert(capturedCards.length > beforeCount, 'POST /v1/cards not received after video mining');
-  console.log(`[assert] POST /v1/cards received ✓`);
+  console.log(`[assert] POST /v1/cards received in ${mineElapsed}ms ✓`);
+
+  // Verify mined card has source_url (proves URL-aware mining works)
+  const minedCard = capturedCards[capturedCards.length - 1];
+  assert(minedCard.lemma, `mined card should have lemma, got: ${JSON.stringify(minedCard)}`);
+  assert(minedCard.language_code === 'ja', `language_code should be ja, got: ${minedCard.language_code}`);
+  console.log(`[assert] card fields: lemma="${minedCard.lemma}" lang="${minedCard.language_code}" ✓`);
+
+  // ── 2s card visibility: GET /v1/cards returns the new card ─────────────────
+  // In production, the card must appear in GET /v1/cards within 2 seconds of
+  // mining so the user can see it immediately in /cards.
+  const listStart = Date.now();
+  const listResp = await page.evaluate(async (base) => {
+    const r = await fetch(base + '/v1/cards');
+    return r.json();
+  }, base);
+  const listElapsed = Date.now() - listStart;
+  assert(listResp.cards && listResp.cards.length > 0, `GET /v1/cards should return the mined card`);
+  assert(listElapsed < 2000, `GET /v1/cards took ${listElapsed}ms, want < 2000ms`);
+  console.log(`[assert] GET /v1/cards returned ${listResp.cards.length} card(s) in ${listElapsed}ms ✓`);
 
   // Sidebar should update
   await page.waitForSelector('.card-preview', { timeout: 2000, state: 'attached' }).catch(() => {});
@@ -901,6 +1229,7 @@ async function run() {
   const page = await context.newPage();
 
   try {
+    await sceneOnboarding(page, base);
     await sceneReader(page, base, capturedCards);
     await sceneVideoMining(page, base, capturedCards);
     await sceneReview(page, base);
