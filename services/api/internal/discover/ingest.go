@@ -36,6 +36,21 @@ func NewIngester(db *pgxpool.Pool) *Ingester {
 	}
 }
 
+// IngestAll runs every configured source once. Called by the 6-hour cron.
+// Each source is independent — a failure in one doesn't stop the others.
+func (i *Ingester) IngestAll(ctx context.Context, perSourceMax int) {
+	if n, err := i.IngestNHKEasy(ctx, perSourceMax); err != nil {
+		slog.Warn("discover: nhk easy failed", "error", err)
+	} else {
+		slog.Info("discover: nhk easy", "inserted", n)
+	}
+	if n, err := i.IngestRSS(ctx, "watanoc", "ja", "https://watanoc.com/feed/", perSourceMax); err != nil {
+		slog.Warn("discover: watanoc failed", "error", err)
+	} else {
+		slog.Info("discover: watanoc", "inserted", n)
+	}
+}
+
 // IngestNHKEasy is the public entry point — typically called by the 6-hour
 // cron in cmd/api/main.go. It fetches up to `max` recent NHK Easy articles,
 // tokenises any that aren't already in the discover_articles table, and
@@ -93,6 +108,63 @@ func (i *Ingester) IngestNHKEasy(ctx context.Context, max int) (int, error) {
 		inserted++
 	}
 	slog.Info("discover: nhk easy ingested", "inserted", inserted, "checked", len(articles))
+	return inserted, nil
+}
+
+// IngestRSS pulls an RSS feed and ingests new articles. `source` is a stable
+// slug used in the discover_articles.source column (e.g. "watanoc").
+func (i *Ingester) IngestRSS(ctx context.Context, source, language, feedURL string, max int) (int, error) {
+	if max <= 0 {
+		max = 30
+	}
+	articles, err := FetchRSS(i.httpClient, feedURL, max)
+	if err != nil {
+		return 0, fmt.Errorf("fetch rss %s: %w", source, err)
+	}
+
+	inserted := 0
+	for _, a := range articles {
+		if a.Body == "" || a.URL == "" {
+			continue
+		}
+		var exists bool
+		if err := i.db.QueryRow(ctx,
+			`SELECT EXISTS(SELECT 1 FROM discover_articles WHERE url = $1)`,
+			a.URL,
+		).Scan(&exists); err != nil {
+			slog.Warn("discover: existence check failed", "source", source, "url", a.URL, "error", err)
+			continue
+		}
+		if exists {
+			continue
+		}
+
+		lemmas, contentCount, err := i.tokenizeContentLemmas(ctx, a.Body, language)
+		if err != nil {
+			slog.Warn("discover: tokenize failed; skipping", "source", source, "url", a.URL, "error", err)
+			continue
+		}
+
+		id := auth.NewID()
+		var publishedAt any
+		if !a.PublishedAt.IsZero() {
+			publishedAt = a.PublishedAt
+		}
+
+		if _, err := i.db.Exec(ctx,
+			`INSERT INTO discover_articles
+			    (id, source, language_code, title, summary, body, url,
+			     content_lemmas, total_content_words, published_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			 ON CONFLICT (url) DO NOTHING`,
+			id, source, language, a.Title, a.Summary, a.Body, a.URL,
+			lemmas, contentCount, publishedAt,
+		); err != nil {
+			slog.Warn("discover: insert failed", "source", source, "url", a.URL, "error", err)
+			continue
+		}
+		inserted++
+	}
 	return inserted, nil
 }
 

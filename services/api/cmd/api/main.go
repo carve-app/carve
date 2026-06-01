@@ -245,18 +245,15 @@ func main() {
 	// startup so a fresh deployment has something to show. Best-effort: errors
 	// are logged inside the ingester and don't propagate.
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
-		if _, err := discoverIngester.IngestNHKEasy(ctx, 30); err != nil {
-			slog.Warn("discover: initial ingest failed", "error", err)
-		}
+		discoverIngester.IngestAll(ctx, 30)
+
 		ticker := time.NewTicker(6 * time.Hour)
 		defer ticker.Stop()
 		for range ticker.C {
-			ictx, icancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			if _, err := discoverIngester.IngestNHKEasy(ictx, 30); err != nil {
-				slog.Warn("discover: periodic ingest failed", "error", err)
-			}
+			ictx, icancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			discoverIngester.IngestAll(ictx, 30)
 			icancel()
 		}
 	}()
