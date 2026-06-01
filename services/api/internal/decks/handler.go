@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -13,11 +14,21 @@ import (
 )
 
 type Handler struct {
-	db *pgxpool.Pool
+	db         *pgxpool.Pool
+	nlpBaseURL string
+	http       *http.Client
 }
 
 func NewHandler(db *pgxpool.Pool) *Handler {
-	return &Handler{db: db}
+	nlp := os.Getenv("NLP_SERVICE_URL")
+	if nlp == "" {
+		nlp = "http://localhost:8001"
+	}
+	return &Handler{
+		db:         db,
+		nlpBaseURL: nlp,
+		http:       &http.Client{Timeout: 120 * time.Second},
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

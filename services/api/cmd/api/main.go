@@ -146,6 +146,7 @@ func main() {
 		// Decks
 		r.Get("/decks", decksHandler.List)
 		r.Post("/decks", decksHandler.Create)
+		r.Post("/decks/generate", decksHandler.Generate)
 		r.Patch("/decks/{id}", decksHandler.Update)
 		r.Delete("/decks/{id}", decksHandler.DeleteDeck)
 		r.Post("/decks/{id}/subscribe", decksHandler.Subscribe)

@@ -2,10 +2,12 @@
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
   import {
+    apiFetch,
     fetchDecks, subscribeDeck, unsubscribeDeck, rateDeck,
     createDeck, updateDeck, deleteDeckById,
     type Deck,
   } from '$lib/api';
+  import { goto } from '$app/navigation';
   import { lang } from '$lib/stores/lang';
   import { toasts } from '$lib/stores/toast';
 
@@ -128,6 +130,27 @@
       toasts.add(err instanceof Error ? err.message : 'Failed to delete deck');
     }
   }
+
+  let generating = false;
+  async function generateFromReading() {
+    generating = true;
+    try {
+      const res = await apiFetch<{ deck_id: string; deck_name: string; card_count: number; sources_used: number }>(
+        '/v1/decks/generate',
+        { method: 'POST', body: JSON.stringify({ language: get(lang), since_days: 30, size: 30 }) },
+      );
+      toasts.add(`Generated "${res.deck_name}" with ${res.card_count} cards from ${res.sources_used} source(s)`);
+      activeTab = 'mine';
+      await load('mine');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to generate deck';
+      toasts.add(msg);
+      if (/no recent reading|no new vocabulary/i.test(msg)) {
+        if (confirm('No recent reading found. Open Library to save some articles?')) goto('/library');
+      }
+    }
+    generating = false;
+  }
 </script>
 
 <main>
@@ -137,9 +160,14 @@
       <button class="tab" class:active={activeTab === 'mine'} on:click={() => switchTab('mine')}>My Decks</button>
     </div>
     {#if activeTab === 'mine' && state === 'loaded'}
-      <button class="btn-new" on:click={() => showCreate = !showCreate}>
-        {showCreate ? '✕ Cancel' : '+ New Deck'}
-      </button>
+      <div class="mine-actions">
+        <button class="btn-generate" on:click={generateFromReading} disabled={generating} title="Generate a deck from your recent Library reading">
+          {generating ? 'Generating…' : '✨ From my reading'}
+        </button>
+        <button class="btn-new" on:click={() => showCreate = !showCreate}>
+          {showCreate ? '✕ Cancel' : '+ New Deck'}
+        </button>
+      </div>
     {/if}
   </div>
 
@@ -273,6 +301,10 @@
 
   .btn-new { background: #1e2128; border: 1px solid #4caf50; color: #4caf50; padding: 0.45rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.88rem; font-weight: 500; transition: background 0.15s; }
   .btn-new:hover { background: #2a3320; }
+  .mine-actions { display: flex; gap: 0.5rem; }
+  .btn-generate { background: #1e2128; border: 1px solid #7ab8ff; color: #7ab8ff; padding: 0.45rem 0.95rem; border-radius: 6px; cursor: pointer; font-size: 0.88rem; font-weight: 500; transition: background 0.15s; }
+  .btn-generate:hover { background: #1e2a3a; }
+  .btn-generate:disabled { opacity: 0.55; cursor: not-allowed; }
 
   .create-form { background: #1e2128; border: 1px solid #2a2d36; border-radius: 10px; padding: 1.25rem 1.5rem; margin-bottom: 1.5rem; display: flex; flex-direction: column; gap: 0.75rem; }
   .create-form h3 { margin: 0; font-size: 1rem; }
