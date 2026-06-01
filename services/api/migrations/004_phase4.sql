@@ -20,9 +20,12 @@ CREATE TABLE output_exercises (
     expires_at      TIMESTAMPTZ NOT NULL DEFAULT now() + INTERVAL '24 hours'
 );
 
-CREATE INDEX output_exercises_user_lang_idx
-    ON output_exercises(user_id, language_code, created_at DESC)
-    WHERE expires_at > now();
+-- NOTE: Originally this was a partial index "WHERE expires_at > now()",
+-- but Postgres rejects now() in an index predicate (must be IMMUTABLE).
+-- The plain index still serves the same query patterns; expiry filtering
+-- happens in the WHERE clause at query time.
+CREATE INDEX IF NOT EXISTS output_exercises_user_lang_idx
+    ON output_exercises(user_id, language_code, created_at DESC);
 
 -- ── Output submissions ────────────────────────────────────────────────────────
 -- User's written/spoken answers plus AI feedback.

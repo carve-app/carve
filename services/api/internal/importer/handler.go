@@ -93,6 +93,7 @@ func (h *Handler) ImportAnki(w http.ResponseWriter, r *http.Request) {
 	imported := 0
 	skipped := 0
 
+	now := time.Now()
 	for _, note := range notes {
 		var backPtr *string
 		if note.Back != "" {
@@ -103,13 +104,19 @@ func (h *Handler) ImportAnki(w http.ResponseWriter, r *http.Request) {
 			sentencePtr = &note.Sentence
 		}
 
+		sched := Map(note.Sched, note.CollectionCreated, now)
+
 		id := auth.NewID()
 		_, err := h.db.Exec(ctx,
 			`INSERT INTO cards
-			    (id, user_id, language_code, front_text, back_text, sentence, fsrs_state)
-			 VALUES ($1, $2, $3, $4, $5, $6, 'new')
+			    (id, user_id, language_code, front_text, back_text, sentence,
+			     fsrs_state, fsrs_stability, fsrs_difficulty, fsrs_due,
+			     fsrs_reps, fsrs_lapses)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 			 ON CONFLICT DO NOTHING`,
 			id, claims.UserID, language, note.Front, backPtr, sentencePtr,
+			sched.State, sched.Stability, sched.Difficulty, sched.Due,
+			sched.Reps, sched.Lapses,
 		)
 		if err != nil {
 			slog.Warn("anki import: insert card", "error", err, "front", note.Front)
@@ -398,15 +405,23 @@ func (h *Handler) ImportJPDBCSV(w http.ResponseWriter, r *http.Request) {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-// ankiNote holds the parsed fields from a single Anki note row.
+// ankiNote holds the parsed fields from a single Anki note row, plus the
+// scheduling fields of its most-progressed sibling card. Anki cards table
+// fields preserved: type, queue, ivl, factor, reps, lapses, due. Together
+// they reconstruct the FSRS state via anki_sched.Map.
 type ankiNote struct {
 	Front    string
 	Back     string
 	Sentence string
+
+	// Scheduling fields from the most-progressed sibling card (max(type)).
+	// Zero values mean "new card / no review history."
+	Sched             AnkiCardSched
+	CollectionCreated time.Time
 }
 
 // parseAnkiPackage extracts notes from an .apkg byte slice without touching the DB.
-// It writes the embedded SQLite to a temp file, queries notes, and returns them.
+// It writes the embedded SQLite to a temp file, queries notes + cards, and returns them.
 func parseAnkiPackage(data []byte) ([]ankiNote, error) {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
@@ -441,7 +456,48 @@ func parseAnkiPackage(data []byte) ([]ankiNote, error) {
 	}
 	defer db.Close()
 
-	rows, err := db.Query(`SELECT flds, tags FROM notes LIMIT 10000`)
+	// Read collection creation time so day-relative `due` values can be
+	// converted to absolute timestamps later.
+	var crt int64
+	_ = db.QueryRow(`SELECT crt FROM col LIMIT 1`).Scan(&crt)
+	if crt == 0 {
+		crt = time.Now().Unix() // fallback: today
+	}
+	collectionCreated := time.Unix(crt, 0)
+
+	// Detect whether the .apkg includes a `cards` table. Some legacy
+	// fixtures and bare exports don't include it; we still want to import
+	// the notes (every card becomes 'new' as a safe fallback).
+	hasCards := tableExists(db, "cards")
+
+	var q string
+	if hasCards {
+		// Join notes with the most-progressed card per note. "Most progressed"
+		// = highest type, then highest reps. Notes with reverse-sibling cards
+		// import based on the more-studied sibling.
+		q = `
+			SELECT n.flds, n.tags,
+			       COALESCE(c.type, 0)   AS c_type,
+			       COALESCE(c.queue, 0)  AS c_queue,
+			       COALESCE(c.ivl, 0)    AS c_ivl,
+			       COALESCE(c.factor, 0) AS c_factor,
+			       COALESCE(c.reps, 0)   AS c_reps,
+			       COALESCE(c.lapses, 0) AS c_lapses,
+			       COALESCE(c.due, 0)    AS c_due
+			FROM notes n
+			LEFT JOIN cards c ON c.id = (
+			    SELECT id FROM cards
+			    WHERE nid = n.id
+			    ORDER BY type DESC, reps DESC, id ASC
+			    LIMIT 1
+			)
+			LIMIT 10000
+		`
+	} else {
+		q = `SELECT flds, tags, 0,0,0,0,0,0,0 FROM notes LIMIT 10000`
+	}
+
+	rows, err := db.Query(q)
 	if err != nil {
 		return nil, fmt.Errorf("query notes: %w", err)
 	}
@@ -450,7 +506,9 @@ func parseAnkiPackage(data []byte) ([]ankiNote, error) {
 	var notes []ankiNote
 	for rows.Next() {
 		var flds, tags string
-		if err := rows.Scan(&flds, &tags); err != nil {
+		var cType, cQueue, cIVL, cFactor, cReps, cLapses int
+		var cDue int64
+		if err := rows.Scan(&flds, &tags, &cType, &cQueue, &cIVL, &cFactor, &cReps, &cLapses, &cDue); err != nil {
 			continue
 		}
 		fields := strings.Split(flds, "\x1f")
@@ -468,7 +526,18 @@ func parseAnkiPackage(data []byte) ([]ankiNote, error) {
 		if len(fields) > 2 {
 			sentence = stripHTMLSimple(fields[2])
 		}
-		notes = append(notes, ankiNote{Front: front, Back: back, Sentence: sentence})
+		notes = append(notes, ankiNote{
+			Front:    front,
+			Back:     back,
+			Sentence: sentence,
+			Sched: AnkiCardSched{
+				Type: cType, Queue: cQueue,
+				IVL: cIVL, Factor: cFactor,
+				Reps: cReps, Lapses: cLapses,
+				Due: cDue,
+			},
+			CollectionCreated: collectionCreated,
+		})
 	}
 	return notes, rows.Err()
 }
@@ -486,6 +555,14 @@ func stripHTMLSimple(s string) string {
 
 func writeFile(path string, data []byte) error {
 	return os.WriteFile(path, data, 0600)
+}
+
+func tableExists(db *sql.DB, name string) bool {
+	var n int
+	err := db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, name,
+	).Scan(&n)
+	return err == nil && n > 0
 }
 
 func removeFile(path string) {

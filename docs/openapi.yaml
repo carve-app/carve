@@ -1,0 +1,288 @@
+openapi: 3.0.3
+info:
+  title: Carve API
+  description: |
+    The Carve language-learning API. This document is the source of truth for
+    every `/v1` endpoint; the TypeScript client in `apps/web/src/lib/api.ts`
+    is regenerated from it and schemathesis runs property-based HTTP fuzz
+    against it as part of the L4 testing layer.
+  version: 0.2.0
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: https://api.carve.app
+    description: Production
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+    AuthLoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:    { type: string, format: email, minLength: 3, maxLength: 254 }
+        password: { type: string, minLength: 8, maxLength: 100 }
+    AuthRegisterRequest:
+      type: object
+      required: [email, password, display_name]
+      properties:
+        email:        { type: string, format: email }
+        password:     { type: string, minLength: 8, maxLength: 100 }
+        display_name: { type: string, minLength: 1, maxLength: 80 }
+    AuthTokenResponse:
+      type: object
+      required: [access_token, refresh_token, user]
+      properties:
+        access_token:  { type: string }
+        refresh_token: { type: string }
+        user:          { $ref: '#/components/schemas/User' }
+    User:
+      type: object
+      required: [id, email, display_name]
+      properties:
+        id:           { type: string, format: uuid }
+        email:        { type: string }
+        display_name: { type: string }
+    ForgotPasswordRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+    ResetPasswordRequest:
+      type: object
+      required: [token, new_password]
+      properties:
+        token:        { type: string, minLength: 16, maxLength: 200 }
+        new_password: { type: string, minLength: 8,  maxLength: 100 }
+    Card:
+      type: object
+      required: [id, front_text, fsrs_state]
+      properties:
+        id:                  { type: string, format: uuid }
+        language_code:       { type: string, minLength: 2, maxLength: 5 }
+        front_text:          { type: string }
+        back_text:           { type: string, nullable: true }
+        sentence:            { type: string, nullable: true }
+        fsrs_state:          { type: string, enum: [new, learning, review, relearning, suspended] }
+        fsrs_stability:      { type: number, nullable: true }
+        fsrs_difficulty:     { type: number, nullable: true }
+        fsrs_due:            { type: string, format: date-time, nullable: true }
+        fsrs_reps:           { type: integer, minimum: 0 }
+        fsrs_lapses:         { type: integer, minimum: 0 }
+        front_audio_url:     { type: string, nullable: true }
+        front_image_url:     { type: string, nullable: true }
+        video_source_url:    { type: string, nullable: true }
+        subtitle_start_ms:   { type: integer, nullable: true }
+        subtitle_end_ms:     { type: integer, nullable: true }
+        subtitle_translation:{ type: string, nullable: true }
+    ReviewEventRequest:
+      type: object
+      required: [card_id, rating]
+      properties:
+        card_id:       { type: string, format: uuid }
+        rating:        { type: integer, minimum: 1, maximum: 4 }
+        time_taken_ms: { type: integer, minimum: 0 }
+    ReviewEventResponse:
+      type: object
+      required: [next_due, is_leech]
+      properties:
+        next_due: { type: string, format: date-time }
+        is_leech: { type: boolean }
+    DueCountResponse:
+      type: object
+      required: [due_count]
+      properties:
+        due_count: { type: integer, minimum: 0 }
+    TokenizeRequest:
+      type: object
+      required: [text, language]
+      properties:
+        text:     { type: string, maxLength: 50000 }
+        language: { type: string, enum: [ja, zh-cn, zh-tw, zh, ko, en] }
+    TranscribeResponse:
+      type: object
+      required: [transcript, language, diff, wer]
+      properties:
+        transcript: { type: string }
+        language:   { type: string }
+        wer:        { type: number, minimum: 0 }
+        diff:
+          type: array
+          items:
+            type: object
+            properties:
+              op:  { type: string, enum: [keep, sub, insert, delete] }
+              ref: { type: string }
+              hyp: { type: string }
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties: { status: { type: string }, service: { type: string }, version: { type: string } }
+
+  /metrics:
+    get:
+      operationId: getMetrics
+      summary: Prometheus metrics
+      responses:
+        '200':
+          description: Prometheus exposition format
+          content:
+            text/plain: { schema: { type: string } }
+
+  /v1/auth/login:
+    post:
+      operationId: login
+      summary: Sign in
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/AuthLoginRequest' } }
+      responses:
+        '200':
+          description: OK
+          content: { application/json: { schema: { $ref: '#/components/schemas/AuthTokenResponse' } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/auth/register:
+    post:
+      operationId: register
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/AuthRegisterRequest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuthTokenResponse' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Email taken, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/auth/forgot:
+    post:
+      operationId: forgotPassword
+      summary: Send a password-reset email
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/ForgotPasswordRequest' } }
+      responses:
+        '200': { description: Always 200 to prevent email enumeration, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/auth/reset:
+    post:
+      operationId: resetPassword
+      summary: Complete a password reset
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/ResetPasswordRequest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/cards:
+    get:
+      operationId: listCards
+      summary: List the user's cards
+      security: [{ bearer: [] }]
+      parameters:
+        - in: query
+          name: language
+          schema: { type: string, enum: [ja, zh-cn, zh-tw, ko, en] }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [cards]
+                properties:
+                  cards: { type: array, items: { $ref: '#/components/schemas/Card' } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/review/events:
+    post:
+      operationId: submitReviewEvent
+      summary: Submit a review event
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/ReviewEventRequest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewEventResponse' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Card not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/review/due-count:
+    get:
+      operationId: getDueCount
+      summary: Count cards due now for the current user
+      security: [{ bearer: [] }]
+      parameters:
+        - in: query
+          name: language
+          schema: { type: string }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DueCountResponse' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/nlp/tokenize:
+    post:
+      operationId: tokenize
+      summary: Tokenize text
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/TokenizeRequest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { tokens: { type: array, items: { type: object } } } } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: Unsupported language, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/output/transcribe:
+    post:
+      operationId: transcribe
+      summary: Transcribe + diff a recording against a reference
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                audio:      { type: string, format: binary }
+                expected:   { type: string }
+                hypothesis: { type: string }
+                language:   { type: string }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TranscribeResponse' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }

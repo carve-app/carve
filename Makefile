@@ -2,6 +2,9 @@
         colima-start infra-up infra-down infra-logs \
         dev dev-api dev-nlp dev-web \
         test-nlp test-api test-extension test-promo test-all \
+        test-property test-integration test-contract test-e2e \
+        test-mutation test-mutation-api test-mutation-nlp test-mutation-ts \
+        test-perf test-polish test-canary test-synthetic \
         import-jmdict import-tatoeba migrate \
         lint build clean record-promo \
         docker-up docker-down docker-logs
@@ -180,6 +183,75 @@ record-promo:
 
 test-all: test-nlp test-api test-extension test-promo
 	@echo "✓ All tests passed — Phase 0 gate cleared"
+
+# ── Per-layer test targets (docs/12-testing-strategy.md) ─────────────────────
+
+# L1 — property-based
+test-property:
+	@echo "→ L1 property-based tests..."
+	cd $(API_DIR) && go test ./internal/fsrs/... ./internal/importer/... ./internal/output/... -run "Property" -count=1
+	cd $(NLP_DIR) && .venv/bin/python -m pytest tests/test_property_en.py -q
+	cd apps/extension && npx vitest run src/content/popup/__tests__/property.test.ts
+
+# L3 — testcontainers integration
+test-integration:
+	@echo "→ L3 testcontainers integration tests..."
+	cd $(API_DIR) && DOCKER_HOST=$$(colima ssh -- echo unix:///Users/$$USER/.colima/default/docker.sock 2>/dev/null) \
+		TESTCONTAINERS_RYUK_DISABLED=true \
+		go test ./internal/importer/... -run TestImportAnki_ -count=1 -timeout 10m
+
+# L4 — OpenAPI contract + schemathesis fuzz
+test-contract:
+	@command -v schemathesis >/dev/null 2>&1 || { echo "✗ pip install schemathesis"; exit 1; }
+	@echo "→ L4 schemathesis fuzz..."
+	# Spin up the API on FUZZ_PORT against a transient DB, then run schemathesis.
+	FUZZ_PORT=8090 schemathesis run --base-url http://127.0.0.1:8090 docs/openapi.yaml
+
+# L5/L6/L7/L8/L9 — Playwright matrix (web + extension + visual + a11y + offline)
+test-e2e:
+	@echo "→ L5–L9 Playwright matrix..."
+	cd e2e && npm run test:web
+
+# L2 — mutation testing per stack
+test-mutation: test-mutation-api test-mutation-nlp test-mutation-ts
+
+test-mutation-api:
+	@command -v go-mutesting >/dev/null 2>&1 || { echo "✗ go install github.com/avito-tech/go-mutesting/cmd/go-mutesting@latest"; exit 1; }
+	cd $(API_DIR) && go-mutesting --config .mutation.txt --threshold 0.65 \
+		./internal/fsrs/... ./internal/importer/... ./internal/output/... ./internal/metrics/...
+
+test-mutation-nlp:
+	@command -v mutmut >/dev/null 2>&1 || { echo "✗ pip install mutmut"; exit 1; }
+	cd $(NLP_DIR) && mutmut run --paths-to-mutate=src/ \
+		--tests-dir=tests/ --runner='.venv/bin/python -m pytest -x --tb=no -q'
+
+test-mutation-ts:
+	@echo "→ L2 Stryker mutation testing (TS)..."
+	cd apps/extension && npx stryker run
+	cd apps/web && npx stryker run
+
+# L13 — perf budget
+test-perf:
+	@command -v k6 >/dev/null 2>&1 || { echo "✗ brew install k6"; exit 1; }
+	k6 run tests/perf/load.js
+	@echo "→ Lighthouse CI..."
+	@command -v lhci >/dev/null 2>&1 || { echo "✗ npm i -g @lhci/cli"; exit 1; }
+	lhci autorun
+
+# L14 — LLM-as-judge polish
+test-polish:
+	@[ -n "$$ANTHROPIC_API_KEY" ] || { echo "✗ ANTHROPIC_API_KEY not set"; exit 1; }
+	node scripts/polish-review.mjs
+
+# L11 — streaming canary (hourly cron)
+test-canary:
+	@echo "→ L11 hourly streaming canary..."
+	cd e2e && npx playwright test tests/extension-streaming.spec.ts
+
+# L15 — production synthetic (every minute via cron)
+test-synthetic:
+	@[ -n "$$API_BASE" ] || { echo "✗ API_BASE not set"; exit 1; }
+	node scripts/synthetic.mjs
 
 # ── Database ──────────────────────────────────────────────────────────────────
 

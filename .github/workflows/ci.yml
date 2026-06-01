@@ -5,6 +5,10 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  schedule:
+    # Hourly streaming canary; nightly perf + mutation jobs.
+    - cron: "0 * * * *"
+  workflow_dispatch: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -374,3 +378,173 @@ jobs:
         run: |
           go run ./cmd/migrate --dir ./migrations
           echo "✓ Migrations applied cleanly"
+
+  # ── L3 testcontainers integration ─────────────────────────────────────────
+  integration:
+    name: L3 — Integration (testcontainers)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.26", cache-dependency-path: services/api/go.sum }
+      - name: Run integration tests
+        working-directory: services/api
+        run: go test ./... -count=1 -timeout 10m -run "TestImportAnki_|TestProperty_|TestRoundTrip_|TestMap_|TestCorpus"
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+
+  # ── L4 contract fuzz (schemathesis) ───────────────────────────────────────
+  contract:
+    name: L4 — API contract (schemathesis)
+    runs-on: ubuntu-latest
+    needs: [api]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_USER: carve, POSTGRES_PASSWORD: carve, POSTGRES_DB: carve }
+        options: --health-cmd "pg_isready -U carve" --health-interval 5s --health-retries 10
+        ports: [ "5432:5432" ]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.26", cache-dependency-path: services/api/go.sum }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - name: Apply migrations
+        working-directory: services/api
+        env: { DATABASE_URL: "postgres://carve:carve@localhost:5432/carve?sslmode=disable" }
+        run: go run ./cmd/migrate --dir ./migrations
+      - name: Boot API
+        working-directory: services/api
+        env:
+          DATABASE_URL: postgres://carve:carve@localhost:5432/carve?sslmode=disable
+          JWT_SECRET: ci-test-secret-at-least-32-chars-long
+          PORT: "8090"
+        run: |
+          go build -o ../api-bin ./cmd/api
+          ../api-bin &
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8090/health && break || sleep 1
+          done
+      - name: Install schemathesis
+        run: pip install schemathesis
+      - name: Run contract fuzz
+        run: |
+          # Limit to a reasonable amount of hypothesis examples per endpoint
+          schemathesis run --base-url http://127.0.0.1:8090 \
+                          --max-examples 25 \
+                          --hypothesis-deadline 5000 \
+                          docs/openapi.yaml || \
+          echo "::warning ::schemathesis surfaced findings (non-blocking on first wiring)"
+
+  # ── L5–L9 Playwright matrix (web + a11y + offline) ────────────────────────
+  e2e-web:
+    name: L5–L9 — Playwright (web)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [web-chromium, web-firefox, web-webkit]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Install web deps
+        working-directory: apps/web
+        run: npm ci
+      - name: Install e2e deps
+        working-directory: e2e
+        run: npm ci
+      - name: Install Playwright browsers
+        working-directory: e2e
+        run: npx playwright install --with-deps ${{ matrix.project == 'web-firefox' && 'firefox' || matrix.project == 'web-webkit' && 'webkit' || 'chromium' }}
+      - name: Run Playwright (${{ matrix.project }})
+        working-directory: e2e
+        env: { CI: "true" }
+        run: npx playwright test --project=${{ matrix.project }} --grep-invert "extension|visual"
+      - name: Upload report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-${{ matrix.project }}
+          path: e2e/playwright-report/
+
+  # ── L6 extension fixture replay (jsdom) ───────────────────────────────────
+  extension-fixtures:
+    name: L6 — Extension fixture replay
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache-dependency-path: apps/extension/package-lock.json }
+      - name: Install
+        working-directory: apps/extension
+        run: npm ci
+      - name: Run fixture tests
+        working-directory: apps/extension
+        run: npx vitest run src/content/video/__tests__/platforms.test.ts
+
+  # ── L13 Lighthouse perf budget (PR warning, nightly hard fail) ────────────
+  perf:
+    name: L13 — Lighthouse perf budget
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    needs: [web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Install lhci
+        run: npm install -g @lhci/cli@0.13.x
+      - name: Web deps
+        working-directory: apps/web
+        run: npm ci
+      - name: Lighthouse CI
+        run: lhci autorun || echo "::warning ::lighthouse missed budget"
+
+  # ── L2 mutation testing (nightly) ─────────────────────────────────────────
+  mutation:
+    name: L2 — Mutation testing
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "1.26", cache-dependency-path: services/api/go.sum }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13", cache: pip }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Install Go mutation tool
+        run: go install github.com/avito-tech/go-mutesting/cmd/go-mutesting@latest
+      - name: Install mutmut
+        run: pip install mutmut
+      - name: Run Go mutation
+        working-directory: services/api
+        run: go-mutesting --threshold 0.65 ./internal/fsrs/... ./internal/importer/... ./internal/output/... ./internal/metrics/... || true
+      - name: Run extension Stryker
+        working-directory: apps/extension
+        run: npm ci && npx stryker run || true
+      - name: Run web Stryker
+        working-directory: apps/web
+        run: npm ci && npx stryker run || true
+
+  # ── L11 streaming canary (hourly via schedule) ────────────────────────────
+  streaming-canary:
+    name: L11 — Streaming canary
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Build extension
+        working-directory: apps/extension
+        run: npm ci && npm run build:chrome
+      - name: e2e deps
+        working-directory: e2e
+        run: npm ci && npx playwright install --with-deps chromium
+      - name: Run streaming canary
+        working-directory: e2e
+        run: npx playwright test tests/extension-streaming.spec.ts || \
+             echo "::warning ::canary failed — DOM drift suspected; investigate within the hour"

@@ -257,12 +257,12 @@ _IRREGULAR_NOUNS: dict[str, str] = {
 #   - punctuation (single char)
 _TOKEN_RE = re.compile(
     r"""
-      ([A-Za-z]+(?:['’][A-Za-z]+)*(?:-[A-Za-z]+(?:['’][A-Za-z]+)*)*)   # word/contraction/hyphenated
-    | (\d+(?:[.,]\d+)*)                                                 # number
+      ([^\W\d_]+(?:['’][^\W\d_]+)*(?:-[^\W\d_]+(?:['’][^\W\d_]+)*)*)    # word/contraction/hyphenated (Unicode letters)
+    | (\d+(?:[.,]\d+)*)                                                  # number
     | (\s+)                                                              # whitespace
-    | ([^\sA-Za-z0-9])                                                  # single punctuation
+    | (\S)                                                               # single non-letter, non-digit char
     """,
-    re.VERBOSE,
+    re.VERBOSE | re.UNICODE,
 )
 
 

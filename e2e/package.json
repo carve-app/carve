@@ -4,7 +4,10 @@
   "description": "",
   "main": "extension.test.js",
   "scripts": {
-    "test": "node extension.test.js"
+    "test": "playwright test && node extension.test.js",
+    "test:web": "playwright test",
+    "test:web:update": "playwright test --update-snapshots",
+    "test:extension": "node extension.test.js"
   },
   "keywords": [],
   "author": "",
@@ -12,5 +15,9 @@
   "type": "commonjs",
   "dependencies": {
     "playwright": "^1.60.0"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
+    "@playwright/test": "^1.60.0"
   }
 }
