@@ -380,7 +380,7 @@ jobs:
           echo "✓ Migrations applied cleanly"
 
   # ── L3 testcontainers integration ─────────────────────────────────────────
-  integration:
+  integration-l3:
     name: L3 — Integration (testcontainers)
     runs-on: ubuntu-latest
     steps:

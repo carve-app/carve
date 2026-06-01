@@ -17,7 +17,7 @@
   "devDependencies": {
     "@types/chrome": "^0.0.320",
     "@types/node": "^25.9.1",
-    "@vitest/browser": "^4.1.7",
+    "@vitest/browser": "^2.1.9",
     "fast-check": "^4.8.0",
     "jsdom": "^29.1.1",
     "typescript": "^5.8.0",
