@@ -174,6 +174,33 @@ export function injectStyles(): void {
       line-height: 1;
     }
     #carve-overlay .overlay-close:hover { color: #e8eaf0; }
+    #carve-popup .carve-mine-similar {
+      margin: 4px 0 8px;
+      padding: 6px 8px;
+      background: rgba(255, 167, 38, 0.10);
+      border: 1px solid rgba(255, 167, 38, 0.35);
+      border-radius: 6px;
+      font-size: 11px;
+    }
+    #carve-popup .carve-mine-similar .carve-mine-warn {
+      color: #ffa726;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    #carve-popup .carve-mine-similar ul {
+      margin: 0;
+      padding: 0 0 0 14px;
+      color: #c8c8c8;
+    }
+    #carve-popup .carve-mine-similar li {
+      margin: 2px 0;
+      line-height: 1.3;
+    }
+    #carve-popup .carve-mine-similar .carve-mine-sim {
+      color: #9ba8c0;
+      font-size: 10px;
+      margin-left: 4px;
+    }
   `;
   document.head.appendChild(style);
 }

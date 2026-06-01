@@ -17,7 +17,8 @@ export type Message =
   | { type: 'CAPTURE_SCREENSHOT'; cardId?: string }
   | { type: 'ATTACH_PAGE_SCREENSHOT'; cardId: string }
   | { type: 'TRANSLATE'; text: string; sourceLanguage: string }
-  | { type: 'SELECT_SENTENCE'; candidates: string[]; targetLemma: string; language: string; knownLemmas: string[]; learningLemmas: string[] };
+  | { type: 'SELECT_SENTENCE'; candidates: string[]; targetLemma: string; language: string; knownLemmas: string[]; learningLemmas: string[] }
+  | { type: 'FIND_SIMILAR_CARDS'; languageCode: string; sentence: string };
 
 export type MessageResponse =
   | { type: 'TOKENIZE_RESULT'; tokens: Token[]; comprehension_pct: number | null }
@@ -32,4 +33,5 @@ export type MessageResponse =
   | { type: 'SCREENSHOT_RESULT'; success: boolean; url?: string; error?: string }
   | { type: 'ATTACH_SCREENSHOT_RESULT'; success: boolean }
   | { type: 'TRANSLATE_RESULT'; translation: string | null }
-  | { type: 'SELECT_SENTENCE_RESULT'; bestText: string | null; bestComprehensionPct: number | null; bestContainsTarget: boolean };
+  | { type: 'SELECT_SENTENCE_RESULT'; bestText: string | null; bestComprehensionPct: number | null; bestContainsTarget: boolean }
+  | { type: 'FIND_SIMILAR_CARDS_RESULT'; matches: { id: string; front_text: string; sentence: string; similarity: number }[] };

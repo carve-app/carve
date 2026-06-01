@@ -126,6 +126,34 @@ export async function logImmersion(params: {
 }
 
 /**
+ * Find existing cards with a near-duplicate sentence.
+ */
+export interface SimilarCard {
+  id: string;
+  front_text: string;
+  sentence: string;
+  similarity: number;
+}
+
+export async function findSimilarCards(params: {
+  languageCode: string;
+  sentence: string;
+  threshold?: number;
+  limit?: number;
+}): Promise<{ matches: SimilarCard[] }> {
+  const response = await apiFetch('/v1/cards/find-similar', {
+    method: 'POST',
+    body: JSON.stringify({
+      language_code: params.languageCode,
+      sentence: params.sentence,
+      threshold: params.threshold,
+      limit: params.limit,
+    }),
+  });
+  return response.json();
+}
+
+/**
  * Pick the best i+1 candidate sentence for mining a word.
  */
 export interface SentenceCandidate {

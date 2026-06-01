@@ -167,6 +167,57 @@ func TestDeleteHandler_Unauthorized(t *testing.T) {
 	}
 }
 
+// ── FindSimilar handler — validation paths ───────────────────────────────────
+
+func TestFindSimilarHandler_Unauthorized(t *testing.T) {
+	h := &Handler{db: nil}
+	r := httptest.NewRequest(http.MethodPost, "/v1/cards/find-similar", strings.NewReader("{}"))
+	w := httptest.NewRecorder()
+	h.FindSimilar(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestFindSimilarHandler_InvalidJSON(t *testing.T) {
+	h := &Handler{db: nil}
+	r := newAuthedRequest(http.MethodPost, "/v1/cards/find-similar", []byte("not json"))
+	w := httptest.NewRecorder()
+	h.FindSimilar(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestFindSimilarHandler_MissingFields(t *testing.T) {
+	h := &Handler{db: nil}
+	body, _ := json.Marshal(map[string]string{"language_code": "ja"})
+	r := newAuthedRequest(http.MethodPost, "/v1/cards/find-similar", body)
+	w := httptest.NewRecorder()
+	h.FindSimilar(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing sentence, got %d", w.Code)
+	}
+	assertErrorContains(t, w, "language_code and sentence are required")
+}
+
+func TestFindSimilarHandler_WhitespaceSentenceShortCircuits(t *testing.T) {
+	// charTrigrams normalises whitespace-only input to nil — the handler must
+	// short-circuit to an empty matches list before touching the DB (db=nil
+	// here would otherwise panic).
+	h := &Handler{db: nil}
+	body, _ := json.Marshal(map[string]string{"language_code": "ja", "sentence": "   "})
+	r := newAuthedRequest(http.MethodPost, "/v1/cards/find-similar", body)
+	w := httptest.NewRecorder()
+	h.FindSimilar(w, r)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d (body=%s)", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"matches":[]`) {
+		t.Errorf("expected empty matches, got body=%s", w.Body.String())
+	}
+}
+
 // ── AttachMedia handler — validation paths ────────────────────────────────────
 
 func TestAttachMediaHandler_Unauthorized(t *testing.T) {

@@ -203,6 +203,7 @@ export class PopupManager {
     popup.innerHTML = `
       <div class="carve-mine-form">
         <div class="carve-mine-title">Add card</div>
+        <div class="carve-mine-similar" id="mine-similar" style="display:none"></div>
         <label>Word</label>
         <input class="carve-mine-input" id="mine-lemma" value="${escapedLemma}" />
         <label>Reading</label>
@@ -222,6 +223,37 @@ export class PopupManager {
         <div class="carve-mine-status" id="mine-status"></div>
       </div>
     `;
+
+    // Check for near-duplicate cards. Re-runs whenever the sentence textarea
+    // changes (e.g. after the picker swaps it in, or after user edits).
+    const refreshSimilar = (sourceSentence: string) => {
+      if (!sourceSentence || sourceSentence.length < 4) return;
+      browser.runtime.sendMessage({
+        type: 'FIND_SIMILAR_CARDS',
+        languageCode: 'ja',
+        sentence: sourceSentence,
+      })
+        .then((res) => {
+          const matches = (res?.matches ?? []) as Array<{ id: string; front_text: string; similarity: number }>;
+          const el = popup.querySelector<HTMLElement>('#mine-similar');
+          if (!el) return;
+          if (matches.length === 0) {
+            el.style.display = 'none';
+            el.innerHTML = '';
+            return;
+          }
+          const items = matches
+            .map((m) => `<li>${escapeHtml(m.front_text)} <span class="carve-mine-sim">${Math.round(m.similarity * 100)}%</span></li>`)
+            .join('');
+          el.innerHTML = `<div class="carve-mine-warn">⚠ ${matches.length} similar card${matches.length === 1 ? '' : 's'} exist</div><ul>${items}</ul>`;
+          el.style.display = 'block';
+        })
+        .catch(() => {/* non-fatal */});
+    };
+    if (sentence) refreshSimilar(sentence);
+    popup.querySelector<HTMLTextAreaElement>('#mine-sentence')?.addEventListener('blur', (e) => {
+      refreshSimilar((e.target as HTMLTextAreaElement).value.trim());
+    });
 
     // Kick off i+1 sentence selection. If a materially better candidate exists,
     // swap it into the textarea and surface a small "picked better example"

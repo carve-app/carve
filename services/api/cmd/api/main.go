@@ -120,6 +120,7 @@ func main() {
 		// Cards
 		r.Post("/cards", cardsHandler.Create)
 		r.Post("/cards/bulk", cardsHandler.Bulk)
+		r.Post("/cards/find-similar", cardsHandler.FindSimilar)
 		r.Get("/cards", cardsHandler.List)
 		r.Get("/cards/{id}", cardsHandler.Get)
 		r.Patch("/cards/{id}", cardsHandler.Update)

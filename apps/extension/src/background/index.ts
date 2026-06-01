@@ -1,5 +1,5 @@
 import { browser } from '../shared/browser';
-import { nlpTokenize, nlpLookup, createCard, logImmersion, getDueCount, getReviewSession, submitReviewEvent, translateText, selectMiningSentence } from '../shared/api';
+import { nlpTokenize, nlpLookup, createCard, logImmersion, getDueCount, getReviewSession, submitReviewEvent, translateText, selectMiningSentence, findSimilarCards } from '../shared/api';
 import { getAccessToken, getApiBaseUrl, storageGet, storageSet, type OfflineReviewEvent, type CachedReviewCard } from '../shared/storage';
 import type { Message, MessageResponse } from '../shared/messages';
 
@@ -140,6 +140,18 @@ async function handleMessage(msg: Message): Promise<MessageResponse> {
         return { type: 'TRANSLATE_RESULT', translation: result.translation ?? null };
       } catch {
         return { type: 'TRANSLATE_RESULT', translation: null };
+      }
+    }
+
+    case 'FIND_SIMILAR_CARDS': {
+      try {
+        const result = await findSimilarCards({
+          languageCode: msg.languageCode,
+          sentence: msg.sentence,
+        });
+        return { type: 'FIND_SIMILAR_CARDS_RESULT', matches: result.matches ?? [] };
+      } catch {
+        return { type: 'FIND_SIMILAR_CARDS_RESULT', matches: [] };
       }
     }
 

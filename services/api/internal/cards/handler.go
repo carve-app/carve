@@ -640,6 +640,113 @@ func (h *Handler) Bulk(w http.ResponseWriter, r *http.Request) {
 }
 
 // DELETE /v1/cards/:id
+// POST /v1/cards/find-similar
+//
+// Given a candidate sentence, return the user's existing cards whose sentence
+// is near-duplicate. Used by the extension's mine form to warn before saving
+// yet another card with the same context, which is the dominant source of
+// review-queue waste (subtitle loops, re-runs, mining many words from one cue).
+func (h *Handler) FindSimilar(w http.ResponseWriter, r *http.Request) {
+	claims, ok := auth.ClaimsFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	var req struct {
+		LanguageCode string  `json:"language_code"`
+		Sentence     string  `json:"sentence"`
+		Threshold    float64 `json:"threshold"`
+		Limit        int     `json:"limit"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+	if req.LanguageCode == "" || req.Sentence == "" {
+		writeError(w, http.StatusBadRequest, "language_code and sentence are required")
+		return
+	}
+	if req.Threshold <= 0 {
+		req.Threshold = 0.5
+	}
+	if req.Limit <= 0 || req.Limit > 10 {
+		req.Limit = 3
+	}
+
+	candidateGrams := charTrigrams(req.Sentence)
+	if len(candidateGrams) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"matches": []any{}})
+		return
+	}
+
+	// Scan a recent window of cards — enough to catch dupes, small enough to
+	// keep the request cheap. 200 covers a few months of heavy mining.
+	rows, err := h.db.Query(r.Context(),
+		`SELECT id, front_text, sentence
+		   FROM cards
+		  WHERE user_id = $1
+		    AND language_code = $2
+		    AND deleted_at IS NULL
+		    AND sentence IS NOT NULL
+		    AND length(sentence) > 0
+		  ORDER BY created_at DESC
+		  LIMIT 200`,
+		claims.UserID, req.LanguageCode,
+	)
+	if err != nil {
+		slog.Error("find-similar query", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	defer rows.Close()
+
+	type match struct {
+		ID         string  `json:"id"`
+		FrontText  string  `json:"front_text"`
+		Sentence   string  `json:"sentence"`
+		Similarity float64 `json:"similarity"`
+	}
+	matches := make([]match, 0, req.Limit+1)
+
+	for rows.Next() {
+		var id, front string
+		var sentence *string
+		if err := rows.Scan(&id, &front, &sentence); err != nil {
+			slog.Warn("find-similar scan", "error", err)
+			continue
+		}
+		if sentence == nil {
+			continue
+		}
+		sim := jaccardTrigrams(candidateGrams, charTrigrams(*sentence))
+		if sim < req.Threshold {
+			continue
+		}
+		matches = append(matches, match{
+			ID:         id,
+			FrontText:  front,
+			Sentence:   *sentence,
+			Similarity: sim,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("find-similar rows.Err", "error", err)
+	}
+
+	// Sort by similarity descending and cap to limit.
+	for i := 1; i < len(matches); i++ {
+		for j := i; j > 0 && matches[j].Similarity > matches[j-1].Similarity; j-- {
+			matches[j], matches[j-1] = matches[j-1], matches[j]
+		}
+	}
+	if len(matches) > req.Limit {
+		matches = matches[:req.Limit]
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"matches": matches})
+}
+
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	claims, ok := auth.ClaimsFromContext(r.Context())
 	if !ok {
