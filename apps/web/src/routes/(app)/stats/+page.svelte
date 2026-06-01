@@ -17,6 +17,7 @@
   let error = '';
   let stats: any = null;
   let forecast: ForecastDay[] = [];
+  let weekly: any = null;
 
   onMount(() => {
     let init = false;
@@ -29,9 +30,10 @@
   async function load(language: LangCode = get(lang)) {
     state = 'loading';
     try {
-      [stats, { forecast }] = await Promise.all([
+      [stats, { forecast }, weekly] = await Promise.all([
         apiFetch(`/v1/stats?language=${language}`),
         fetchForecast(language, 14),
+        apiFetch(`/v1/reports/weekly?language=${language}`).catch(() => null),
       ]);
       state = 'loaded';
     } catch (err) {
@@ -69,6 +71,21 @@
       <Button on:click={() => load()}>Retry</Button>
     </EmptyState>
   {:else if stats}
+    {#if weekly && (weekly.cards_mined || weekly.reviews_completed || weekly.immersion_minutes)}
+      <Card padding="md" class="weekly-banner">
+        <div class="weekly-head">This week</div>
+        <div class="weekly-stats">
+          <div><strong>{weekly.cards_mined}</strong> mined</div>
+          <div><strong>{weekly.reviews_completed}</strong> reviews</div>
+          <div><strong>{weekly.immersion_minutes}m</strong> immersion</div>
+          <div><strong>{weekly.new_known_words}</strong> new known</div>
+          {#if weekly.reviews_completed > 0}
+            <div><strong>{Math.round(weekly.retention_rate * 100)}%</strong> retention</div>
+          {/if}
+        </div>
+      </Card>
+    {/if}
+
     <div class="kpi-grid">
       <Card padding="sm">
         <div class="kpi-label">Known cards</div>
@@ -156,6 +173,11 @@
   .kpi-sub { font-size: 0.78rem; color: var(--c-textMuted); margin-top: var(--s-1); }
 
   :global(.mt) { margin-top: var(--s-4); }
+  :global(.weekly-banner) { margin-bottom: var(--s-4); }
+  .weekly-head { font-size: 0.72rem; color: var(--c-textMuted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: var(--s-2); }
+  .weekly-stats { display: flex; gap: var(--s-6); flex-wrap: wrap; }
+  .weekly-stats div { font-size: 0.92rem; color: var(--c-textHi); }
+  .weekly-stats strong { color: var(--c-textHi); font-size: 1.1rem; font-weight: 700; }
 
   .forecast-total { color: var(--c-textMuted); font-size: 0.85rem; margin: var(--s-3) 0 0; }
 

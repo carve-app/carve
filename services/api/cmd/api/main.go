@@ -24,6 +24,7 @@ import (
 	"github.com/carve-app/carve/services/api/internal/nlp"
 	"github.com/carve-app/carve/services/api/internal/onboarding"
 	"github.com/carve-app/carve/services/api/internal/output"
+	"github.com/carve-app/carve/services/api/internal/reports"
 	"github.com/carve-app/carve/services/api/internal/review"
 	"github.com/carve-app/carve/services/api/internal/settings"
 	"github.com/carve-app/carve/services/api/internal/stats"
@@ -107,6 +108,7 @@ func main() {
 	syncHandler := syncbridge.NewHandler(pool)
 	discoverHandler := discover.NewHandler(pool)
 	discoverIngester := discover.NewIngester(pool)
+	reportsHandler := reports.NewHandler(pool)
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(auth.Middleware)
@@ -201,6 +203,9 @@ func main() {
 		// Discover (content recommendations)
 		r.Get("/discover/feed", discoverHandler.Feed)
 
+		// Learning reports
+		r.Get("/reports/weekly", reportsHandler.Weekly)
+
 	})
 
 	// Stripe webhook — no auth middleware; signature verified inside handler.
@@ -255,6 +260,22 @@ func main() {
 			ictx, icancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			discoverIngester.IngestAll(ictx, 30)
 			icancel()
+		}
+	}()
+
+	// Weekly digest email — Monday 08:00 UTC. No-op if SMTP_HOST is unset.
+	go func() {
+		for {
+			now := time.Now().UTC()
+			daysUntilMon := (8 - int(now.Weekday())) % 7
+			if daysUntilMon == 0 && now.Hour() >= 8 {
+				daysUntilMon = 7
+			}
+			next := time.Date(now.Year(), now.Month(), now.Day()+daysUntilMon, 8, 0, 0, 0, time.UTC)
+			time.Sleep(time.Until(next))
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+			reports.SendWeeklyDigestToAll(ctx, pool)
+			cancel()
 		}
 	}()
 
