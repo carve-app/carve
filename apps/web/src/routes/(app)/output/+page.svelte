@@ -203,14 +203,14 @@
   .tabs-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
   .tabs { display: flex; gap: 0.5rem; }
   .tab { background: #1e2128; border: 1px solid #2a2d36; color: #9ba8c0; padding: 0.5rem 1.2rem; border-radius: 6px; cursor: pointer; font-size: 0.9rem; transition: all 0.15s; }
-  .tab.active { background: #4caf50; border-color: #4caf50; color: #fff; }
+  .tab.active { background: #2e7d32; border-color: #4caf50; color: #fff; }
 
   .msg { text-align: center; margin-top: 3rem; color: #9ba8c0; }
   .error-text { color: #ef5350; }
 
   .progress-bar-track { height: 4px; background: #2a2d36; border-radius: 2px; margin-bottom: 0.3rem; }
-  .progress-bar-fill { height: 100%; background: #4caf50; border-radius: 2px; transition: width 0.3s; }
-  .progress-label { font-size: 0.75rem; color: #6b7591; margin-bottom: 1rem; }
+  .progress-bar-fill { height: 100%; background: #2e7d32; border-radius: 2px; transition: width 0.3s; }
+  .progress-label { font-size: 0.75rem; color: #8a96b3; margin-bottom: 1rem; }
 
   .exercise-card { background: #1e2128; border: 1px solid #2a2d36; border-radius: 10px; padding: 1.5rem; }
   .ex-type-badge { display: inline-block; font-size: 0.68rem; font-weight: 700; padding: 0.1rem 0.5rem; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.75rem; }
@@ -230,10 +230,10 @@
   .score-circle { font-size: 2.5rem; font-weight: 700; text-align: center; margin-bottom: 0.5rem; }
   .feedback-text { color: #e8eaf0; font-size: 0.95rem; margin: 0 0 0.75rem; }
   .detail-row { display: flex; gap: 0.75rem; font-size: 0.82rem; color: #9ba8c0; padding: 0.35rem 0; border-top: 1px solid #2a2d36; }
-  .detail-label { font-weight: 600; color: #6b7591; min-width: 80px; }
+  .detail-label { font-weight: 600; color: #8a96b3; min-width: 80px; }
 
   .actions { display: flex; gap: 0.75rem; align-items: center; }
-  .btn { background: #4caf50; color: #fff; border: none; padding: 0.65rem 1.5rem; border-radius: 7px; font-size: 0.95rem; font-weight: 500; cursor: pointer; transition: background 0.15s; }
+  .btn { background: #2e7d32; color: #fff; border: none; padding: 0.65rem 1.5rem; border-radius: 7px; font-size: 0.95rem; font-weight: 500; cursor: pointer; transition: background 0.15s; }
   .btn:hover:not(:disabled) { background: #43a047; }
   .btn:disabled { opacity: 0.6; cursor: not-allowed; }
   .btn-skip { background: none; border: 1px solid #3a3d47; color: #9ba8c0; padding: 0.6rem 1.2rem; border-radius: 7px; font-size: 0.88rem; cursor: pointer; }
@@ -250,6 +250,6 @@
   .shadow-transcript { font-size: 0.88rem; color: #9ba8c0; margin: 0 0 0.75rem; }
   .shadow-audio { width: 100%; margin-bottom: 0.75rem; }
   .shadow-footer { display: flex; justify-content: space-between; align-items: center; }
-  .shadow-count { font-size: 0.78rem; color: #6b7591; }
-  .btn-sm { background: #4caf50; color: #fff; border: none; padding: 0.35rem 0.8rem; border-radius: 5px; font-size: 0.82rem; cursor: pointer; }
+  .shadow-count { font-size: 0.78rem; color: #8a96b3; }
+  .btn-sm { background: #2e7d32; color: #fff; border: none; padding: 0.35rem 0.8rem; border-radius: 5px; font-size: 0.82rem; cursor: pointer; }
 </style>

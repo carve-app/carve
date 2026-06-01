@@ -37,10 +37,22 @@ export function injectStyles(): void {
       padding: 12px 16px;
       max-width: 340px;
       min-width: 240px;
+      max-height: calc(100vh - 24px);
+      overflow-y: auto;
       font-family: system-ui, -apple-system, sans-serif;
       font-size: 14px;
       line-height: 1.5;
     }
+    #carve-popup .carve-mine-form { display: flex; flex-direction: column; gap: 4px; }
+    #carve-popup .carve-mine-form label { font-size: 11px; color: #9ba8c0; margin-top: 4px; }
+    #carve-popup .carve-mine-input { width: 100%; box-sizing: border-box; padding: 5px 7px; background: #13151a; border: 1px solid #2a2d36; border-radius: 4px; color: #e8eaf0; font-size: 13px; }
+    #carve-popup .carve-mine-input:focus { outline: none; border-color: #4caf50; }
+    #carve-popup .carve-mine-title { font-size: 13px; font-weight: 600; color: #e8eaf0; margin-bottom: 2px; }
+    #carve-popup .carve-mine-actions { display: flex; gap: 6px; margin-top: 8px; }
+    #carve-popup .carve-mine-actions button { flex: 1; padding: 6px 10px; border-radius: 5px; font-size: 12px; font-weight: 600; cursor: pointer; border: none; }
+    #carve-popup .btn-mine-save { background: #2e7d32; color: #fff; }
+    #carve-popup .btn-mine-cancel { background: #37404e; color: #e8eaf0; }
+    #carve-popup .carve-mine-status { font-size: 11px; margin-top: 4px; min-height: 14px; }
     #carve-popup .carve-word {
       font-size: 22px;
       font-weight: 600;

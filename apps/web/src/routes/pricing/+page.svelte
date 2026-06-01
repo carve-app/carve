@@ -10,7 +10,7 @@
     <div class="plans">
       <!-- Free -->
       <div class="plan">
-        <div class="plan-name">Free</div>
+        <h2 class="plan-name">Free</h2>
         <div class="plan-price"><span class="amount">$0</span><span class="period">/month</span></div>
         <p class="plan-desc">Everything you need to get started with immersion learning.</p>
         <ul class="features">
@@ -27,7 +27,7 @@
       <!-- Learner -->
       <div class="plan plan-featured">
         <div class="plan-badge">Most popular</div>
-        <div class="plan-name">Learner</div>
+        <h2 class="plan-name">Learner</h2>
         <div class="plan-price"><span class="amount">$9</span><span class="period">/month</span></div>
         <p class="plan-desc">For serious learners who want unlimited cards and rich media.</p>
         <ul class="features">
@@ -44,7 +44,7 @@
 
       <!-- Pro -->
       <div class="plan">
-        <div class="plan-name">Pro</div>
+        <h2 class="plan-name">Pro</h2>
         <div class="plan-price"><span class="amount">$19</span><span class="period">/month</span></div>
         <p class="plan-desc">For advanced learners and power users who want every feature.</p>
         <ul class="features">
@@ -121,7 +121,7 @@
     top: -12px;
     left: 50%;
     transform: translateX(-50%);
-    background: #7986cb;
+    background: #3949ab;
     color: #fff;
     font-size: 0.72rem;
     font-weight: 600;
@@ -148,7 +148,7 @@
   }
 
   .period {
-    color: #6b7a99;
+    color: #9ba8c0;
     font-size: 0.875rem;
   }
 
@@ -198,7 +198,7 @@
   .btn:hover { opacity: 0.85; }
 
   .btn-primary {
-    background: #7986cb;
+    background: #3949ab;
     color: #fff;
     border: none;
   }
@@ -210,14 +210,14 @@
   }
 
   .faq-note {
-    color: #6b7a99;
+    color: #9ba8c0;
     font-size: 0.875rem;
   }
 
   .faq-note a {
-    color: #7986cb;
-    text-decoration: none;
+    color: #c5cae9;
+    text-decoration: underline;
   }
 
-  .faq-note a:hover { text-decoration: underline; }
+  .faq-note a:hover { color: #fff; }
 </style>

@@ -513,7 +513,7 @@
   }
   .progress-bar {
     height: 100%;
-    background: #4caf50;
+    background: #2e7d32;
     transition: width 0.3s ease;
     border-radius: 4px;
   }
@@ -559,7 +559,7 @@
   .definition { font-size: 1.3rem; color: #b0bec5; margin: 0; }
   .sentence {
     font-size: 0.95rem;
-    color: #6b7591;
+    color: #8a96b3;
     font-style: italic;
     margin: 0.5rem 0 0;
     line-height: 1.6;
@@ -589,7 +589,7 @@
   .audio-btn:hover { background: #3a3d47; }
 
   .show-btn {
-    background: #4caf50;
+    background: #2e7d32;
     border: none;
     color: #fff;
     padding: 0.7rem 2rem;
@@ -606,7 +606,8 @@
   .show-btn:hover { background: #43a047; }
 
   .hint {
-    background: rgba(255,255,255,0.15);
+    background: rgba(0,0,0,0.35);
+    color: #fff;
     font-size: 0.72rem;
     padding: 0.1rem 0.35rem;
     border-radius: 3px;
@@ -616,7 +617,7 @@
     display: flex;
     gap: 1.25rem;
     font-size: 0.78rem;
-    color: #6b7591;
+    color: #8a96b3;
     flex-wrap: wrap;
     justify-content: center;
   }
@@ -668,7 +669,7 @@
   .lc-btn {
     background: transparent;
     border: 1px solid #2a2d36;
-    color: #6b7591;
+    color: #8a96b3;
     padding: 0.3rem 0.9rem;
     border-radius: 6px;
     font-size: 0.82rem;
@@ -676,7 +677,7 @@
     text-decoration: none;
     transition: border-color 0.15s, color 0.15s;
   }
-  .lc-btn:hover:not(:disabled) { border-color: #4a5568; color: #9ba8c0; }
+  .lc-btn:hover:not(:disabled) { border-color: #8a96b3; color: #9ba8c0; }
   .lc-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
   .center-msg { text-align: center; margin-top: 4rem; color: #9ba8c0; }
@@ -691,7 +692,7 @@
   .btn {
     display: inline-block;
     padding: 0.65rem 1.5rem;
-    background: #4caf50;
+    background: #2e7d32;
     color: #fff;
     border-radius: 7px;
     text-decoration: none;

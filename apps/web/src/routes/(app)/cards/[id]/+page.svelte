@@ -355,7 +355,7 @@
   .edit-label {
     display: block;
     font-size: 0.72rem;
-    color: #4a5568;
+    color: #8a96b3;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     margin-bottom: 0.3rem;
@@ -421,22 +421,22 @@
   .field { padding: 0.75rem 0; border-bottom: 1px solid #1e2128; }
   .field-label {
     font-size: 0.72rem;
-    color: #4a5568;
+    color: #8a96b3;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     margin-bottom: 0.25rem;
   }
   .field-value { color: #c8d0e0; font-size: 0.95rem; line-height: 1.5; }
   .sentence { font-style: italic; color: #9ba8c0; }
-  .translation { color: #7a8aa6; }
+  .translation { color: #9ba8c0; }
   .source-link {
-    color: #4caf50;
-    text-decoration: none;
+    color: #81c784;
+    text-decoration: underline;
     font-size: 0.82rem;
     word-break: break-all;
   }
-  .source-link:hover { text-decoration: underline; }
-  .meta-row { display: flex; gap: 1.25rem; flex-wrap: wrap; font-size: 0.88rem; color: #6b7591; }
+  .source-link:hover { color: #a5d6a7; }
+  .meta-row { display: flex; gap: 1.25rem; flex-wrap: wrap; font-size: 0.88rem; color: #8a96b3; }
 
   .tag-row { display: flex; gap: 0.4rem; flex-wrap: wrap; }
   .tag {
@@ -459,7 +459,7 @@
   .btn {
     display: inline-block;
     padding: 0.55rem 1.1rem;
-    background: #4caf50;
+    background: #2e7d32;
     color: #fff;
     border-radius: 7px;
     text-decoration: none;

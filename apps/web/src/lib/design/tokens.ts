@@ -23,14 +23,17 @@ export const color = {
   text:      '#c8d0e0',
   textLo:    '#9ba8c0',
   textMuted: '#7a8aa6',
-  textDim:   '#6b7591',
-  textFaint: '#4a5568',
+  textDim:   '#8a96b3',
+  textFaint: '#8a96b3',
 
   // Brand
   green:     '#4caf50',
   greenDark: '#43a047',
   greenLite: '#81c784',
   greenBg:   '#162316',
+  // Solid CTA background — chosen for WCAG AA (≥4.5:1) with white text.
+  greenBtn:  '#2e7d32',
+  greenBtnHi:'#388e3c',
 
   // Semantic
   success:   '#4caf50',
@@ -38,6 +41,9 @@ export const color = {
   danger:    '#e57373',
   dangerHi:  '#ef5350',
   info:      '#42a5f5',
+  // Solid danger-button background — WCAG AA (≥4.5:1) with white text.
+  dangerBtn:   '#c62828',
+  dangerBtnHi: '#d84343',
 
   // FSRS rating palette
   ratingAgain: '#e57373',

@@ -197,12 +197,12 @@
     padding: 1.25rem;
     margin-bottom: 1rem;
   }
-  .ref-label { font-size: 0.75rem; color: #6b7591; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+  .ref-label { font-size: 0.75rem; color: #8a96b3; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
   .ref-text { font-size: 1.1rem; color: #e8eaf0; line-height: 1.5; margin: 0 0 1rem; }
 
   .rec-card { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
   .big-btn {
-    background: #4caf50;
+    background: #2e7d32;
     color: #fff;
     border: none;
     border-radius: 999px;

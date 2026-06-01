@@ -226,14 +226,10 @@ jobs:
         run: npm run build
 
   # ── Extension e2e (Playwright) ────────────────────────────────────────────
-  # TODO(phase-7): mock-server / extension-host selector timeout — fixture
-  # needs a refresh now that the popup mine form gained the i+1 picker badge
-  # and similarity warning DOM. Non-blocking until the fixture is updated.
   extension-e2e:
     name: Extension E2E
     runs-on: ubuntu-latest
     needs: [extension]
-    continue-on-error: true
 
     steps:
       - uses: actions/checkout@v4
@@ -442,13 +438,9 @@ jobs:
           echo "::warning ::schemathesis surfaced findings (non-blocking on first wiring)"
 
   # ── L5–L9 Playwright matrix (web + a11y + offline) ────────────────────────
-  # TODO(phase-7): real a11y violations across login/cards/import/output/
-  # password-reset pages — color-contrast, missing <title>, link-in-text-block.
-  # Tracked but not blocking PRs until the design pass lands.
   e2e-web:
     name: L5–L9 — Playwright (web)
     runs-on: ubuntu-latest
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:

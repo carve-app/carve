@@ -73,14 +73,14 @@
   .fullWidth { width: 100%; }
 
   /* Variants */
-  .primary   { background: var(--c-green);     color: #fff; }
-  .primary:hover:not(:disabled)  { background: var(--c-greenDark); }
+  .primary   { background: var(--c-greenBtn);  color: #fff; }
+  .primary:hover:not(:disabled)  { background: var(--c-greenBtnHi); }
   .secondary { background: var(--c-bgRaised);  color: var(--c-textHi); border-color: var(--c-border); }
   .secondary:hover:not(:disabled){ border-color: var(--c-green); color: var(--c-textHi); }
   .ghost     { background: transparent; color: var(--c-text); border-color: var(--c-border); }
   .ghost:hover:not(:disabled)    { color: var(--c-textHi); border-color: var(--c-borderHi); }
-  .danger    { background: var(--c-danger);    color: #fff; }
-  .danger:hover:not(:disabled)   { background: var(--c-dangerHi); }
+  .danger    { background: var(--c-dangerBtn);  color: #fff; }
+  .danger:hover:not(:disabled)   { background: var(--c-dangerBtnHi); }
 
   .spin { display: inline-block; animation: rot 0.9s linear infinite; }
   @keyframes rot { to { transform: rotate(360deg); } }

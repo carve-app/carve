@@ -135,7 +135,7 @@
                 <div class="score-unknown">{item.unknown_word_count} unknown</div>
               {/if}
             {:else}
-              <div class="score-pct" style="color:#6b7591">—</div>
+              <div class="score-pct" style="color:#8a96b3">—</div>
               <div class="score-label">not scored</div>
             {/if}
           </div>
@@ -154,11 +154,11 @@
 
   .add-section { background: #1e2128; border: 1px solid #2a2d36; border-radius: 10px; padding: 1.25rem 1.5rem; margin-bottom: 1.5rem; }
   .add-section h2 { margin: 0 0 0.4rem; font-size: 1rem; }
-  .add-hint { font-size: 0.83rem; color: #6b7591; margin-bottom: 1rem; }
+  .add-hint { font-size: 0.83rem; color: #8a96b3; margin-bottom: 1rem; }
   .add-row { display: flex; gap: 0.75rem; }
   .url-input { flex: 1; background: #13151a; border: 1px solid #2a2d36; border-radius: 7px; color: #e8eaf0; padding: 0.55rem 0.8rem; font-size: 0.92rem; outline: none; }
   .url-input:focus { border-color: #4caf50; }
-  .btn { background: #4caf50; color: #fff; border: none; padding: 0.55rem 1.2rem; border-radius: 7px; font-size: 0.92rem; font-weight: 500; cursor: pointer; white-space: nowrap; }
+  .btn { background: #2e7d32; color: #fff; border: none; padding: 0.55rem 1.2rem; border-radius: 7px; font-size: 0.92rem; font-weight: 500; cursor: pointer; white-space: nowrap; }
   .btn:disabled { opacity: 0.6; cursor: not-allowed; }
   .error { color: #ef5350; font-size: 0.85rem; margin-top: 0.5rem; }
   .success { color: #4caf50; font-size: 0.85rem; margin-top: 0.5rem; }
@@ -171,18 +171,18 @@
   .item-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem; margin-bottom: 0.25rem; }
   .item-title { color: #e8eaf0; text-decoration: none; font-size: 0.95rem; font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item-title:hover { color: #4caf50; }
-  .item-url { font-size: 0.75rem; color: #6b7591; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item-url { font-size: 0.75rem; color: #8a96b3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item-btns { display: flex; gap: 0.5rem; align-items: center; }
-  .ext-link { color: #4a5568; text-decoration: none; font-size: 0.85rem; }
+  .ext-link { color: #8a96b3; text-decoration: none; font-size: 0.85rem; }
   .ext-link:hover { color: #9ba8c0; }
-  .remove-btn { background: none; border: none; color: #6b7591; cursor: pointer; font-size: 0.9rem; padding: 0; flex-shrink: 0; }
+  .remove-btn { background: none; border: none; color: #8a96b3; cursor: pointer; font-size: 0.9rem; padding: 0; flex-shrink: 0; }
   .remove-btn:hover { color: #ef5350; }
   .import-link { margin-top: 0.75rem; font-size: 0.8rem; }
-  .import-link a { color: #6b7591; }
+  .import-link a { color: #8a96b3; }
   .import-link a:hover { color: #9ba8c0; }
 
   .item-score { text-align: center; min-width: 70px; }
   .score-pct { font-size: 1.5rem; font-weight: 700; line-height: 1.1; }
-  .score-label { font-size: 0.7rem; color: #6b7591; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.2rem; }
-  .score-unknown { font-size: 0.72rem; color: #6b7591; margin-top: 0.2rem; }
+  .score-label { font-size: 0.7rem; color: #8a96b3; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.2rem; }
+  .score-unknown { font-size: 0.72rem; color: #8a96b3; margin-top: 0.2rem; }
 </style>

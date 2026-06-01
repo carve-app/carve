@@ -59,7 +59,7 @@
   ul { margin: 0; padding-left: 1.4rem; }
   li { font-size: 0.88rem; color: #b0bec5; margin-bottom: 0.3rem; }
 
-  .btn { background: #4caf50; color: #fff; border: none; padding: 0.7rem 1.75rem; border-radius: 7px; font-size: 1rem; font-weight: 500; cursor: pointer; transition: background 0.15s; }
+  .btn { background: #2e7d32; color: #fff; border: none; padding: 0.7rem 1.75rem; border-radius: 7px; font-size: 1rem; font-weight: 500; cursor: pointer; transition: background 0.15s; }
   .btn:hover:not(:disabled) { background: #43a047; }
   .btn:disabled { opacity: 0.6; cursor: not-allowed; }
 

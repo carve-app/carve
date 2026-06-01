@@ -215,7 +215,7 @@
   }
 
   .due-badge {
-    background: #4caf50;
+    background: #2e7d32;
     color: #fff;
     font-size: 0.65rem;
     font-weight: 700;
@@ -294,7 +294,7 @@
     width: 1.9rem;
     height: 1.9rem;
     border-radius: 50%;
-    background: #4caf50;
+    background: #2e7d32;
     color: #fff;
     border: none;
     font-size: 0.82rem;
@@ -322,7 +322,7 @@
 
   .dropdown-info { padding: 0.5rem 1rem 0.4rem; }
   .dropdown-name { font-size: 0.87rem; font-weight: 600; color: #e8eaf0; }
-  .dropdown-email { font-size: 0.74rem; color: #6b7591; margin-top: 0.1rem; }
+  .dropdown-email { font-size: 0.74rem; color: #8a96b3; margin-top: 0.1rem; }
 
   .dropdown-hr { border: none; border-top: 1px solid #2a2d36; margin: 0.3rem 0; }
 

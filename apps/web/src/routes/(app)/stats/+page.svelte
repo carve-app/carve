@@ -51,6 +51,11 @@
   }
 
   $: wordGrowthData = (stats?.word_growth ?? []).map((s: any) => ({ label: s.date, value: s.known_count }));
+  const emptyForecast = Array.from({ length: 14 }, (_, i) => {
+    const d = new Date();
+    d.setUTCDate(d.getUTCDate() + i);
+    return { label: d.toISOString().slice(5, 10), value: 0 };
+  });
   $: forecastData   = forecast.map(d => ({ label: d.date, value: d.count }));
   // Heatmap expects [{ date, value }] over last 13 weeks; reuse word_growth as proxy
   // if backend hasn't yet shipped a `reviews_by_day` field.
@@ -131,12 +136,8 @@
 
     <Card padding="md" class="mt">
       <h2>14-day forecast</h2>
-      {#if forecastData.length > 0}
-        <Chart data={forecastData} kind="bar" width={720} height={180} yLabel="cards due" />
-        <p class="forecast-total">Total due: {forecast.reduce((s, d) => s + d.count, 0)}</p>
-      {:else}
-        <EmptyState title="No upcoming reviews" body="Mine more cards or wait for current cards to mature." />
-      {/if}
+      <Chart data={forecastData.length > 0 ? forecastData : emptyForecast} kind="bar" width={720} height={180} yLabel="cards due" />
+      <p class="forecast-total">Total due: {forecast.reduce((s, d) => s + d.count, 0)}</p>
     </Card>
 
     <Card padding="md" class="mt">

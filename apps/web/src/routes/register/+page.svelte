@@ -41,6 +41,7 @@
       <label for="name">Name</label>
       <input
         id="name"
+        name="display_name"
         type="text"
         bind:value={displayName}
         placeholder="Your name"
@@ -147,7 +148,7 @@
   button {
     margin-top: 1rem;
     padding: 0.7rem;
-    background: #4caf50;
+    background: #2e7d32;
     color: #fff;
     border: none;
     border-radius: 6px;
@@ -167,6 +168,6 @@
     color: #9ba8c0;
   }
 
-  .footer a { color: #4caf50; text-decoration: none; }
+  .footer a { color: #81c784; text-decoration: underline; }
   .footer a:hover { text-decoration: underline; }
 </style>

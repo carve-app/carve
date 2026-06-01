@@ -20,8 +20,8 @@
   .md { padding: 0.25rem 0.6rem;  font-size: 0.78rem; }
 
   .default { background: var(--c-border);  color: var(--c-text); }
-  .success { background: color-mix(in srgb, var(--c-green)  20%, transparent); color: var(--c-green); }
-  .warning { background: color-mix(in srgb, var(--c-warning) 20%, transparent); color: var(--c-warning); }
-  .danger  { background: color-mix(in srgb, var(--c-danger)  20%, transparent); color: var(--c-danger); }
-  .info    { background: color-mix(in srgb, var(--c-info)    20%, transparent); color: var(--c-info); }
+  .success { background: color-mix(in srgb, var(--c-green)  20%, transparent); color: var(--c-greenLite); }
+  .warning { background: color-mix(in srgb, var(--c-warning) 20%, transparent); color: #ffcc80; }
+  .danger  { background: color-mix(in srgb, var(--c-danger)  20%, transparent); color: #ef9a9a; }
+  .info    { background: color-mix(in srgb, var(--c-info)    20%, transparent); color: #90caf9; }
 </style>

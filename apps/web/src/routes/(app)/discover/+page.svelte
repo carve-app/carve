@@ -163,7 +163,7 @@
   }
   .card-main { flex: 1; min-width: 0; }
 
-  .meta { display: flex; gap: 0.4rem; align-items: center; font-size: 0.75rem; color: #6b7591; margin-bottom: 0.4rem; }
+  .meta { display: flex; gap: 0.4rem; align-items: center; font-size: 0.75rem; color: #8a96b3; margin-bottom: 0.4rem; }
   .source { font-weight: 600; color: #9ba8c0; }
   .dot { opacity: 0.5; }
   .mode { font-weight: 500; padding: 0.05rem 0.45rem; border-radius: 6px; }
@@ -176,13 +176,13 @@
   .summary { margin: 0 0 0.6rem; font-size: 0.85rem; color: #9ba8c0; line-height: 1.45; }
 
   .actions { display: flex; gap: 0.6rem; margin-top: 0.5rem; }
-  .btn-save { background: #4caf50; color: #fff; border: none; padding: 0.4rem 0.85rem; border-radius: 6px; font-size: 0.8rem; cursor: pointer; }
+  .btn-save { background: #2e7d32; color: #fff; border: none; padding: 0.4rem 0.85rem; border-radius: 6px; font-size: 0.8rem; cursor: pointer; }
   .btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn-open { background: #2a2d36; color: #c8c8c8; padding: 0.4rem 0.85rem; border-radius: 6px; font-size: 0.8rem; text-decoration: none; }
   .btn-open:hover { background: #353944; }
 
   .score { text-align: center; min-width: 80px; }
   .score-pct { font-size: 1.5rem; font-weight: 700; line-height: 1.1; }
-  .score-label { font-size: 0.7rem; color: #6b7591; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.2rem; }
-  .score-unknown { font-size: 0.72rem; color: #6b7591; margin-top: 0.2rem; }
+  .score-label { font-size: 0.7rem; color: #8a96b3; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.2rem; }
+  .score-unknown { font-size: 0.72rem; color: #8a96b3; margin-top: 0.2rem; }
 </style>

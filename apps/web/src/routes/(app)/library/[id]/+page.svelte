@@ -288,7 +288,7 @@
   }
 
   .word-text { font-size: 0.9rem; color: #e8eaf0; flex: 1; }
-  .word-reading { font-size: 0.7rem; color: #6b7591; min-width: 40px; }
+  .word-reading { font-size: 0.7rem; color: #8a96b3; min-width: 40px; }
 
   .mine-small {
     background: none;
@@ -306,16 +306,16 @@
   }
   .mine-small:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  .no-unknown { font-size: 0.8rem; color: #4a5568; }
+  .no-unknown { font-size: 0.8rem; color: #8a96b3; }
 
   .reader-main { padding: 1.5rem 2rem 3rem; }
 
   .reader-header { display: flex; align-items: baseline; gap: 1.25rem; margin-bottom: 1.5rem; }
-  .back { color: #6b7591; text-decoration: none; font-size: 0.85rem; flex-shrink: 0; }
+  .back { color: #8a96b3; text-decoration: none; font-size: 0.85rem; flex-shrink: 0; }
   .back:hover { color: #e8eaf0; }
   .reader-title { margin: 0; font-size: 1rem; color: #c8d0e0; font-weight: 500; }
 
-  .loading-msg { color: #6b7591; margin-top: 2rem; }
+  .loading-msg { color: #8a96b3; margin-top: 2rem; }
 
   .reader-text {
     font-size: 1.1rem;
@@ -364,11 +364,11 @@
 
   .popup-word { font-size: 1.5rem; font-weight: 600; color: #e8eaf0; }
   .popup-reading { font-size: 0.8rem; color: #9ba8c0; margin-bottom: 0.5rem; }
-  .popup-loading { color: #6b7591; font-size: 0.85rem; }
+  .popup-loading { color: #8a96b3; font-size: 0.85rem; }
   .popup-defs { display: flex; flex-direction: column; gap: 0.25rem; margin-bottom: 0.5rem; }
   .popup-def { font-size: 0.85rem; color: #c8d0e0; }
-  .popup-pos { font-size: 0.7rem; color: #6b7591; background: #1e2128; padding: 0.05rem 0.3rem; border-radius: 3px; margin-right: 0.3rem; }
-  .popup-notfound { color: #6b7591; }
+  .popup-pos { font-size: 0.7rem; color: #8a96b3; background: #1e2128; padding: 0.05rem 0.3rem; border-radius: 3px; margin-right: 0.3rem; }
+  .popup-notfound { color: #8a96b3; }
   .popup-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
   .popup-mine {
     flex: 1;
@@ -384,7 +384,7 @@
   .popup-close {
     background: none;
     border: 1px solid #2a2d36;
-    color: #6b7591;
+    color: #8a96b3;
     padding: 0.3rem 0.5rem;
     border-radius: 6px;
     font-size: 0.78rem;

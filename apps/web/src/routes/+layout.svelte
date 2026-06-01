@@ -12,6 +12,7 @@
 </script>
 
 <svelte:head>
+  <title>Carve</title>
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
   <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
@@ -39,6 +40,11 @@
   }
 
   :global(a) { color: inherit; }
+  /* axe link-in-text-block: inline links inside text containers must be
+     distinguishable without relying on color alone. */
+  :global(p a),
+  :global(li a),
+  :global(.prose a) { text-decoration: underline; }
   :global(button) { font-family: inherit; }
   :global(:focus-visible) {
     outline: none;

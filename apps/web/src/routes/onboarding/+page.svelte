@@ -194,8 +194,8 @@
               <span class="lang-native">{opt.native}</span>
             </button>
           {/each}
-          <div class="lang-card disabled" title="Coming next">
-            <span class="lang-flag">🌐</span>
+          <div class="lang-card disabled" aria-disabled="true" title="Coming next">
+            <span class="lang-flag" aria-hidden="true">🌐</span>
             <span class="lang-name">More soon</span>
             <span class="lang-native">ES, FR, DE…</span>
           </div>
@@ -375,13 +375,13 @@
     transition: background 0.2s;
   }
 
-  .dot.done { background: #4caf50; }
+  .dot.done { background: #2e7d32; }
   .dot.active { background: #81c784; width: 18px; border-radius: 4px; }
 
   .skip-btn {
     background: none;
     border: none;
-    color: #6b7591;
+    color: #8a96b3;
     font-size: 0.8rem;
     cursor: pointer;
     padding: 0.2rem 0.4rem;
@@ -433,11 +433,13 @@
 
   .lang-card:hover:not(.disabled) { border-color: #4caf50; background: #161a1e; }
   .lang-card.selected { border-color: #4caf50; background: #162316; }
-  .lang-card.disabled { opacity: 0.4; cursor: default; }
+  .lang-card.disabled { cursor: default; border-color: #2a2d36; background: #161922; }
+  .lang-card.disabled .lang-name { color: #a8b2c8; }
+  .lang-card.disabled .lang-native { color: #8a96b3; }
 
   .lang-flag { font-size: 1.75rem; }
   .lang-name { font-size: 0.9rem; font-weight: 600; color: #c8d0e0; }
-  .lang-native { font-size: 0.8rem; color: #6b7591; }
+  .lang-native { font-size: 0.8rem; color: #8a96b3; }
 
   /* ── Word groups ── */
 
@@ -467,8 +469,8 @@
   .group-label { font-size: 0.88rem; font-weight: 600; color: #c8d0e0; }
   .group-check { color: #4caf50; font-weight: 700; width: 1rem; text-align: right; }
 
-  .word-sample { font-size: 0.78rem; color: #6b7591; line-height: 1.7; }
-  .more { color: #4a5568; margin-left: 0.25rem; }
+  .word-sample { font-size: 0.78rem; color: #8a96b3; line-height: 1.7; }
+  .more { color: #8a96b3; margin-left: 0.25rem; }
 
   /* ── Deck preview ── */
 
@@ -486,7 +488,7 @@
 
   .deck-icon { font-size: 2rem; }
   .deck-name { font-size: 0.95rem; font-weight: 600; color: #c8d0e0; }
-  .deck-desc { font-size: 0.8rem; color: #6b7591; margin-top: 0.15rem; }
+  .deck-desc { font-size: 0.8rem; color: #8a96b3; margin-top: 0.15rem; }
 
   /* ── Extension ── */
 
@@ -516,7 +518,7 @@
   .ext-btn.highlighted { border-color: #4caf50; color: #e8eaf0; }
 
   .ext-icon { font-size: 1.4rem; }
-  .ext-note { font-size: 0.8rem; color: #4a5568; }
+  .ext-note { font-size: 0.8rem; color: #8a96b3; }
 
   /* ── Done ── */
 
@@ -543,7 +545,7 @@
   }
 
   .btn-primary {
-    background: #4caf50;
+    background: #2e7d32;
     color: #fff;
     border: none;
     padding: 0.65rem 1.5rem;
@@ -566,6 +568,6 @@
     cursor: pointer;
     transition: border-color 0.15s, color 0.15s;
   }
-  .btn-ghost:hover:not(:disabled) { border-color: #4a5568; color: #9ba8c0; }
+  .btn-ghost:hover:not(:disabled) { border-color: #8a96b3; color: #9ba8c0; }
   .btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

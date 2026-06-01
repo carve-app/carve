@@ -262,7 +262,7 @@
   main { max-width: 680px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
 
   .page-header { display: flex; align-items: baseline; gap: 1.25rem; margin-bottom: 1.5rem; }
-  .back { color: #6b7591; text-decoration: none; font-size: 0.85rem; }
+  .back { color: #8a96b3; text-decoration: none; font-size: 0.85rem; }
   .back:hover { color: #e8eaf0; }
   h1 { margin: 0; font-size: 1.25rem; }
 
@@ -271,7 +271,7 @@
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
-    color: #6b7591;
+    color: #8a96b3;
     padding: 0.55rem 1.25rem;
     font-size: 0.9rem;
     cursor: pointer;
@@ -284,7 +284,7 @@
   .desc { color: #9ba8c0; font-size: 0.9rem; margin: 0; }
 
   .field { display: flex; flex-direction: column; gap: 0.35rem; }
-  .field label { font-size: 0.78rem; color: #6b7591; text-transform: uppercase; letter-spacing: 0.05em; }
+  .field label { font-size: 0.78rem; color: #8a96b3; text-transform: uppercase; letter-spacing: 0.05em; }
 
   select {
     background: #13151a;
@@ -309,14 +309,14 @@
   }
   .kind-card.active { border-color: #4caf50; background: #1a2a1a; }
   .kind-label { font-size: 0.88rem; font-weight: 500; color: #e8eaf0; margin-bottom: 0.25rem; }
-  .kind-desc { font-size: 0.74rem; color: #6b7591; line-height: 1.4; }
+  .kind-desc { font-size: 0.74rem; color: #8a96b3; line-height: 1.4; }
 
   .drop-zone {
     border: 2px dashed #2a2d36;
     border-radius: 10px;
     padding: 2rem 1.5rem;
     text-align: center;
-    color: #6b7591;
+    color: #8a96b3;
     font-size: 0.9rem;
     display: flex;
     flex-direction: column;
@@ -324,7 +324,7 @@
     gap: 0.75rem;
     transition: border-color 0.15s;
   }
-  .drop-zone:hover { border-color: #4a5568; }
+  .drop-zone:hover { border-color: #8a96b3; }
   .drop-zone.has-file { border-color: #4caf50; border-style: solid; }
   .drop-zone p { margin: 0; }
 
@@ -341,10 +341,10 @@
   }
   .file-label input { display: none; }
 
-  .clear-btn { background: none; border: none; color: #6b7591; cursor: pointer; font-size: 1rem; }
+  .clear-btn { background: none; border: none; color: #8a96b3; cursor: pointer; font-size: 1rem; }
 
   .import-btn {
-    background: #4caf50;
+    background: #2e7d32;
     color: #fff;
     border: none;
     padding: 0.65rem 1.5rem;
@@ -370,6 +370,6 @@
   .result-label { font-size: 0.82rem; color: #9ba8c0; }
   .result-val { font-size: 1rem; font-weight: 600; }
   .result-val.success { color: #4caf50; }
-  .result-val.muted { color: #6b7591; }
-  .result-note { font-size: 0.8rem; color: #6b7591; margin: 0.25rem 0 0; }
+  .result-val.muted { color: #8a96b3; }
+  .result-note { font-size: 0.8rem; color: #8a96b3; margin: 0.25rem 0 0; }
 </style>

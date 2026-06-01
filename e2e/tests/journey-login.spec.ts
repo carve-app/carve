@@ -19,7 +19,7 @@ test('login → auth guard → logout', async ({ page, request }) => {
   await page.fill('input[type="email"]', email);
   await page.fill('input[type="password"]', 'super-secret-123');
   await Promise.all([
-    page.waitForURL(/\/(cards|onboarding)/, { timeout: 10_000 }),
+    page.waitForURL(/\/(cards|onboarding|review)/, { timeout: 10_000 }),
     page.click('button[type="submit"]'),
   ]);
 

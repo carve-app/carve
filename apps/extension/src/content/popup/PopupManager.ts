@@ -123,7 +123,12 @@ export class PopupManager {
       </div>
     `;
 
-    popup.querySelector('.btn-mine')?.addEventListener('click', () => {
+    popup.querySelector('.btn-mine')?.addEventListener('click', (e) => {
+      // The button is removed from the DOM when innerHTML is replaced below.
+      // Stop the bubbled click before it reaches the document-level "click
+      // outside #carve-popup" handler, which would otherwise see the orphaned
+      // node, conclude the click was outside, and hide the popup.
+      e.stopPropagation();
       const candidates = getCandidateSentences(tokenEl, tokenEl.textContent ?? '');
       this.showMineForm(popup, tokenEl, lemma, entry?.reading ?? reading, entry, sentence, candidates);
     });
@@ -153,17 +158,24 @@ export class PopupManager {
 
   private positionPopup(tokenEl: HTMLElement): void {
     const popup = this.getOrCreatePopup();
+    popup.style.display = 'block';
+    // Force layout then read the rendered size.
+    const measuredH = popup.getBoundingClientRect().height || 200;
     const rect = tokenEl.getBoundingClientRect();
-    const popupH = 200;
+    const viewportH = window.innerHeight;
+    const margin = 8;
 
-    // popup is position:fixed, so getBoundingClientRect() coords are already in
-    // viewport space — do not add window.scroll* offsets
+    // Choose anchor side, then clamp inside the viewport so a tall mine form
+    // is never positioned below the viewport (the Save button has to stay
+    // reachable without scrolling).
     let top: number;
-    if (rect.top > popupH + 8) {
-      top = rect.top - popupH - 8;
+    if (rect.top - margin >= measuredH) {
+      top = rect.top - measuredH - margin;
     } else {
-      top = rect.bottom + 8;
+      top = rect.bottom + margin;
     }
+    const maxTop = Math.max(margin, viewportH - measuredH - margin);
+    top = Math.max(margin, Math.min(top, maxTop));
 
     let left = rect.left;
     const maxLeft = window.innerWidth - 360;
@@ -171,7 +183,6 @@ export class PopupManager {
 
     popup.style.top = `${top}px`;
     popup.style.left = `${left}px`;
-    popup.style.display = 'block';
   }
 
   private showMineForm(
@@ -223,6 +234,10 @@ export class PopupManager {
         <div class="carve-mine-status" id="mine-status"></div>
       </div>
     `;
+
+    // Re-position now that the form content is much taller than the lookup
+    // popup — otherwise the Save button can land below the viewport.
+    this.positionPopup(tokenEl);
 
     // Check for near-duplicate cards. Re-runs whenever the sentence textarea
     // changes (e.g. after the picker swaps it in, or after user edits).

@@ -219,7 +219,20 @@ const server = http.createServer(async (req, res) => {
   // ── Stats / library / settings stubs ──────────────────────────────────
   if (req.method === 'GET' && (path === '/v1/stats' || path.startsWith('/v1/stats/'))) {
     if (!auth(req)) return send(res, 401, { error: 'unauthorized' });
-    return send(res, 200, { reviews_today: state.reviewEvents.length, retention: 0.9 });
+    return send(res, 200, {
+      reviews_today: state.reviewEvents.length,
+      known_cards: 0,
+      learning_cards: 0,
+      retention_30d: 0.9,
+      retention: 0.9,
+      total_reviews: 0,
+      total_ever_reviews: 0,
+      streak_days: 0,
+      reading_minutes: 0,
+      listening_minutes: 0,
+      word_growth: [],
+      reviews_by_day: [],
+    });
   }
 
   // Stub everything else as 200 / empty, so journey tests don't accidentally

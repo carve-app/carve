@@ -330,8 +330,9 @@ async function testMiningWorkflow(context, mockBase, capturedCards) {
   await page.click('#carve-popup .btn-mine');
   console.log('[action] clicked Mine button');
 
-  // Mine form should appear with Save card button
-  await page.waitForSelector('#carve-popup .btn-mine-save', { timeout: 5_000, state: 'visible' });
+  // Mine form should appear with Save card button.
+  const saveBtn = page.locator('#carve-popup .btn-mine-save');
+  await saveBtn.waitFor({ timeout: 5_000, state: 'visible' });
   console.log('[page] mine form appeared');
 
   // ── Mine form field checks ────────────────────────────────────────────────
@@ -344,7 +345,7 @@ async function testMiningWorkflow(context, mockBase, capturedCards) {
 
   // ── Save card and verify API call ─────────────────────────────────────────
   const cardCountBefore = capturedCards.length;
-  await page.click('#carve-popup .btn-mine-save');
+  await saveBtn.click();
   console.log('[action] clicked Save card');
 
   // Wait for the card to be captured by mock server (poll up to 3s)

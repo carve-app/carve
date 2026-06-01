@@ -122,7 +122,7 @@
     width: 100%;
     margin-top: 1rem;
     padding: 0.7rem;
-    background: #4caf50;
+    background: #2e7d32;
     color: #fff;
     border: none;
     border-radius: 6px;
@@ -141,7 +141,7 @@
     margin: 1.25rem 0 0;
     font-size: 0.85rem;
   }
-  .footer a { color: #9ba8c0; text-decoration: none; }
+  .footer a { color: #c8d0e0; text-decoration: underline; }
   .footer a:hover { color: #e8eaf0; }
 
   .error-msg {

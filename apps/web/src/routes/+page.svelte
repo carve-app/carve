@@ -123,7 +123,7 @@
   .nav-link:hover { color: #e8eaf0; }
 
   .cta-small {
-    background: #4caf50;
+    background: #2e7d32;
     color: #fff;
     padding: 0.45rem 1rem;
     border-radius: 6px;
@@ -194,7 +194,7 @@
 
   .btn-primary {
     display: inline-block;
-    background: #4caf50;
+    background: #2e7d32;
     color: #fff;
     padding: 0.75rem 1.75rem;
     border-radius: 8px;
@@ -216,7 +216,7 @@
     font-size: 1rem;
     transition: border-color 0.15s, color 0.15s;
   }
-  .btn-ghost:hover { border-color: #4a5568; color: #c8d0e0; }
+  .btn-ghost:hover { border-color: #8a96b3; color: #c8d0e0; }
 
   /* ── Features ── */
 
@@ -303,5 +303,5 @@
   }
 
   .footer-brand { font-weight: 700; color: #4caf50; }
-  .footer-copy { color: #4a5568; }
+  .footer-copy { color: #8a96b3; }
 </style>

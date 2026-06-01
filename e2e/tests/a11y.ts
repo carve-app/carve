@@ -22,7 +22,15 @@ export async function expectNoSeriousA11y(
     (v) => v.impact === 'serious' || v.impact === 'critical',
   );
   if (serious.length > 0) {
-    const summary = serious.map((v) => `${v.id} (${v.impact}): ${v.help}`).join('\n');
+    const summary = serious
+      .map((v) => {
+        const nodes = v.nodes
+          .slice(0, 3)
+          .map((n) => `      • ${n.target.join(' ')} — ${n.failureSummary?.split('\n')[0] ?? ''}`)
+          .join('\n');
+        return `  ${v.id} (${v.impact}): ${v.help}\n${nodes}`;
+      })
+      .join('\n');
     throw new Error(`[${label}] axe found ${serious.length} serious violations:\n${summary}`);
   }
   expect(serious).toHaveLength(0);

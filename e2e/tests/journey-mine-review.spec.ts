@@ -45,5 +45,5 @@ test('user can review a card with keyboard shortcuts', async ({ page, request, b
   }
 
   // Expect to see a session-complete screen.
-  await expect(page.locator('text=/Session complete|review more/i')).toBeVisible({ timeout: 5_000 });
+  await expect(page.locator('text=/Session complete|review more/i').first()).toBeVisible({ timeout: 5_000 });
 });

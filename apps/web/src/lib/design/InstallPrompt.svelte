@@ -73,7 +73,7 @@
     padding: 0.4rem 0.7rem; border-radius: 6px; font-size: 0.78rem; cursor: pointer;
   }
   .install-primary {
-    background: #4caf50; border: none; color: #fff;
+    background: #2e7d32; border: none; color: #fff;
     padding: 0.4rem 0.9rem; border-radius: 6px; font-size: 0.78rem;
     font-weight: 600; cursor: pointer;
   }

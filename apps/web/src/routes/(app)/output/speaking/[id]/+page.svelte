@@ -167,7 +167,7 @@
     padding: 1.25rem;
     margin-bottom: 1rem;
   }
-  .label { font-size: 0.75rem; color: #6b7591; text-transform: uppercase; letter-spacing: 0.05em; }
+  .label { font-size: 0.75rem; color: #8a96b3; text-transform: uppercase; letter-spacing: 0.05em; }
   .prompt-text { color: #e8eaf0; font-size: 1.05rem; line-height: 1.5; margin: 0.5rem 0 0.75rem; }
   .target { color: #9ba8c0; font-size: 0.85rem; }
   .target code {
@@ -179,7 +179,7 @@
 
   .rec-card { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; }
   .big-btn {
-    background: #4caf50; color: #fff; border: none; border-radius: 999px;
+    background: #2e7d32; color: #fff; border: none; border-radius: 999px;
     padding: 0.9rem 1.75rem; font-size: 1rem; font-weight: 600; cursor: pointer;
   }
   .big-btn.rec { background: #e53935; animation: pulse 1.4s ease-in-out infinite; }

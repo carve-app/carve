@@ -119,24 +119,24 @@
       on:input={onSearchInput}
       placeholder="Search cards…"
     />
-    <select class="filter-select" bind:value={filterState} on:change={load}>
+    <select class="filter-select" bind:value={filterState} on:change={load} aria-label="Filter by state">
       <option value="">All states</option>
       <option value="new">New</option>
       <option value="learning">Learning</option>
       <option value="review">Review</option>
       <option value="relearning">Re-learning</option>
     </select>
-    <select class="filter-select" bind:value={filterSuspended} on:change={load}>
+    <select class="filter-select" bind:value={filterSuspended} on:change={load} aria-label="Filter by suspended">
       <option value="all">All</option>
       <option value="active">Active</option>
       <option value="suspended">Suspended</option>
     </select>
-    <select class="filter-select" bind:value={filterLeech} on:change={load}>
+    <select class="filter-select" bind:value={filterLeech} on:change={load} aria-label="Filter by leech">
       <option value="all">All</option>
       <option value="normal">Not leech</option>
       <option value="leech">Leech</option>
     </select>
-    <select class="filter-select" bind:value={sortBy} on:change={load}>
+    <select class="filter-select" bind:value={sortBy} on:change={load} aria-label="Sort by">
       <option value="created">Newest</option>
       <option value="due">Due soonest</option>
       <option value="lapses">Most lapses</option>
@@ -195,7 +195,12 @@
       {#each cards as card (card.id)}
         <li class="card" class:selected={selected.has(card.id)} class:suspended={card.suspended}>
           <label class="card-check">
-            <input type="checkbox" checked={selected.has(card.id)} on:change={() => toggleSelect(card.id)} />
+            <input
+              type="checkbox"
+              checked={selected.has(card.id)}
+              on:change={() => toggleSelect(card.id)}
+              aria-label="Select card {card.front_text}"
+            />
           </label>
           <a href="/cards/{card.id}" class="card-link">
             <div class="card-top">
@@ -281,7 +286,7 @@
   }
   .bulk-count { color: #64b5f6; font-size: 0.88rem; font-weight: 600; }
   .btn-bulk {
-    background: #4caf50;
+    background: #2e7d32;
     border: none;
     color: #fff;
     padding: 0.35rem 0.9rem;
@@ -302,7 +307,7 @@
     display: inline-block;
     margin-top: 1rem;
     padding: 0.6rem 1.4rem;
-    background: #4caf50;
+    background: #2e7d32;
     color: #fff;
     border-radius: 6px;
     text-decoration: none;
@@ -315,7 +320,7 @@
 
   .empty { text-align: center; margin-top: 4rem; }
   .empty-title { font-size: 1.2rem; color: #9ba8c0; margin-bottom: 0.5rem; }
-  .empty-hint { color: #6b7591; font-size: 0.9rem; }
+  .empty-hint { color: #8a96b3; font-size: 0.9rem; }
 
   /* ── Count bar ── */
   .count-bar { margin-bottom: 0.5rem; }
@@ -340,7 +345,7 @@
     display: flex;
     align-items: stretch;
   }
-  .card:hover { border-color: #4a5568; }
+  .card:hover { border-color: #8a96b3; }
   .card.selected { border-color: #4caf50; background: #1a2420; }
   .card.suspended { opacity: 0.6; }
 
@@ -379,8 +384,8 @@
   .badge-leech      { background: #2a0a0a; color: #e57373; }
 
   .back-text { color: #b0bec5; font-size: 0.95rem; margin: 0.25rem 0; }
-  .sentence { color: #6b7591; font-size: 0.88rem; font-style: italic; margin: 0.35rem 0 0; line-height: 1.5; }
-  .date { color: #4a5270; font-size: 0.78rem; margin: 0.5rem 0 0; }
+  .sentence { color: #8a96b3; font-size: 0.88rem; font-style: italic; margin: 0.35rem 0 0; line-height: 1.5; }
+  .date { color: #8a96b3; font-size: 0.78rem; margin: 0.5rem 0 0; }
 
   .tag-row { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.35rem; }
   .tag {

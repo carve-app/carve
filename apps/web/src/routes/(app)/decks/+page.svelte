@@ -264,7 +264,7 @@
   .tabs-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
   .tabs { display: flex; gap: 0.5rem; }
   .tab { background: #1e2128; border: 1px solid #2a2d36; color: #9ba8c0; padding: 0.5rem 1.2rem; border-radius: 6px; cursor: pointer; font-size: 0.9rem; transition: all 0.15s; }
-  .tab.active { background: #4caf50; border-color: #4caf50; color: #fff; }
+  .tab.active { background: #2e7d32; border-color: #4caf50; color: #fff; }
   .tab:hover:not(.active) { color: #e8eaf0; }
 
   .msg { text-align: center; margin-top: 3rem; color: #9ba8c0; }
@@ -285,18 +285,18 @@
   .sub-btn.subscribed { background: #2a2d36; border-color: #9ba8c0; color: #9ba8c0; }
   .sub-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-  .deck-meta { display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.8rem; color: #6b7591; }
+  .deck-meta { display: flex; flex-wrap: wrap; gap: 1rem; font-size: 0.8rem; color: #8a96b3; }
   .tags { font-style: italic; }
 
   .rate-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; flex-wrap: wrap; }
   .rate-label { font-size: 0.8rem; color: #9ba8c0; }
   .star { background: none; border: none; color: #ffb74d; cursor: pointer; font-size: 0.85rem; padding: 0.2rem 0.4rem; border-radius: 4px; }
   .star:hover { background: #2a2d36; }
-  .cancel-rate { background: none; border: none; color: #6b7591; cursor: pointer; font-size: 0.9rem; }
+  .cancel-rate { background: none; border: none; color: #8a96b3; cursor: pointer; font-size: 0.9rem; }
   .rate-open-btn { background: none; border: 1px solid #3a3d47; color: #9ba8c0; padding: 0.25rem 0.75rem; border-radius: 5px; cursor: pointer; font-size: 0.78rem; }
   .rate-open-btn:hover { background: #2a2d36; }
 
-  .btn { display: inline-block; padding: 0.6rem 1.4rem; background: #4caf50; color: #fff; border-radius: 6px; font-size: 0.9rem; font-weight: 500; border: none; cursor: pointer; }
+  .btn { display: inline-block; padding: 0.6rem 1.4rem; background: #2e7d32; color: #fff; border-radius: 6px; font-size: 0.9rem; font-weight: 500; border: none; cursor: pointer; }
   .btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
   .btn-new { background: #1e2128; border: 1px solid #4caf50; color: #4caf50; padding: 0.45rem 1rem; border-radius: 6px; cursor: pointer; font-size: 0.88rem; font-weight: 500; transition: background 0.15s; }
@@ -316,7 +316,7 @@
   .edit-form { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid #2a2d36; }
   .text-input-sm { background: #13151a; border: 1px solid #3a3d47; color: #e8eaf0; padding: 0.35rem 0.6rem; border-radius: 5px; font-size: 0.85rem; flex: 1; min-width: 120px; }
   .check-label-sm { font-size: 0.82rem; color: #9ba8c0; display: flex; align-items: center; gap: 0.3rem; }
-  .btn-sm { background: #4caf50; color: #fff; border: none; padding: 0.35rem 0.8rem; border-radius: 5px; font-size: 0.82rem; cursor: pointer; }
+  .btn-sm { background: #2e7d32; color: #fff; border: none; padding: 0.35rem 0.8rem; border-radius: 5px; font-size: 0.82rem; cursor: pointer; }
   .btn-sm:disabled { opacity: 0.6; cursor: not-allowed; }
   .btn-ghost-sm { background: none; border: 1px solid #3a3d47; color: #9ba8c0; padding: 0.3rem 0.7rem; border-radius: 5px; font-size: 0.82rem; cursor: pointer; }
   .btn-ghost-sm:hover { background: #2a2d36; }

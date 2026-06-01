@@ -175,7 +175,7 @@
   button {
     margin-top: 0.25rem;
     padding: 0.7rem;
-    background: #7986cb;
+    background: #3949ab;
     color: #fff;
     border: none;
     border-radius: 8px;
@@ -185,13 +185,13 @@
     transition: opacity 0.15s;
   }
 
-  button:disabled { opacity: 0.5; cursor: default; }
+  button:disabled { cursor: default; background: #4a5263; color: #c8d0e0; }
 
   .btn {
     display: block;
     text-align: center;
     padding: 0.7rem;
-    background: #7986cb;
+    background: #3949ab;
     color: #fff;
     border-radius: 8px;
     font-size: 0.95rem;
@@ -201,10 +201,10 @@
 
   .back {
     text-align: center;
-    color: #6b7a99;
+    color: #9ba8c0;
     font-size: 0.875rem;
-    text-decoration: none;
+    text-decoration: underline;
   }
 
-  .back:hover { color: #9ba8c0; }
+  .back:hover { color: #e8eaf0; }
 </style>

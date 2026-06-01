@@ -75,7 +75,7 @@
   }
 
   .updated {
-    color: #6b7a99;
+    color: #9ba8c0;
     font-size: 0.875rem;
     margin-bottom: 2.5rem;
   }
@@ -102,12 +102,12 @@
   }
 
   a {
-    color: #7986cb;
-    text-decoration: none;
+    color: #c5cae9;
+    text-decoration: underline;
   }
 
   a:hover {
-    text-decoration: underline;
+    color: #fff;
   }
 
   code {
