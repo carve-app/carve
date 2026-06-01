@@ -220,6 +220,7 @@ func main() {
 		r.Post("/score-content", nlpProxy.ScoreContent)
 		r.Post("/translate", nlpProxy.Translate)
 		r.Post("/select-sentence", nlpProxy.SelectSentence)
+		r.Get("/grammar/patterns", nlpProxy.GrammarPatterns)
 	})
 
 	port := os.Getenv("PORT")

@@ -21,6 +21,7 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from .dictionary import DictionaryService
+from .grammar_ja import PATTERNS as JA_PATTERNS, pattern_summary
 from .scorer import CandidateScore, score_content, select_best_sentence
 from .tokenizer import JapaneseTokenizer
 from .tokenizer_zh import ChineseTokenizer
@@ -69,6 +70,8 @@ class TokenizeRequest(BaseModel):
     include_definitions: bool = False
     known_lemmas: list[str] = []
     learning_lemmas: list[str] = []
+    known_pattern_ids: list[str] = []
+    include_patterns: bool = False
 
 
 class TokenOut(BaseModel):
@@ -88,6 +91,9 @@ class TokenizeResponse(BaseModel):
     comprehension_pct: float | None
     unknown_count: int | None
     recommended_mode: str | None
+    detected_patterns: list[dict] | None = None
+    grammar_pct: float | None = None
+    unknown_patterns: list[dict] | None = None
 
 
 class LookupRequest(BaseModel):
@@ -136,6 +142,20 @@ class ScoreResponse(BaseModel):
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "service": "nlp", "version": "0.1.0"}
+
+
+@app.get("/grammar/patterns")
+def list_grammar_patterns(language: str = "ja") -> dict:
+    """List all grammar patterns the detector knows about. Used by Settings
+    so the user can mark patterns as known/unknown."""
+    if language != "ja":
+        raise HTTPException(status_code=422, detail=f"Grammar patterns not yet supported for '{language}'")
+    return {
+        "patterns": [
+            {"id": p.id, "name": p.name, "jlpt": p.jlpt, "description": p.description}
+            for p in JA_PATTERNS
+        ],
+    }
 
 
 @app.post("/tokenize", response_model=TokenizeResponse)
@@ -219,6 +239,11 @@ def tokenize(
             definitions=defs,
         ))
 
+    # Optional grammar layer (JA only for now).
+    grammar_payload: dict | None = None
+    if req.language == "ja" and req.include_patterns:
+        grammar_payload = pattern_summary(raw_tokens, set(req.known_pattern_ids))
+
     if req.known_lemmas or req.learning_lemmas:
         scored = score_content(raw_tokens, known, learning)
         return TokenizeResponse(
@@ -226,6 +251,9 @@ def tokenize(
             comprehension_pct=scored.comprehension_pct,
             unknown_count=scored.unknown_count,
             recommended_mode=scored.recommended_mode,
+            detected_patterns=grammar_payload["detected_patterns"] if grammar_payload else None,
+            grammar_pct=grammar_payload["grammar_pct"] if grammar_payload else None,
+            unknown_patterns=grammar_payload["unknown_patterns"] if grammar_payload else None,
         )
 
     return TokenizeResponse(
@@ -233,6 +261,9 @@ def tokenize(
         comprehension_pct=None,
         unknown_count=None,
         recommended_mode=None,
+        detected_patterns=grammar_payload["detected_patterns"] if grammar_payload else None,
+        grammar_pct=grammar_payload["grammar_pct"] if grammar_payload else None,
+        unknown_patterns=grammar_payload["unknown_patterns"] if grammar_payload else None,
     )
 
 

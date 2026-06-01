@@ -102,3 +102,45 @@ func (p *Proxy) Translate(w http.ResponseWriter, r *http.Request) {
 func (p *Proxy) SelectSentence(w http.ResponseWriter, r *http.Request) {
 	p.forward(w, r, "/select-sentence")
 }
+
+// GET /v1/nlp/grammar/patterns — proxies to NLP /grammar/patterns.
+// Lists all detectable grammar patterns for the requested language.
+func (p *Proxy) GrammarPatterns(w http.ResponseWriter, r *http.Request) {
+	upstreamPath := "/grammar/patterns"
+	if q := r.URL.RawQuery; q != "" {
+		upstreamPath += "?" + q
+	}
+	p.forwardGET(w, r, upstreamPath)
+}
+
+// forwardGET is a GET-flavoured forward (no body).
+func (p *Proxy) forwardGET(w http.ResponseWriter, r *http.Request, upstreamPath string) {
+	upstreamURL := p.serviceURL + upstreamPath
+	ctx, cancel := context.WithTimeout(context.Background(), nlpTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamURL, nil)
+	if err != nil {
+		slog.Error("nlp proxy GET: build request", "error", err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+	if p.internalSecret != "" {
+		req.Header.Set("X-Internal-Secret", p.internalSecret)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		slog.Error("nlp proxy GET: upstream request failed", "url", upstreamURL, "error", err)
+		http.Error(w, `{"error":"nlp service unavailable"}`, http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	for k, vals := range resp.Header {
+		for _, v := range vals {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		slog.Error("nlp proxy GET: copy body", "error", err)
+	}
+}
