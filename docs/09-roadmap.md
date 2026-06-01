@@ -190,16 +190,18 @@ Goal: Content recommendations, AI-powered features at scale.
 
 ### Deliverables
 
-- [ ] Content discovery engine: given user vocab, recommend URLs
-- [ ] NHK Easy, Satori Reader, Watanoc integrations (Japanese reading)
-- [ ] YouTube channel / playlist tracker (auto-add new videos to library)
-- [ ] Grammar pattern library: known grammar patterns tracked alongside vocab
-- [ ] Grammar difficulty in comprehension score (not just vocabulary)
-- [ ] Sentence similarity detection: avoid near-duplicate mined cards
-- [ ] Smart sentence selection: when mining a word, AI selects the most i+1-appropriate sentence from the context window
-- [ ] Personalized deck generation: "Build me a deck from content I've been reading this month"
-- [ ] Weekly learning report email (immersion time, new words, retention)
-- [ ] Teacher/classroom mode (for small-group use)
+- [x] Content discovery engine: given user vocab, recommend URLs (`/v1/discover/feed`)
+- [x] NHK Easy + Watanoc integrations (Japanese reading); Satori Reader deferred (paywalled, no public feed)
+- [ ] YouTube channel / playlist tracker (auto-add new videos to library) — deferred: needs YouTube Data API key
+- [x] Grammar pattern library: 30 N5/N4/N3 JA patterns tracked alongside vocab (`services/nlp/src/grammar_ja.py`)
+- [x] Grammar difficulty in comprehension score: `/tokenize` returns `grammar_pct` + `unknown_patterns`
+- [x] Sentence similarity detection: `/v1/cards/find-similar` (char-trigram Jaccard)
+- [x] Smart sentence selection: `/v1/nlp/select-sentence` picks the best i+1 candidate from a context window
+- [x] Personalized deck generation: `/v1/decks/generate` builds a deck from recent library reading
+- [x] Weekly learning report email: `/v1/reports/weekly` + Monday 08:00 UTC SMTP cron
+- [ ] Teacher/classroom mode (for small-group use) — deferred to Phase 7
+
+**Phase 6 closed 2026-06-01** with two deliverables explicitly carried forward (YouTube tracker and Teacher mode) as their own scope items.
 
 ---
 
