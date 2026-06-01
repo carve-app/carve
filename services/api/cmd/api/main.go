@@ -15,6 +15,7 @@ import (
 	"github.com/carve-app/carve/services/api/internal/cards"
 	"github.com/carve-app/carve/services/api/internal/db"
 	"github.com/carve-app/carve/services/api/internal/decks"
+	"github.com/carve-app/carve/services/api/internal/discover"
 	"github.com/carve-app/carve/services/api/internal/export"
 	"github.com/carve-app/carve/services/api/internal/immersion"
 	"github.com/carve-app/carve/services/api/internal/importer"
@@ -104,6 +105,8 @@ func main() {
 	outputHandler := output.NewHandler(pool)
 	onboardingHandler := onboarding.NewHandler(pool)
 	syncHandler := syncbridge.NewHandler(pool)
+	discoverHandler := discover.NewHandler(pool)
+	discoverIngester := discover.NewIngester(pool)
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(auth.Middleware)
@@ -194,6 +197,9 @@ func main() {
 		r.Post("/sync/anki-connect/test", syncHandler.Test)
 		r.Post("/sync/anki-connect", syncHandler.Sync)
 
+		// Discover (content recommendations)
+		r.Get("/discover/feed", discoverHandler.Feed)
+
 	})
 
 	// Stripe webhook — no auth middleware; signature verified inside handler.
@@ -231,6 +237,26 @@ func main() {
 			next := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 5, 0, 0, time.UTC)
 			time.Sleep(time.Until(next))
 			stats.SnapshotAllUsers(pool)
+		}
+	}()
+
+	// Discover ingest job — refresh NHK Easy every 6 hours, plus once on
+	// startup so a fresh deployment has something to show. Best-effort: errors
+	// are logged inside the ingester and don't propagate.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if _, err := discoverIngester.IngestNHKEasy(ctx, 30); err != nil {
+			slog.Warn("discover: initial ingest failed", "error", err)
+		}
+		ticker := time.NewTicker(6 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			ictx, icancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			if _, err := discoverIngester.IngestNHKEasy(ictx, 30); err != nil {
+				slog.Warn("discover: periodic ingest failed", "error", err)
+			}
+			icancel()
 		}
 	}()
 

@@ -17,6 +17,7 @@
     { href: '/review',   label: 'Review'   },
     { href: '/cards',    label: 'Cards'    },
     { href: '/library',  label: 'Library'  },
+    { href: '/discover', label: 'Discover' },
     { href: '/import',   label: 'Import'   },
     { href: '/decks',    label: 'Decks'    },
     { href: '/stats',    label: 'Stats'    },
