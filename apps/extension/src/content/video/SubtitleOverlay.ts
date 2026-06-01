@@ -183,13 +183,34 @@ export class SubtitleOverlay {
     this.setMineStatus('Mining…');
     this.miningInProgress = true;
 
+    // i+1 sentence selection: prev + current + next cues are candidates.
+    let pickedSentence = cue.text;
+    try {
+      const prev = this.cueHistory[this.historyIndex - 1]?.text;
+      const next = this.cueHistory[this.historyIndex + 1]?.text;
+      const candidates = [prev, cue.text, next].filter((t): t is string => !!t);
+      if (candidates.length > 1) {
+        const sel = await browser.runtime.sendMessage({
+          type: 'SELECT_SENTENCE',
+          candidates,
+          targetLemma: lemma,
+          language: this.lang,
+          knownLemmas: this.vocabCache.getKnownLemmas(),
+          learningLemmas: this.vocabCache.getLearningLemmas(),
+        });
+        if (sel?.bestText && sel.bestContainsTarget) {
+          pickedSentence = sel.bestText;
+        }
+      }
+    } catch {/* selector is best-effort; fall back to current cue */}
+
     try {
       // Create card via background (to reuse existing API path)
       const result = await browser.runtime.sendMessage({
         type: 'MINE_CARD',
         lemma,
         reading,
-        sentence: cue.text,
+        sentence: pickedSentence,
         sourceUrl: window.location.href,
         languageCode: this.lang,
       });

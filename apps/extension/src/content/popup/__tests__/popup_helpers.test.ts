@@ -6,6 +6,7 @@ import {
   pitchSvg,
   buildFuriganaWithMode,
   getSurroundingSentence,
+  getCandidateSentences,
 } from '../PopupManager';
 
 // ── escapeHtml ────────────────────────────────────────────────────────────────
@@ -191,6 +192,72 @@ describe('getSurroundingSentence', () => {
     document.body.appendChild(parent);
     const result = getSurroundingSentence(el);
     expect(result!.length).toBeLessThanOrEqual(200);
+  });
+});
+
+// ── getCandidateSentences ─────────────────────────────────────────────────────
+
+describe('getCandidateSentences', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('splits paragraph into multiple sentences on CJK terminators', () => {
+    const parent = document.createElement('p');
+    parent.textContent = '今日は天気がいいです。私は寿司を食べる。明日も晴れる。';
+    const el = document.createElement('span');
+    el.textContent = '食べる';
+    parent.appendChild(el);
+    document.body.appendChild(parent);
+
+    const cands = getCandidateSentences(el, '食べる');
+    expect(cands.length).toBeGreaterThanOrEqual(2);
+    // The sentence containing the target should be first (priority sort).
+    expect(cands[0]).toContain('食べる');
+  });
+
+  it('splits on ASCII terminators', () => {
+    const parent = document.createElement('p');
+    parent.textContent = 'I had lunch. I ate sushi yesterday. Tomorrow will be sunny.';
+    const el = document.createElement('span');
+    el.textContent = 'ate';
+    parent.appendChild(el);
+    document.body.appendChild(parent);
+
+    const cands = getCandidateSentences(el, 'ate');
+    expect(cands.length).toBeGreaterThanOrEqual(2);
+    expect(cands[0]).toContain('ate');
+  });
+
+  it('returns empty when no block ancestor', () => {
+    const orphan = document.createElement('span');
+    document.body.appendChild(orphan);
+    expect(getCandidateSentences(orphan, 'x')).toEqual([]);
+  });
+
+  it('respects max cap', () => {
+    const parent = document.createElement('p');
+    parent.textContent = 'One. Two. Three. Four. Five. Six. Seven.';
+    const el = document.createElement('span');
+    el.textContent = 'Four';
+    parent.appendChild(el);
+    document.body.appendChild(parent);
+
+    const cands = getCandidateSentences(el, 'Four', 3);
+    expect(cands.length).toBeLessThanOrEqual(3);
+  });
+
+  it('deduplicates identical sentences', () => {
+    const parent = document.createElement('p');
+    parent.textContent = '私は食べる。私は食べる。違う文です。';
+    const el = document.createElement('span');
+    el.textContent = '食べる';
+    parent.appendChild(el);
+    document.body.appendChild(parent);
+
+    const cands = getCandidateSentences(el, '食べる');
+    const eatCount = cands.filter((c) => c === '私は食べる。').length;
+    expect(eatCount).toBe(1);
   });
 });
 

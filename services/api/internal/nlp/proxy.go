@@ -96,3 +96,9 @@ func (p *Proxy) ScoreContent(w http.ResponseWriter, r *http.Request) {
 func (p *Proxy) Translate(w http.ResponseWriter, r *http.Request) {
 	p.forward(w, r, "/translate")
 }
+
+// POST /v1/nlp/select-sentence — proxies to NLP /select-sentence.
+// Returns the best i+1 candidate sentence for mining the requested word.
+func (p *Proxy) SelectSentence(w http.ResponseWriter, r *http.Request) {
+	p.forward(w, r, "/select-sentence")
+}

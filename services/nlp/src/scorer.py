@@ -104,3 +104,88 @@ def score_content(
         recommended_mode=mode,
         top_unknown_lemmas=top_unknown,
     )
+
+
+# ── i+1 candidate selection ──────────────────────────────────────────────────
+
+@dataclass
+class CandidateScore:
+    index: int                     # position in input candidates list
+    text: str
+    comprehension_pct: float
+    content_word_count: int
+    unknown_count: int
+    contains_target: bool
+    fit_score: float               # 0-1, higher = better i+1 fit
+
+
+def _fit_score(comprehension_pct: float, content_word_count: int) -> float:
+    """
+    Score how close a sentence is to the i+1 ideal.
+
+    Optimum is ~93% comprehension with 8-20 content words. Too easy (>=98%,
+    flow-read) or too hard (<70%) get penalised; very short (<4) or very long
+    (>30) sentences are penalised because they make poor mining cards.
+    """
+    if comprehension_pct < 70.0 or comprehension_pct > 100.0:
+        comp = 0.0
+    elif comprehension_pct <= 93.0:
+        comp = (comprehension_pct - 70.0) / 23.0
+    else:
+        comp = max(0.0, 1.0 - (comprehension_pct - 93.0) / 7.0)
+
+    if content_word_count <= 0:
+        length = 0.0
+    elif content_word_count < 4:
+        length = content_word_count / 4.0
+    elif content_word_count <= 20:
+        length = 1.0
+    elif content_word_count <= 30:
+        length = 1.0 - (content_word_count - 20) / 20.0
+    else:
+        length = 0.5
+
+    return round(comp * 0.75 + length * 0.25, 4)
+
+
+def select_best_sentence(
+    scored_candidates: list[tuple[str, list[Token]]],
+    target_lemma: str,
+    known_lemmas: set[str],
+    learning_lemmas: set[str],
+) -> tuple[CandidateScore | None, list[CandidateScore]]:
+    """
+    Pick the candidate that's the best i+1 mining card for `target_lemma`.
+
+    `scored_candidates` is (sentence_text, tokens) pairs — the caller tokenizes
+    in the right language. Returns (best, all_ranked). Candidates that don't
+    contain the target lemma get a heavy penalty but stay in the list as a
+    fallback for when nothing contains the lemma (e.g. tokenizer mis-segments).
+    """
+    ranked: list[CandidateScore] = []
+    for i, (text, tokens) in enumerate(scored_candidates):
+        score = score_content(tokens, known_lemmas, learning_lemmas)
+        contains = any(
+            t.is_content_word and t.lemma == target_lemma for t in tokens
+        )
+        fit = _fit_score(score.comprehension_pct, score.total_content_words)
+        if not contains:
+            fit *= 0.05
+        ranked.append(CandidateScore(
+            index=i,
+            text=text,
+            comprehension_pct=score.comprehension_pct,
+            content_word_count=score.total_content_words,
+            unknown_count=score.unknown_count,
+            contains_target=contains,
+            fit_score=round(fit, 4),
+        ))
+
+    if not ranked:
+        return None, []
+
+    ranked_sorted = sorted(
+        ranked,
+        key=lambda c: (-c.fit_score, c.content_word_count, c.index),
+    )
+    return ranked_sorted[0], ranked_sorted

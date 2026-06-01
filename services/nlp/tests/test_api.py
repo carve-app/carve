@@ -24,6 +24,62 @@ def test_health():
     assert r.json()["service"] == "nlp"
 
 
+class TestSelectSentence:
+
+    def test_picks_candidate_with_target_lemma(self):
+        r = client.post("/select-sentence", json={
+            "candidates": [
+                "今日は天気がいいです。",          # no target
+                "私は毎日寿司を食べる。",          # has 食べる
+            ],
+            "target_lemma": "食べる",
+            "language": "ja",
+            "known_lemmas": ["私", "毎日", "寿司", "今日", "天気"],
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert data["best"] is not None
+        assert "食べる" in data["best"]["text"]
+        assert data["best"]["contains_target"] is True
+
+    def test_empty_candidates_after_strip(self):
+        r = client.post("/select-sentence", json={
+            "candidates": ["   ", ""],
+            "target_lemma": "食べる",
+            "language": "ja",
+        })
+        # min_length=1 enforced before strip — but blank-after-strip returns nulls.
+        # FastAPI accepts the request (one non-empty string in the list); we
+        # respond with best=None and empty ranked.
+        assert r.status_code == 200
+        body = r.json()
+        assert body["best"] is None
+        assert body["ranked"] == []
+
+    def test_unsupported_language_returns_422(self):
+        r = client.post("/select-sentence", json={
+            "candidates": ["bonjour"],
+            "target_lemma": "x",
+            "language": "fr",
+        })
+        assert r.status_code == 422
+
+    def test_ranked_descending_by_fit(self):
+        r = client.post("/select-sentence", json={
+            "candidates": [
+                "私は毎日寿司を食べる。",
+                "今日は天気がいいです。",
+            ],
+            "target_lemma": "食べる",
+            "language": "ja",
+            "known_lemmas": ["私", "毎日", "寿司"],
+        })
+        assert r.status_code == 200
+        ranked = r.json()["ranked"]
+        fits = [c["fit_score"] for c in ranked]
+        assert fits == sorted(fits, reverse=True)
+
+
 class TestTokenize:
 
     def test_basic_sentence(self):

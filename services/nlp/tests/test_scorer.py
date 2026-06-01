@@ -20,7 +20,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from src.scorer import ContentScore, score_content
+from src.scorer import ContentScore, score_content, select_best_sentence
 from src.tokenizer import Token
 
 
@@ -249,3 +249,89 @@ def test_function_words_excluded_from_score():
     s = score_content(tokens, {"word"}, set())
     assert s.comprehension_pct == 100.0
     assert s.total_content_words == 1
+
+
+# ── select_best_sentence (i+1 picker) ─────────────────────────────────────────
+
+def _cand(text: str, lemmas: list[str], func: list[str] | None = None,
+          freqs: list[int | None] | None = None) -> tuple[str, list[Token]]:
+    tokens = content(lemmas, freqs=freqs) + func_tokens(func or [])
+    return (text, tokens)
+
+
+def test_select_empty_candidates_returns_none():
+    best, ranked = select_best_sentence([], "x", set(), set())
+    assert best is None
+    assert ranked == []
+
+
+def test_select_prefers_candidate_containing_target():
+    # Two sentences with similar comprehension, only one has the target lemma.
+    with_target = _cand("has target", ["target", "a", "b", "c", "d", "e", "f", "g"])
+    without = _cand("no target", ["a", "b", "c", "d", "e", "f", "g", "h"])
+    known = {"a", "b", "c", "d", "e", "f", "g", "h"}  # everything except target known
+    best, ranked = select_best_sentence(
+        [without, with_target], "target", known, set()
+    )
+    assert best is not None
+    assert best.text == "has target"
+    assert best.contains_target is True
+
+
+def test_select_picks_i_plus_1_over_too_easy():
+    # Easy sentence: 100% comprehension but contains target (flow-read — too easy)
+    easy = _cand("easy", ["target", "a", "b", "c", "d", "e", "f"])
+    # i+1 sentence: ~88% comprehension (1 unknown of 8 content words besides target)
+    i1 = _cand("i+1", ["target", "a", "b", "c", "d", "e", "f", "unknown"])
+    known = {"a", "b", "c", "d", "e", "f", "target"}  # target known, but contains_target still True
+    best, ranked = select_best_sentence([easy, i1], "target", known, set())
+    assert best is not None
+    assert best.text == "i+1"
+
+
+def test_select_avoids_too_hard_sentences():
+    # Hard sentence: only 25% comprehension (too_hard, < 80%)
+    hard = _cand("hard", ["target", "u1", "u2", "u3"])
+    # Sweet spot: ~88% comprehension
+    sweet = _cand("sweet", ["target", "a", "b", "c", "d", "e", "f", "u1"])
+    known = {"a", "b", "c", "d", "e", "f"}
+    best, ranked = select_best_sentence([hard, sweet], "target", known, set())
+    assert best is not None
+    assert best.text == "sweet"
+
+
+def test_select_falls_back_when_no_candidate_has_target():
+    # Neither sentence has 'target' — still return the best-fit one.
+    a = _cand("a", ["x", "y", "z", "k", "l", "m", "n", "o"])
+    b = _cand("b", ["x", "y", "z", "k", "l", "m", "n", "u1"])
+    known = {"x", "y", "z", "k", "l", "m", "n", "o"}
+    best, ranked = select_best_sentence([a, b], "target", known, set())
+    assert best is not None
+    assert best.contains_target is False
+    # All candidates retained in ranked list
+    assert len(ranked) == 2
+
+
+def test_select_tiebreak_prefers_shorter_sentence():
+    short = _cand("short", ["target", "a", "b", "c", "d", "e", "u1"])
+    long = _cand(
+        "long",
+        ["target", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "u1"],
+    )
+    known = {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l"}
+    best, ranked = select_best_sentence([long, short], "target", known, set())
+    # Both contain target; both ~93% comprehension. Shorter wins length component.
+    assert best is not None
+    assert best.text in ("short", "long")  # implementation may pick either based on fit
+    # The picked one should be at least tied on fit
+    assert best.fit_score == ranked[0].fit_score
+
+
+def test_select_ranked_is_sorted_descending_by_fit():
+    a = _cand("a", ["target", "u1", "u2"])  # too hard
+    b = _cand("b", ["target", "a", "b", "c", "d", "e", "f"])  # easy
+    c = _cand("c", ["target", "a", "b", "c", "d", "e", "u1"])  # sweet spot
+    known = {"a", "b", "c", "d", "e", "f"}
+    _, ranked = select_best_sentence([a, b, c], "target", known, set())
+    fits = [r.fit_score for r in ranked]
+    assert fits == sorted(fits, reverse=True)

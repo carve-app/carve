@@ -206,6 +206,7 @@ func main() {
 		r.Post("/lookup", nlpProxy.Lookup)
 		r.Post("/score-content", nlpProxy.ScoreContent)
 		r.Post("/translate", nlpProxy.Translate)
+		r.Post("/select-sentence", nlpProxy.SelectSentence)
 	})
 
 	port := os.Getenv("PORT")

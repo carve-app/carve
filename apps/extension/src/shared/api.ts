@@ -126,6 +126,39 @@ export async function logImmersion(params: {
 }
 
 /**
+ * Pick the best i+1 candidate sentence for mining a word.
+ */
+export interface SentenceCandidate {
+  index: number;
+  text: string;
+  comprehension_pct: number;
+  content_word_count: number;
+  unknown_count: number;
+  contains_target: boolean;
+  fit_score: number;
+}
+
+export async function selectMiningSentence(params: {
+  candidates: string[];
+  targetLemma: string;
+  language: string;
+  knownLemmas?: string[];
+  learningLemmas?: string[];
+}): Promise<{ best: SentenceCandidate | null; ranked: SentenceCandidate[] }> {
+  const response = await apiFetch('/v1/nlp/select-sentence', {
+    method: 'POST',
+    body: JSON.stringify({
+      candidates: params.candidates,
+      target_lemma: params.targetLemma,
+      language: params.language,
+      known_lemmas: params.knownLemmas ?? [],
+      learning_lemmas: params.learningLemmas ?? [],
+    }),
+  });
+  return response.json();
+}
+
+/**
  * Translate text via the NLP API.
  */
 export async function translateText(

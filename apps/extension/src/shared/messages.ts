@@ -16,7 +16,8 @@ export type Message =
   | { type: 'SET_OVERLAY'; enabled: boolean }
   | { type: 'CAPTURE_SCREENSHOT'; cardId?: string }
   | { type: 'ATTACH_PAGE_SCREENSHOT'; cardId: string }
-  | { type: 'TRANSLATE'; text: string; sourceLanguage: string };
+  | { type: 'TRANSLATE'; text: string; sourceLanguage: string }
+  | { type: 'SELECT_SENTENCE'; candidates: string[]; targetLemma: string; language: string; knownLemmas: string[]; learningLemmas: string[] };
 
 export type MessageResponse =
   | { type: 'TOKENIZE_RESULT'; tokens: Token[]; comprehension_pct: number | null }
@@ -30,4 +31,5 @@ export type MessageResponse =
   | { type: 'COMPREHENSION_RESULT'; pct: number | null; total: number }
   | { type: 'SCREENSHOT_RESULT'; success: boolean; url?: string; error?: string }
   | { type: 'ATTACH_SCREENSHOT_RESULT'; success: boolean }
-  | { type: 'TRANSLATE_RESULT'; translation: string | null };
+  | { type: 'TRANSLATE_RESULT'; translation: string | null }
+  | { type: 'SELECT_SENTENCE_RESULT'; bestText: string | null; bestComprehensionPct: number | null; bestContainsTarget: boolean };

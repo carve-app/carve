@@ -124,7 +124,8 @@ export class PopupManager {
     `;
 
     popup.querySelector('.btn-mine')?.addEventListener('click', () => {
-      this.showMineForm(popup, tokenEl, lemma, entry?.reading ?? reading, entry, sentence);
+      const candidates = getCandidateSentences(tokenEl, tokenEl.textContent ?? '');
+      this.showMineForm(popup, tokenEl, lemma, entry?.reading ?? reading, entry, sentence, candidates);
     });
 
     popup.querySelector('.btn-ignore')?.addEventListener('click', async () => {
@@ -180,6 +181,7 @@ export class PopupManager {
     reading: string,
     entry: DictEntry | null,
     sentence: string | null,
+    candidates: string[] = [],
   ): void {
     const topDef = entry?.definitions?.[0]?.definition ?? '';
     const escapedLemma = escapeHtml(lemma);
@@ -207,7 +209,7 @@ export class PopupManager {
         <input class="carve-mine-input" id="mine-reading" value="${escapedReading}" />
         <label>Definition</label>
         <input class="carve-mine-input" id="mine-def" value="${escapedDef}" />
-        <label>Sentence</label>
+        <label>Sentence <span class="carve-mine-badge" id="mine-sentence-badge" style="display:none"></span></label>
         <textarea class="carve-mine-input" id="mine-sentence" rows="2">${escapedSentence}</textarea>
         <label>Translation <span style="color:#4a5568">(auto-filling…)</span></label>
         <input class="carve-mine-input" id="mine-translation" placeholder="Fetching translation…" />
@@ -220,6 +222,42 @@ export class PopupManager {
         <div class="carve-mine-status" id="mine-status"></div>
       </div>
     `;
+
+    // Kick off i+1 sentence selection. If a materially better candidate exists,
+    // swap it into the textarea and surface a small "picked better example"
+    // badge with a one-click "use original" toggle.
+    if (sentence && candidates.length > 1) {
+      const all = candidates.includes(sentence) ? candidates : [sentence, ...candidates];
+      browser.runtime.sendMessage({
+        type: 'SELECT_SENTENCE',
+        candidates: all,
+        targetLemma: lemma,
+        language: 'ja',
+        knownLemmas: this.vocabCache.getKnownLemmas(),
+        learningLemmas: this.vocabCache.getLearningLemmas(),
+      })
+        .then((result) => {
+          const best: string | null = result?.bestText ?? null;
+          const pct: number | null = result?.bestComprehensionPct ?? null;
+          const containsTarget: boolean = result?.bestContainsTarget ?? false;
+          if (!best || best === sentence || !containsTarget) return;
+          const ta = popup.querySelector<HTMLTextAreaElement>('#mine-sentence');
+          const badge = popup.querySelector<HTMLElement>('#mine-sentence-badge');
+          if (!ta || !badge) return;
+          ta.value = best;
+          const pctLabel = pct != null ? ` (${Math.round(pct)}%)` : '';
+          badge.textContent = `✨ better example picked${pctLabel} · use original`;
+          badge.style.display = 'inline';
+          badge.style.cursor = 'pointer';
+          badge.style.color = '#7ab8ff';
+          badge.style.fontSize = '11px';
+          badge.addEventListener('click', () => {
+            ta.value = sentence;
+            badge.style.display = 'none';
+          }, { once: true });
+        })
+        .catch(() => {/* selector is best-effort */});
+    }
 
     popup.querySelector('.btn-mine-cancel')?.addEventListener('click', () => {
       this.hidePopup();
@@ -406,4 +444,41 @@ export function getSurroundingSentence(el: HTMLElement): string | null {
     }
   }
   return text.slice(0, 200) || null;
+}
+
+/**
+ * Return up to `max` candidate sentences from the paragraph containing `el`,
+ * preferring ones that contain `targetSurface`. Used to give the i+1 selector
+ * something to choose from instead of just the clicked sentence.
+ */
+export function getCandidateSentences(
+  el: HTMLElement,
+  targetSurface: string,
+  max = 5,
+): string[] {
+  const parent = el.closest('p, li, td, div, blockquote, section, article');
+  if (!parent) return [];
+  const text = (parent.textContent ?? '').replace(/\s+/g, ' ').trim();
+  if (!text) return [];
+
+  // Split on terminal punctuation, keeping the terminator with the sentence.
+  // CJK terminators (。！？) don't require trailing whitespace; ASCII (.!?) do
+  // because otherwise we'd split inside e.g. "U.S.A.".
+  const pieces = text
+    .split(/(?<=[。！？])|(?<=[.!?])\s+/u)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 2 && s.length <= 240);
+
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  for (const p of pieces) {
+    if (seen.has(p)) continue;
+    seen.add(p);
+    ordered.push(p);
+  }
+
+  // Sort: sentences containing the target surface first, then by position.
+  const withIdx = ordered.map((s, i) => ({ s, i, hit: targetSurface ? s.includes(targetSurface) : false }));
+  withIdx.sort((a, b) => (Number(b.hit) - Number(a.hit)) || (a.i - b.i));
+  return withIdx.slice(0, max).map((x) => x.s);
 }

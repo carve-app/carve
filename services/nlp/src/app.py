@@ -6,6 +6,7 @@ Endpoints:
   POST /lookup          Single word dictionary lookup
   POST /batch-lookup    Multi-word dictionary lookup (one DB round-trip)
   POST /score-text      Comprehension score for text + user vocabulary
+  POST /select-sentence Pick the best i+1 candidate sentence for mining
   GET  /health          Health check
 """
 
@@ -20,7 +21,7 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from .dictionary import DictionaryService
-from .scorer import score_content
+from .scorer import CandidateScore, score_content, select_best_sentence
 from .tokenizer import JapaneseTokenizer
 from .tokenizer_zh import ChineseTokenizer
 from .tokenizer_ko import KoreanTokenizer
@@ -428,6 +429,91 @@ def score_text(
         unknown_count=s.unknown_count,
         recommended_mode=s.recommended_mode,
         top_unknown_lemmas=s.top_unknown_lemmas,
+    )
+
+
+def _tokenize_for_language(text: str, language: str):
+    """Tokenize a single sentence in the requested language, returning the
+    raw token list (with .lemma, .is_content_word, .frequency_rank)."""
+    if language == "ja":
+        return _ja_tokenizer.tokenize(text).tokens
+    if language in ("zh-cn", "zh-tw", "zh"):
+        return _zh_tokenizer.tokenize(text).tokens
+    if language == "ko":
+        return _ko_tokenizer.tokenize(text).tokens
+    if language == "en":
+        return _en_tokenizer.tokenize(text).tokens
+    raise HTTPException(status_code=422, detail=f"Language '{language}' not yet supported")
+
+
+class SelectSentenceRequest(BaseModel):
+    candidates: list[str] = Field(..., min_length=1, max_length=20)
+    target_lemma: str = Field(..., min_length=1, max_length=200)
+    language: str = Field("ja", pattern=r"^[a-z]{2}(-[a-z]{2,4})?$")
+    known_lemmas: list[str] = []
+    learning_lemmas: list[str] = []
+
+
+class CandidateOut(BaseModel):
+    index: int
+    text: str
+    comprehension_pct: float
+    content_word_count: int
+    unknown_count: int
+    contains_target: bool
+    fit_score: float
+
+
+class SelectSentenceResponse(BaseModel):
+    best: CandidateOut | None
+    ranked: list[CandidateOut]
+
+
+def _candidate_to_out(c: CandidateScore) -> CandidateOut:
+    return CandidateOut(
+        index=c.index,
+        text=c.text,
+        comprehension_pct=c.comprehension_pct,
+        content_word_count=c.content_word_count,
+        unknown_count=c.unknown_count,
+        contains_target=c.contains_target,
+        fit_score=c.fit_score,
+    )
+
+
+@app.post("/select-sentence", response_model=SelectSentenceResponse)
+def select_sentence(
+    req: SelectSentenceRequest,
+    x_internal_secret: Annotated[str | None, Header()] = None,
+) -> SelectSentenceResponse:
+    """
+    Pick the best i+1 candidate sentence for mining `target_lemma`.
+
+    The caller (extension content script, web mine form) gathers nearby
+    candidate sentences — adjacent subtitle cues, sibling sentences in the
+    current paragraph — and we pick the one closest to ~93% comprehension that
+    actually contains the target lemma.
+    """
+    _check_auth(x_internal_secret)
+
+    cleaned = [c.strip() for c in req.candidates if c and c.strip()]
+    if not cleaned:
+        return SelectSentenceResponse(best=None, ranked=[])
+
+    scored: list[tuple[str, list]] = []
+    for text in cleaned:
+        tokens = _tokenize_for_language(text, req.language)
+        scored.append((text, tokens))
+
+    best, ranked = select_best_sentence(
+        scored,
+        target_lemma=req.target_lemma,
+        known_lemmas=set(req.known_lemmas),
+        learning_lemmas=set(req.learning_lemmas),
+    )
+    return SelectSentenceResponse(
+        best=_candidate_to_out(best) if best else None,
+        ranked=[_candidate_to_out(c) for c in ranked],
     )
 
 
