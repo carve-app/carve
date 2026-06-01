@@ -26,6 +26,7 @@ import (
 	"github.com/carve-app/carve/services/api/internal/review"
 	"github.com/carve-app/carve/services/api/internal/settings"
 	"github.com/carve-app/carve/services/api/internal/stats"
+	syncbridge "github.com/carve-app/carve/services/api/internal/sync"
 	"github.com/carve-app/carve/services/api/internal/users"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -83,6 +84,8 @@ func main() {
 		r.Post("/logout", authHandler.Logout)
 		r.Post("/forgot", authHandler.ForgotPassword)
 		r.Post("/reset", authHandler.ResetPassword)
+		r.Post("/verify", authHandler.VerifyEmail)
+		r.Post("/verify/resend", authHandler.ResendVerification)
 	})
 
 	// Protected routes
@@ -100,6 +103,7 @@ func main() {
 	importerHandler := importer.NewHandler(pool)
 	outputHandler := output.NewHandler(pool)
 	onboardingHandler := onboarding.NewHandler(pool)
+	syncHandler := syncbridge.NewHandler(pool)
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(auth.Middleware)
@@ -184,6 +188,10 @@ func main() {
 		r.Get("/output/shadowing", outputHandler.ShadowingQueue)
 		r.Post("/output/shadowing/{id}/complete", outputHandler.CompleteShadowing)
 		r.Post("/output/transcribe", outputHandler.Transcribe)
+
+		// AnkiConnect bridge
+		r.Post("/sync/anki-connect/test", syncHandler.Test)
+		r.Post("/sync/anki-connect", syncHandler.Sync)
 
 	})
 

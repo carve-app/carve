@@ -114,21 +114,25 @@
             {/each}
           </select>
 
-          <!-- svelte-ignore a11y-no-static-element-interactions -->
-          <div class="user-menu-wrap" on:click|stopPropagation={() => userMenuOpen = !userMenuOpen}>
-            <button class="user-btn" aria-label="User menu">
+          <div class="user-menu-wrap">
+            <button
+              class="user-btn"
+              aria-label="User menu"
+              aria-haspopup="menu"
+              aria-expanded={userMenuOpen}
+              on:click|stopPropagation={() => userMenuOpen = !userMenuOpen}
+            >
               {$currentUser?.display_name?.slice(0, 1).toUpperCase() ?? '?'}
             </button>
             {#if userMenuOpen}
-              <!-- svelte-ignore a11y-no-static-element-interactions -->
-              <div class="user-dropdown" on:click|stopPropagation>
+              <div class="user-dropdown" role="menu">
                 <div class="dropdown-info">
                   <div class="dropdown-name">{$currentUser?.display_name}</div>
                   <div class="dropdown-email">{$currentUser?.email}</div>
                 </div>
                 <hr class="dropdown-hr" />
-                <a href="/settings" class="dropdown-item" on:click={() => userMenuOpen = false}>Settings</a>
-                <button class="dropdown-item logout-item" on:click={logout}>Sign out</button>
+                <a href="/settings" class="dropdown-item" role="menuitem" on:click={() => userMenuOpen = false}>Settings</a>
+                <button class="dropdown-item logout-item" role="menuitem" on:click={logout}>Sign out</button>
               </div>
             {/if}
           </div>

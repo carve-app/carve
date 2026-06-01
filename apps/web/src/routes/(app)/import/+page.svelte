@@ -137,8 +137,8 @@
       <p class="desc">Upload a plain text or subtitle file to read it in the annotated reader.</p>
 
       <div class="field">
-        <label>Language</label>
-        <select bind:value={fileReaderLanguage}>
+        <label for="fr-lang">Language</label>
+        <select id="fr-lang" bind:value={fileReaderLanguage}>
           {#each LANGUAGES as l}
             <option value={l.code}>{l.label}</option>
           {/each}
@@ -148,6 +148,8 @@
       <div
         class="drop-zone"
         class:has-file={!!fileReaderFile}
+        role="region"
+        aria-label="Drop a file here"
         on:dragover|preventDefault
         on:drop|preventDefault={handleFileReaderDrop}
       >
@@ -195,8 +197,8 @@
       </div>
 
       <div class="field">
-        <label>Language</label>
-        <select bind:value={vocabLanguage}>
+        <label for="v-lang">Language</label>
+        <select id="v-lang" bind:value={vocabLanguage}>
           {#each LANGUAGES as l}
             <option value={l.code}>{l.label}</option>
           {/each}
@@ -206,6 +208,8 @@
       <div
         class="drop-zone"
         class:has-file={!!vocabFile}
+        role="region"
+        aria-label="Drop a vocabulary file here"
         on:dragover|preventDefault
         on:drop|preventDefault={handleVocabDrop}
       >

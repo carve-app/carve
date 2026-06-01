@@ -169,14 +169,17 @@
     {#if loading}
       <div class="loading-msg">Tokenizing text…</div>
     {:else}
-      <div class="reader-text" on:click|self={closePopup}>
+      <!-- The reader text is a navigable document; tokens themselves are buttons.
+           Click-outside-to-close is handled by the popup's own backdrop. -->
+      <div class="reader-text">
         {#each tokens as tok (tok.surface + tok.lemma)}
           {#if tok.is_content_word}
-            <span
+            <button
+              type="button"
               class="tok {statusClass(tok.user_status)}"
               title={tok.reading_hira}
               on:click={(e) => showPopup(tok, e)}
-            >{tok.surface}</span>
+            >{tok.surface}</button>
           {:else}
             <span class="tok tok-func">{tok.surface}</span>
           {/if}
@@ -321,7 +324,8 @@
     word-break: break-word;
   }
 
-  .tok { cursor: default; }
+  .tok { cursor: default; background: transparent; border: none; color: inherit; font: inherit; padding: 0; }
+  button.tok { display: inline; }
   .tok-unknown { color: #ef9a9a; cursor: pointer; border-bottom: 1px dashed #ef5350; }
   .tok-unknown:hover { background: rgba(239,83,80,0.1); border-radius: 2px; }
   .tok-learning { color: #ffa726; cursor: pointer; }

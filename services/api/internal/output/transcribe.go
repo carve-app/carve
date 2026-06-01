@@ -1,13 +1,83 @@
 package output
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/carve-app/carve/services/api/internal/auth"
 )
+
+// sttHTTPClient is package-level so tests can swap in a stub for the
+// external STT backend. Default 30s timeout — long enough for a
+// 60-second utterance through faster-whisper-base.
+var sttHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
+// forwardToSTTBackend posts the user's audio (along with the recorded
+// MIME type and the language code) to the external STT service. The
+// expected response is `{ "text": "<utf-8>" }`. Any error here is
+// non-fatal: the handler falls back to the client-provided hypothesis.
+func forwardToSTTBackend(backendURL, language, mime string, audio []byte) (string, error) {
+	if backendURL == "" || len(audio) == 0 {
+		return "", nil
+	}
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+
+	if language != "" {
+		_ = mw.WriteField("language", language)
+	}
+
+	hdr := make(textproto.MIMEHeader)
+	hdr.Set("Content-Disposition", `form-data; name="audio"; filename="utterance"`)
+	if mime != "" {
+		hdr.Set("Content-Type", mime)
+	}
+	part, err := mw.CreatePart(hdr)
+	if err != nil {
+		return "", fmt.Errorf("create part: %w", err)
+	}
+	if _, err := part.Write(audio); err != nil {
+		return "", fmt.Errorf("write audio: %w", err)
+	}
+	if err := mw.Close(); err != nil {
+		return "", fmt.Errorf("close multipart: %w", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPost, backendURL, &buf)
+	if err != nil {
+		return "", fmt.Errorf("new request: %w", err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	if key := os.Getenv("STT_BACKEND_KEY"); key != "" {
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+
+	resp, err := sttHTTPClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("post: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return "", fmt.Errorf("backend %d: %s", resp.StatusCode, string(body))
+	}
+	var out struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", fmt.Errorf("decode: %w", err)
+	}
+	return out.Text, nil
+}
 
 // ── POST /v1/output/transcribe ────────────────────────────────────────────────
 //
@@ -51,23 +121,33 @@ func (h *Handler) Transcribe(w http.ResponseWriter, r *http.Request) {
 		language = "en"
 	}
 
-	// External backend forwarding is intentionally deferred — when STT_BACKEND_URL
-	// is set the handler will round-trip the audio file; until then we let the
-	// client send a `hypothesis` (e.g. from window.SpeechRecognition) so the
-	// diff/WER endpoints stay useful in browsers that support it.
+	// Read the audio. If STT_BACKEND_URL is configured, forward it for
+	// server-side transcription (faster-whisper, Whisper API, Deepgram,
+	// etc.). On any backend error, fall back to the client-provided
+	// hypothesis so the UX still works in Chrome via window.SpeechRecognition.
+	transcript := hypothesis
+	backendUsed := false
 	if file, header, err := r.FormFile("audio"); err == nil {
 		defer file.Close()
-		// drain to /dev/null so the upload completes from the client's perspective
-		_, _ = io.Copy(io.Discard, file)
-		_ = header
+		audio, _ := io.ReadAll(io.LimitReader(file, 20<<20))
+		backendURL := os.Getenv("STT_BACKEND_URL")
+		mime := ""
+		if header != nil {
+			mime = header.Header.Get("Content-Type")
+		}
+		if text, err := forwardToSTTBackend(backendURL, language, mime, audio); err == nil && text != "" {
+			transcript = text
+			backendUsed = true
+		}
 	}
 
-	diff, wer := computeDiff(expected, hypothesis)
+	diff, wer := computeDiff(expected, transcript)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"transcript": hypothesis,
-		"language":   language,
-		"diff":       diff,
-		"wer":        wer,
+		"transcript":   transcript,
+		"language":     language,
+		"diff":         diff,
+		"wer":          wer,
+		"backend_used": backendUsed,
 	})
 }
 

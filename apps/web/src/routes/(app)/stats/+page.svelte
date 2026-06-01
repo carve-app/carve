@@ -2,8 +2,14 @@
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
   import { apiFetch, fetchForecast, type ForecastDay } from '$lib/api';
-  import { lang } from '$lib/stores/lang';
+  import { lang, LANG_LABELS, type LangCode } from '$lib/stores/lang';
   import { toasts } from '$lib/stores/toast';
+  import Card from '$lib/design/Card.svelte';
+  import Chart from '$lib/design/Chart.svelte';
+  import Heatmap from '$lib/design/Heatmap.svelte';
+  import EmptyState from '$lib/design/EmptyState.svelte';
+  import Button from '$lib/design/Button.svelte';
+  import Tag from '$lib/design/Tag.svelte';
 
   type State = 'loading' | 'loaded' | 'error';
 
@@ -20,7 +26,7 @@
     return unsub;
   });
 
-  async function load(language = get(lang)) {
+  async function load(language: LangCode = get(lang)) {
     state = 'loading';
     try {
       [stats, { forecast }] = await Promise.all([
@@ -36,126 +42,126 @@
   }
 
   function pct(v: number) { return Math.round(v * 100); }
-  function retentionColor(r: number): string {
-    if (r >= 0.90) return '#4caf50';
-    if (r >= 0.80) return '#ffa726';
-    return '#ef5350';
+  function retentionVariant(r: number): 'success' | 'warning' | 'danger' {
+    if (r >= 0.90) return 'success';
+    if (r >= 0.80) return 'warning';
+    return 'danger';
   }
 
-  function chartBars(snapshots: any[]): string {
-    if (!snapshots?.length) return '';
-    const maxVal = Math.max(...snapshots.map((s: any) => s.known_count), 1);
-    return snapshots.map((s: any) => {
-      const h = Math.max(4, Math.round((s.known_count / maxVal) * 80));
-      return `<div class="bar" style="height:${h}px" title="${s.date}: ${s.known_count} known"></div>`;
-    }).join('');
-  }
-
-  function forecastBars(days: ForecastDay[]): string {
-    if (!days?.length) return '';
-    const maxVal = Math.max(...days.map(d => d.count), 1);
-    return days.map(d => {
-      const h = Math.max(2, Math.round((d.count / maxVal) * 80));
-      const color = d.count > 100 ? '#ef5350' : d.count > 50 ? '#ffa726' : '#4caf50';
-      return `<div class="bar" style="height:${h}px;background:${color}" title="${d.date}: ${d.count} due"></div>`;
-    }).join('');
-  }
+  $: wordGrowthData = (stats?.word_growth ?? []).map((s: any) => ({ label: s.date, value: s.known_count }));
+  $: forecastData   = forecast.map(d => ({ label: d.date, value: d.count }));
+  // Heatmap expects [{ date, value }] over last 13 weeks; reuse word_growth as proxy
+  // if backend hasn't yet shipped a `reviews_by_day` field.
+  $: heatmapData = stats?.reviews_by_day ?? (stats?.word_growth ?? []).map((s: any) => ({ date: s.date, value: s.delta ?? 0 }));
+  $: langLabel = LANG_LABELS[$lang as LangCode] ?? $lang;
 </script>
 
 <main>
+  <header class="page-head">
+    <h1>Stats</h1>
+    <Tag variant="info" size="md">{langLabel}</Tag>
+  </header>
+
   {#if state === 'loading'}
-    <p class="msg">Loading…</p>
-
+    <p class="loading">Loading…</p>
   {:else if state === 'error'}
-    <div class="msg error"><p>{error}</p><button class="btn" on:click={() => load()}>Retry</button></div>
-
+    <EmptyState title="Could not load stats" body={error} icon="!">
+      <Button on:click={() => load()}>Retry</Button>
+    </EmptyState>
   {:else if stats}
-    <div class="grid">
-      <div class="card">
-        <div class="card-label">Known Cards</div>
-        <div class="card-value" style="color:#4caf50">{stats.known_cards}</div>
-        <div class="card-sub">{stats.learning_cards} learning</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Retention (30d)</div>
-        <div class="card-value" style="color:{retentionColor(stats.retention_30d)}">{pct(stats.retention_30d)}%</div>
-        <div class="card-sub">{stats.total_reviews} reviews</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Streak</div>
-        <div class="card-value" style="color:#ffa726">{stats.streak_days}</div>
-        <div class="card-sub">consecutive days</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Immersion (30d)</div>
-        <div class="card-value">{stats.reading_minutes + stats.listening_minutes}</div>
-        <div class="card-sub">{stats.reading_minutes}m reading · {stats.listening_minutes}m listening</div>
-      </div>
+    <div class="kpi-grid">
+      <Card padding="sm">
+        <div class="kpi-label">Known cards</div>
+        <div class="kpi-value green">{stats.known_cards.toLocaleString()}</div>
+        <div class="kpi-sub">{stats.learning_cards.toLocaleString()} learning</div>
+      </Card>
+      <Card padding="sm">
+        <div class="kpi-label">Retention (30d)</div>
+        <div class="kpi-value">
+          <Tag variant={retentionVariant(stats.retention_30d)} size="md">{pct(stats.retention_30d)}%</Tag>
+        </div>
+        <div class="kpi-sub">{stats.total_reviews.toLocaleString()} reviews</div>
+      </Card>
+      <Card padding="sm">
+        <div class="kpi-label">Streak</div>
+        <div class="kpi-value warning">{stats.streak_days}</div>
+        <div class="kpi-sub">consecutive days</div>
+      </Card>
+      <Card padding="sm">
+        <div class="kpi-label">Immersion (30d)</div>
+        <div class="kpi-value">{(stats.reading_minutes + stats.listening_minutes).toLocaleString()}</div>
+        <div class="kpi-sub">{stats.reading_minutes}m reading · {stats.listening_minutes}m listening</div>
+      </Card>
     </div>
 
-    {#if stats.word_growth?.length > 1}
-      <div class="section">
-        <h2>Known Words Growth</h2>
-        <div class="chart">{@html chartBars(stats.word_growth)}</div>
-        <div class="chart-range">
-          <span>{stats.word_growth[0]?.date}</span>
-          <span>{stats.word_growth[stats.word_growth.length - 1]?.date}</span>
-        </div>
-      </div>
-    {:else}
-      <div class="section empty"><p>Word growth chart will appear after a few days of study.</p></div>
-    {/if}
-
-    <div class="section">
-      <h2>14-Day Review Forecast</h2>
-      {#if forecast.length > 0}
-        <div class="chart">{@html forecastBars(forecast)}</div>
-        <div class="chart-range">
-          <span>{forecast[0]?.date}</span>
-          <span class="forecast-total">{forecast.reduce((s, d) => s + d.count, 0)} total due</span>
-          <span>{forecast[forecast.length - 1]?.date}</span>
-        </div>
+    <Card padding="md" class="mt">
+      <h2>Reviews per day</h2>
+      {#if heatmapData.length > 0}
+        <Heatmap data={heatmapData} weeks={13} title="Last 13 weeks" />
       {:else}
-        <p class="empty-msg">No upcoming reviews.</p>
+        <EmptyState title="Not enough history yet" body="The heatmap fills in after your first week of reviews." />
       {/if}
-    </div>
+    </Card>
 
-    <div class="section">
+    <Card padding="md" class="mt">
+      <h2>Known-words growth</h2>
+      {#if wordGrowthData.length > 1}
+        <Chart data={wordGrowthData} kind="line" width={720} height={180} yLabel="known cards" />
+      {:else}
+        <EmptyState title="Coming soon" body="The growth chart appears after a few days of study." />
+      {/if}
+    </Card>
+
+    <Card padding="md" class="mt">
+      <h2>14-day forecast</h2>
+      {#if forecastData.length > 0}
+        <Chart data={forecastData} kind="bar" width={720} height={180} yLabel="cards due" />
+        <p class="forecast-total">Total due: {forecast.reduce((s, d) => s + d.count, 0)}</p>
+      {:else}
+        <EmptyState title="No upcoming reviews" body="Mine more cards or wait for current cards to mature." />
+      {/if}
+    </Card>
+
+    <Card padding="md" class="mt">
       <h2>All-time</h2>
-      <div class="stat-row"><span class="stat-label">Total reviews</span><span class="stat-val">{stats.total_ever_reviews.toLocaleString()}</span></div>
-      <div class="stat-row"><span class="stat-label">Cards known</span><span class="stat-val">{stats.known_cards.toLocaleString()}</span></div>
-      <div class="stat-row"><span class="stat-label">Cards learning</span><span class="stat-val">{stats.learning_cards.toLocaleString()}</span></div>
-    </div>
+      <dl class="kv-list">
+        <div class="kv"><dt>Total reviews</dt><dd>{stats.total_ever_reviews.toLocaleString()}</dd></div>
+        <div class="kv"><dt>Cards known</dt><dd>{stats.known_cards.toLocaleString()}</dd></div>
+        <div class="kv"><dt>Cards learning</dt><dd>{stats.learning_cards.toLocaleString()}</dd></div>
+        {#if stats.total_immersion_minutes != null}
+          <div class="kv"><dt>Immersion total</dt><dd>{Math.round(stats.total_immersion_minutes / 60)} hours</dd></div>
+        {/if}
+      </dl>
+    </Card>
   {/if}
 </main>
 
 <style>
-  main { max-width: 760px; margin: 0 auto; padding: 1.5rem 1rem; }
+  main { max-width: 820px; margin: 0 auto; padding: var(--s-6) var(--s-4); }
+  .page-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--s-5); }
+  h1 { margin: 0; font-size: 1.5rem; color: var(--c-textHi); }
+  h2 { margin: 0 0 var(--s-4); font-size: 1rem; color: var(--c-textHi); }
+  .loading { text-align: center; color: var(--c-textMuted); margin-top: var(--s-12); }
 
-  .msg { text-align: center; margin-top: 3rem; color: #9ba8c0; }
-  .msg.error { color: #ef5350; }
-  .btn { background: #4caf50; color: #fff; border: none; padding: 0.6rem 1.2rem; border-radius: 6px; font-size: 0.9rem; cursor: pointer; margin-top: 0.75rem; }
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: var(--s-3);
+    margin-bottom: var(--s-4);
+  }
+  .kpi-label { font-size: 0.72rem; color: var(--c-textMuted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .kpi-value { font-size: 1.8rem; font-weight: 700; color: var(--c-textHi); line-height: 1.15; margin-top: var(--s-2); }
+  .kpi-value.green   { color: var(--c-green); }
+  .kpi-value.warning { color: var(--c-warning); }
+  .kpi-sub { font-size: 0.78rem; color: var(--c-textMuted); margin-top: var(--s-1); }
 
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+  :global(.mt) { margin-top: var(--s-4); }
 
-  .card { background: #1e2128; border: 1px solid #2a2d36; border-radius: 10px; padding: 1.25rem 1rem; text-align: center; }
-  .card-label { font-size: 0.78rem; color: #6b7591; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.5rem; }
-  .card-value { font-size: 2.2rem; font-weight: 700; line-height: 1.1; }
-  .card-sub { font-size: 0.78rem; color: #6b7591; margin-top: 0.4rem; }
+  .forecast-total { color: var(--c-textMuted); font-size: 0.85rem; margin: var(--s-3) 0 0; }
 
-  .section { background: #1e2128; border: 1px solid #2a2d36; border-radius: 10px; padding: 1.25rem 1.5rem; margin-bottom: 1rem; }
-  .section h2 { margin: 0 0 1rem; font-size: 1rem; }
-  .section.empty { color: #6b7591; font-size: 0.88rem; text-align: center; padding: 2rem; }
-  .section.empty p { margin: 0; }
-
-  .chart { display: flex; align-items: flex-end; gap: 2px; height: 88px; border-bottom: 1px solid #2a2d36; margin-bottom: 0.4rem; overflow: hidden; }
-  :global(.bar) { flex: 1; min-width: 2px; background: #4caf50; border-radius: 2px 2px 0 0; opacity: 0.85; }
-  .chart-range { display: flex; justify-content: space-between; font-size: 0.72rem; color: #6b7591; }
-  .forecast-total { font-weight: 600; color: #9ba8c0; }
-  .empty-msg { color: #6b7591; font-size: 0.85rem; margin: 0; }
-
-  .stat-row { display: flex; justify-content: space-between; align-items: center; padding: 0.5rem 0; border-bottom: 1px solid #2a2d36; }
-  .stat-row:last-child { border-bottom: none; }
-  .stat-label { font-size: 0.9rem; color: #9ba8c0; }
-  .stat-val { font-size: 0.9rem; font-weight: 600; }
+  .kv-list { display: flex; flex-direction: column; gap: 0; margin: 0; padding: 0; }
+  .kv { display: flex; justify-content: space-between; padding: var(--s-2) 0; border-bottom: 1px solid var(--c-border); }
+  .kv:last-child { border-bottom: none; }
+  dt { color: var(--c-textMuted); margin: 0; }
+  dd { color: var(--c-textHi); font-weight: 600; margin: 0; }
 </style>

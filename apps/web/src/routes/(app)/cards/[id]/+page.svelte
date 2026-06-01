@@ -162,32 +162,32 @@
       <div class="edit-form">
         <div class="edit-title">Edit card</div>
         <div class="edit-field">
-          <label class="edit-label">Word</label>
-          <input class="edit-input" bind:value={editFrontText} />
+          <label class="edit-label" for="ed-word">Word</label>
+          <input id="ed-word" class="edit-input" bind:value={editFrontText} />
         </div>
         <div class="edit-field">
-          <label class="edit-label">Reading <span class="optional">(leave blank to keep current)</span></label>
-          <input class="edit-input" bind:value={editFrontReading} placeholder="e.g. ねこ" />
+          <label class="edit-label" for="ed-reading">Reading <span class="optional">(leave blank to keep current)</span></label>
+          <input id="ed-reading" class="edit-input" bind:value={editFrontReading} placeholder="e.g. ねこ" />
         </div>
         <div class="edit-field">
-          <label class="edit-label">Definition</label>
-          <input class="edit-input" bind:value={editBackText} />
+          <label class="edit-label" for="ed-def">Definition</label>
+          <input id="ed-def" class="edit-input" bind:value={editBackText} />
         </div>
         <div class="edit-field">
-          <label class="edit-label">Sentence</label>
-          <textarea class="edit-input edit-textarea" bind:value={editSentence} rows="3"></textarea>
+          <label class="edit-label" for="ed-sentence">Sentence</label>
+          <textarea id="ed-sentence" class="edit-input edit-textarea" bind:value={editSentence} rows="3"></textarea>
         </div>
         <div class="edit-field">
-          <label class="edit-label">Translation</label>
-          <input class="edit-input" bind:value={editTranslation} />
+          <label class="edit-label" for="ed-translation">Translation</label>
+          <input id="ed-translation" class="edit-input" bind:value={editTranslation} />
         </div>
         <div class="edit-field">
-          <label class="edit-label">Notes</label>
-          <textarea class="edit-input edit-textarea" bind:value={editNotes} rows="2"></textarea>
+          <label class="edit-label" for="ed-notes">Notes</label>
+          <textarea id="ed-notes" class="edit-input edit-textarea" bind:value={editNotes} rows="2"></textarea>
         </div>
         <div class="edit-field">
-          <label class="edit-label">Tags <span class="optional">(comma-separated)</span></label>
-          <input class="edit-input" bind:value={editTagsRaw} placeholder="n5, animals, nouns" />
+          <label class="edit-label" for="ed-tags">Tags <span class="optional">(comma-separated)</span></label>
+          <input id="ed-tags" class="edit-input" bind:value={editTagsRaw} placeholder="n5, animals, nouns" />
         </div>
         <div class="edit-actions">
           <button class="btn" on:click={saveEdit} disabled={saving}>
