@@ -5,15 +5,22 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /api ./cmd/api
-RUN CGO_ENABLED=0 GOOS=linux go build -o /migrate ./cmd/migrate
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /api ./cmd/api \
+ && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /migrate ./cmd/migrate
 
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates tzdata
+# hadolint ignore=DL3018
+RUN apk add --no-cache ca-certificates tzdata wget \
+ && addgroup -S app && adduser -S -G app app
 
 WORKDIR /app
-COPY --from=builder /api /migrate ./
-COPY migrations/ ./migrations/
+COPY --from=builder --chown=app:app /api /migrate ./
+COPY --chown=app:app migrations/ ./migrations/
 
+USER app
 EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD wget -qO- http://localhost:8080/health || exit 1
+
 CMD ["./api"]

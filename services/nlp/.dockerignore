@@ -1,0 +1,9 @@
+.venv
+**/__pycache__
+**/*.pyc
+tests
+**/*.md
+.git
+.github
+data/JMdict_e
+data/JMdict_e.gz

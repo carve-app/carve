@@ -49,6 +49,16 @@ apps/web/.svelte-kit/
 # Docker
 .docker/
 
+# Playwright
+e2e/test-results/
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/bootstrap/.terraform/
+infra/terraform/terraform.tfstate
+infra/terraform/terraform.tfstate.backup
+infra/terraform/*.tfvars
+
 # Logs
 *.log
 demo/promo-*.webm

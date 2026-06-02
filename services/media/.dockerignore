@@ -1,0 +1,6 @@
+**/*_test.go
+**/testdata
+**/*.md
+.git
+.github
+tmp

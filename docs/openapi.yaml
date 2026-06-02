@@ -6,24 +6,60 @@ info:
     every `/v1` endpoint; the TypeScript client in `apps/web/src/lib/api.ts`
     is regenerated from it and schemathesis runs property-based HTTP fuzz
     against it as part of the L4 testing layer.
-  version: 0.2.0
+  version: 0.3.0
 servers:
   - url: http://localhost:8080
     description: Local development
   - url: https://api.carve.app
     description: Production
+
+security: []  # default: no auth; protected operations explicitly set `security: [{ bearer: [] }]`
+
+tags:
+  - name: auth
+  - name: users
+  - name: onboarding
+  - name: cards
+  - name: review
+  - name: decks
+  - name: settings
+  - name: immersion
+  - name: billing
+  - name: stats
+  - name: library
+  - name: import
+  - name: output
+  - name: sync
+  - name: nlp
+  - name: export
+  - name: system
+
 components:
   securitySchemes:
     bearer:
       type: http
       scheme: bearer
       bearerFormat: JWT
+
   schemas:
+    # ── Common ────────────────────────────────────────────────────────────
     Error:
       type: object
       required: [error]
       properties:
         error: { type: string }
+    Ok:
+      type: object
+      properties:
+        ok: { type: boolean }
+    UUID:
+      type: string
+      format: uuid
+    LanguageCode:
+      type: string
+      enum: [ja, zh-cn, zh-tw, zh, ko, en]
+
+    # ── Auth ──────────────────────────────────────────────────────────────
     AuthLoginRequest:
       type: object
       required: [email, password]
@@ -39,17 +75,17 @@ components:
         display_name: { type: string, minLength: 1, maxLength: 80 }
     AuthTokenResponse:
       type: object
-      required: [access_token, refresh_token, user]
+      required: [access_token, expires_in, user]
       properties:
-        access_token:  { type: string }
-        refresh_token: { type: string }
-        user:          { $ref: '#/components/schemas/User' }
-    User:
+        access_token: { type: string }
+        expires_in:   { type: integer, description: "Lifetime of access_token in seconds" }
+        user:         { $ref: '#/components/schemas/AuthUser' }
+    AuthUser:
       type: object
       required: [id, email, display_name]
       properties:
-        id:           { type: string, format: uuid }
-        email:        { type: string }
+        id:           { $ref: '#/components/schemas/UUID' }
+        email:        { type: string, format: email }
         display_name: { type: string }
     ForgotPasswordRequest:
       type: object
@@ -58,55 +94,531 @@ components:
         email: { type: string, format: email }
     ResetPasswordRequest:
       type: object
-      required: [token, new_password]
+      required: [token, password]
       properties:
-        token:        { type: string, minLength: 16, maxLength: 200 }
-        new_password: { type: string, minLength: 8,  maxLength: 100 }
+        token:    { type: string, minLength: 16, maxLength: 200 }
+        password: { type: string, minLength: 8, maxLength: 100 }
+    VerifyEmailRequest:
+      type: object
+      required: [token]
+      properties:
+        token: { type: string, minLength: 16, maxLength: 200 }
+    ResendVerifyRequest:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email }
+
+    # ── Users ─────────────────────────────────────────────────────────────
+    User:
+      type: object
+      required: [id, email, display_name, created_at]
+      properties:
+        id:           { $ref: '#/components/schemas/UUID' }
+        email:        { type: string, format: email }
+        display_name: { type: string }
+        avatar_url:   { type: string, nullable: true }
+        created_at:   { type: string, format: date-time }
+    UserUpdateRequest:
+      type: object
+      properties:
+        display_name: { type: string, nullable: true, minLength: 1, maxLength: 80 }
+        avatar_url:   { type: string, nullable: true }
+
+    # ── Onboarding ────────────────────────────────────────────────────────
+    OnboardingKnownWordsRequest:
+      type: object
+      required: [language, lemmas]
+      properties:
+        language: { $ref: '#/components/schemas/LanguageCode' }
+        lemmas:
+          type: array
+          items: { type: string }
+          maxItems: 50000
+    OnboardingKnownWordsResponse:
+      type: object
+      required: [marked]
+      properties:
+        marked: { type: integer, minimum: 0 }
+    OnboardingStarterDeckRequest:
+      type: object
+      required: [language]
+      properties:
+        language: { $ref: '#/components/schemas/LanguageCode' }
+    OnboardingStarterDeckResponse:
+      type: object
+      required: [status]
+      properties:
+        status:  { type: string, enum: [subscribed, no_deck] }
+        deck_id: { type: string }
+
+    # ── Cards ─────────────────────────────────────────────────────────────
     Card:
       type: object
       required: [id, front_text, fsrs_state]
       properties:
-        id:                  { type: string, format: uuid }
+        id:                  { $ref: '#/components/schemas/UUID' }
         language_code:       { type: string, minLength: 2, maxLength: 5 }
         front_text:          { type: string }
         back_text:           { type: string, nullable: true }
         sentence:            { type: string, nullable: true }
-        fsrs_state:          { type: string, enum: [new, learning, review, relearning, suspended] }
-        fsrs_stability:      { type: number, nullable: true }
-        fsrs_difficulty:     { type: number, nullable: true }
-        fsrs_due:            { type: string, format: date-time, nullable: true }
-        fsrs_reps:           { type: integer, minimum: 0 }
-        fsrs_lapses:         { type: integer, minimum: 0 }
-        front_audio_url:     { type: string, nullable: true }
-        front_image_url:     { type: string, nullable: true }
+        subtitle_translation: { type: string, nullable: true }
+        source_url:          { type: string, nullable: true }
         video_source_url:    { type: string, nullable: true }
+        audio_url:           { type: string, nullable: true }
+        image_url:           { type: string, nullable: true }
         subtitle_start_ms:   { type: integer, nullable: true }
         subtitle_end_ms:     { type: integer, nullable: true }
-        subtitle_translation:{ type: string, nullable: true }
+        fsrs_state:          { type: string, enum: [new, learning, review, relearning, suspended] }
+        stability:           { type: number, nullable: true }
+        difficulty:          { type: number, nullable: true }
+        fsrs_due:            { type: string, format: date-time, nullable: true }
+        reps:                { type: integer, minimum: 0 }
+        lapses:              { type: integer, minimum: 0 }
+        suspended:           { type: boolean }
+        is_leech:            { type: boolean }
+        notes:               { type: string, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+        created_at:          { type: string, format: date-time }
+    CardListItem:
+      type: object
+      required: [id, lemma, front_text, fsrs_state]
+      properties:
+        id:         { $ref: '#/components/schemas/UUID' }
+        lemma:      { type: string }
+        front_text: { type: string }
+        back_text:  { type: string }
+        sentence:   { type: string, nullable: true }
+        source_url: { type: string, nullable: true }
+        fsrs_state: { type: string, enum: [new, learning, review, relearning, suspended] }
+        fsrs_due:   { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        suspended:  { type: boolean }
+        is_leech:   { type: boolean }
+        tags:
+          type: array
+          items: { type: string }
+    CardCreateRequest:
+      type: object
+      required: [language_code, lemma]
+      properties:
+        language_code:        { $ref: '#/components/schemas/LanguageCode' }
+        lemma:                { type: string, minLength: 1, maxLength: 500 }
+        reading:              { type: string }
+        back_text:            { type: string, nullable: true }
+        subtitle_translation: { type: string, nullable: true }
+        sentence:             { type: string, nullable: true }
+        source_url:           { type: string, nullable: true }
+        source_timestamp:     { type: number, nullable: true }
+    CardCreateResponse:
+      type: object
+      required: [id]
+      properties:
+        id:        { $ref: '#/components/schemas/UUID' }
+        is_leech:  { type: boolean }
+    CardUpdateRequest:
+      type: object
+      properties:
+        front_text:           { type: string, nullable: true }
+        front_reading:        { type: string, nullable: true }
+        back_text:            { type: string, nullable: true }
+        sentence:             { type: string, nullable: true }
+        subtitle_translation: { type: string, nullable: true }
+        notes:                { type: string, nullable: true }
+        deck_id:              { type: string, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+    CardListResponse:
+      type: object
+      required: [cards]
+      properties:
+        cards:
+          type: array
+          items: { $ref: '#/components/schemas/CardListItem' }
+    CardBulkRequest:
+      type: object
+      required: [action, ids]
+      properties:
+        action: { type: string, enum: [delete, suspend, unsuspend, bury, tag, untag] }
+        ids:
+          type: array
+          items: { $ref: '#/components/schemas/UUID' }
+          maxItems: 5000
+        tag: { type: string }
+    CardBulkResponse:
+      type: object
+      properties:
+        affected: { type: integer, minimum: 0 }
+    AttachMediaRequest:
+      type: object
+      properties:
+        url: { type: string }
+
+    # ── Review ────────────────────────────────────────────────────────────
+    DueCountResponse:
+      type: object
+      required: [due_count]
+      properties:
+        due_count:    { type: integer, minimum: 0 }
+        new_due:      { type: integer, minimum: 0 }
+        review_due:   { type: integer, minimum: 0 }
+        learning_due: { type: integer, minimum: 0 }
+    SessionCard:
+      type: object
+      required: [id, front_text, fsrs_state]
+      properties:
+        id:         { $ref: '#/components/schemas/UUID' }
+        front_text: { type: string }
+        back_text:  { type: string, nullable: true }
+        sentence:   { type: string, nullable: true }
+        source_url: { type: string, nullable: true }
+        audio_url:  { type: string, nullable: true }
+        image_url:  { type: string, nullable: true }
+        fsrs_state: { type: string, enum: [new, learning, review, relearning, suspended] }
+        stability:  { type: number, nullable: true }
+        difficulty: { type: number, nullable: true }
+        due:        { type: string, format: date-time, nullable: true }
+        reps:       { type: integer, minimum: 0 }
+        lapses:     { type: integer, minimum: 0 }
+    ReviewSessionResponse:
+      type: object
+      required: [cards]
+      properties:
+        cards:
+          type: array
+          items: { $ref: '#/components/schemas/SessionCard' }
+        new_count:    { type: integer, minimum: 0 }
+        review_count: { type: integer, minimum: 0 }
     ReviewEventRequest:
       type: object
       required: [card_id, rating]
       properties:
-        card_id:       { type: string, format: uuid }
+        card_id:       { $ref: '#/components/schemas/UUID' }
         rating:        { type: integer, minimum: 1, maximum: 4 }
-        time_taken_ms: { type: integer, minimum: 0 }
+        time_taken_ms: { type: integer, minimum: 0, nullable: true }
+        reviewed_at:   { type: string, format: date-time }
     ReviewEventResponse:
       type: object
       required: [next_due, is_leech]
       properties:
         next_due: { type: string, format: date-time }
         is_leech: { type: boolean }
-    DueCountResponse:
+        stability:  { type: number, nullable: true }
+        difficulty: { type: number, nullable: true }
+        state:      { type: string, enum: [new, learning, review, relearning, suspended] }
+    UndoResponse:
       type: object
-      required: [due_count]
       properties:
-        due_count: { type: integer, minimum: 0 }
-    TokenizeRequest:
+        ok:      { type: boolean }
+        card_id: { $ref: '#/components/schemas/UUID' }
+    IntervalsResponse:
       type: object
-      required: [text, language]
       properties:
-        text:     { type: string, maxLength: 50000 }
-        language: { type: string, enum: [ja, zh-cn, zh-tw, zh, ko, en] }
+        again: { type: string, format: date-time }
+        hard:  { type: string, format: date-time }
+        good:  { type: string, format: date-time }
+        easy:  { type: string, format: date-time }
+    ForecastBucket:
+      type: object
+      required: [date, count]
+      properties:
+        date:  { type: string }
+        count: { type: integer, minimum: 0 }
+    ForecastResponse:
+      type: object
+      required: [forecast]
+      properties:
+        forecast:
+          type: array
+          items: { $ref: '#/components/schemas/ForecastBucket' }
+    Notification:
+      type: object
+      required: [id, type, created_at]
+      properties:
+        id:         { $ref: '#/components/schemas/UUID' }
+        type:       { type: string }
+        payload:    { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+    NotificationsResponse:
+      type: object
+      required: [notifications]
+      properties:
+        notifications:
+          type: array
+          items: { $ref: '#/components/schemas/Notification' }
+
+    # ── Decks ─────────────────────────────────────────────────────────────
+    Deck:
+      type: object
+      required: [id, name, is_public, is_official, card_count, created_at]
+      properties:
+        id:             { $ref: '#/components/schemas/UUID' }
+        name:           { type: string }
+        description:    { type: string, nullable: true }
+        is_public:      { type: boolean }
+        is_official:    { type: boolean }
+        tags:
+          type: array
+          items: { type: string }
+        card_count:     { type: integer, minimum: 0 }
+        download_count: { type: integer, minimum: 0 }
+        avg_rating:     { type: number, nullable: true }
+        is_subscribed:  { type: boolean }
+        created_at:     { type: string, format: date-time }
+    DeckListResponse:
+      type: object
+      required: [decks]
+      properties:
+        decks:
+          type: array
+          items: { $ref: '#/components/schemas/Deck' }
+    DeckCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name:          { type: string, minLength: 1, maxLength: 200 }
+        description:   { type: string }
+        language_code: { $ref: '#/components/schemas/LanguageCode' }
+        tags:
+          type: array
+          items: { type: string }
+        is_public:     { type: boolean }
+    DeckCreateResponse:
+      type: object
+      required: [id, name]
+      properties:
+        id:   { $ref: '#/components/schemas/UUID' }
+        name: { type: string }
+    DeckUpdateRequest:
+      type: object
+      properties:
+        name:        { type: string, nullable: true }
+        description: { type: string, nullable: true }
+        is_public:   { type: boolean, nullable: true }
+        tags:
+          type: array
+          items: { type: string }
+    DeckRateRequest:
+      type: object
+      required: [rating]
+      properties:
+        rating: { type: integer, minimum: 1, maximum: 5 }
+
+    # ── Settings ──────────────────────────────────────────────────────────
+    FSRSSettings:
+      type: object
+      required: [language_code, weights, target_retention, leech_threshold, daily_new_limit]
+      properties:
+        language_code:    { $ref: '#/components/schemas/LanguageCode' }
+        weights:
+          type: array
+          items: { type: number }
+          minItems: 19
+          maxItems: 19
+        target_retention: { type: number, minimum: 0.5, maximum: 0.99 }
+        leech_threshold:  { type: integer, minimum: 1, maximum: 99 }
+        daily_new_limit:  { type: integer, minimum: 0, maximum: 9999 }
+        updated_at:       { type: string, format: date-time }
+        is_customized:    { type: boolean }
+    FSRSSettingsRequest:
+      type: object
+      required: [language_code]
+      properties:
+        language_code:    { $ref: '#/components/schemas/LanguageCode' }
+        weights:
+          type: array
+          items: { type: number }
+        target_retention: { type: number, nullable: true, minimum: 0.5, maximum: 0.99 }
+        leech_threshold:  { type: integer, nullable: true, minimum: 1, maximum: 99 }
+        daily_new_limit:  { type: integer, nullable: true, minimum: 0, maximum: 9999 }
+    WorkloadPreviewResponse:
+      type: object
+      required: [target_retention, avg_interval_days, total_review_cards]
+      properties:
+        target_retention:   { type: number }
+        avg_interval_days:  { type: number }
+        total_review_cards: { type: integer, minimum: 0 }
+    FSRSOptimizeResponse:
+      type: object
+      properties:
+        status:  { type: string, enum: [ok, insufficient_data, in_progress] }
+        message: { type: string }
+        weights:
+          type: array
+          items: { type: number }
+
+    # ── Immersion ─────────────────────────────────────────────────────────
+    ImmersionCreateRequest:
+      type: object
+      required: [language_code, session_type, duration_sec, started_at]
+      properties:
+        language_code: { $ref: '#/components/schemas/LanguageCode' }
+        session_type:  { type: string, enum: [reading, listening, video, writing] }
+        duration_sec:  { type: integer, minimum: 1, maximum: 86399 }
+        started_at:    { type: string, format: date-time }
+        url:           { type: string, nullable: true }
+
+    # ── Billing ───────────────────────────────────────────────────────────
+    Subscription:
+      type: object
+      required: [tier, status]
+      properties:
+        tier:                { type: string, enum: [free, learner, pro] }
+        status:              { type: string }
+        current_period_end:  { type: string, format: date-time, nullable: true }
+    CheckoutRequest:
+      type: object
+      required: [tier]
+      properties:
+        tier: { type: string, enum: [learner, pro] }
+    CheckoutResponse:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string }
+
+    # ── Stats ─────────────────────────────────────────────────────────────
+    WordGrowthEntry:
+      type: object
+      required: [date, known_count, mature_count, learning_count]
+      properties:
+        date:           { type: string }
+        known_count:    { type: integer, minimum: 0 }
+        mature_count:   { type: integer, minimum: 0 }
+        learning_count: { type: integer, minimum: 0 }
+    StatsDashboardResponse:
+      type: object
+      required: [language_code, known_cards, learning_cards]
+      properties:
+        language_code:      { $ref: '#/components/schemas/LanguageCode' }
+        known_cards:        { type: integer, minimum: 0 }
+        learning_cards:     { type: integer, minimum: 0 }
+        retention_30d:      { type: number, minimum: 0, maximum: 1 }
+        total_reviews:      { type: integer, minimum: 0 }
+        total_ever_reviews: { type: integer, minimum: 0 }
+        streak_days:        { type: integer, minimum: 0 }
+        reading_minutes:    { type: integer, minimum: 0 }
+        listening_minutes:  { type: integer, minimum: 0 }
+        word_growth:
+          type: array
+          items: { $ref: '#/components/schemas/WordGrowthEntry' }
+
+    # ── Library ───────────────────────────────────────────────────────────
+    LibraryItem:
+      type: object
+      required: [id, title, content_type, created_at]
+      properties:
+        id:                 { $ref: '#/components/schemas/UUID' }
+        url:                { type: string, nullable: true }
+        title:              { type: string }
+        comprehension_pct:  { type: number, nullable: true }
+        unknown_word_count: { type: integer, nullable: true }
+        content_type:       { type: string, enum: [url, epub, txt, srt] }
+        created_at:         { type: string, format: date-time }
+    LibraryListResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/LibraryItem' }
+    LibraryAddRequest:
+      type: object
+      required: [url, language]
+      properties:
+        url:      { type: string, format: uri }
+        language: { $ref: '#/components/schemas/LanguageCode' }
+    LibraryAddResponse:
+      type: object
+      required: [id, title]
+      properties:
+        id:                { $ref: '#/components/schemas/UUID' }
+        title:             { type: string }
+        comprehension_pct: { type: number, nullable: true }
+    ReaderResponse:
+      type: object
+      required: [item_id, tokens]
+      properties:
+        item_id:           { $ref: '#/components/schemas/UUID' }
+        title:             { type: string }
+        comprehension_pct: { type: number, nullable: true }
+        tokens:
+          type: array
+          items: { type: object, additionalProperties: true }
+
+    # ── Import ────────────────────────────────────────────────────────────
+    ImportResultResponse:
+      type: object
+      properties:
+        imported:    { type: integer, minimum: 0 }
+        skipped:     { type: integer, minimum: 0 }
+        deck_id:     { type: string, nullable: true }
+        deck_name:   { type: string, nullable: true }
+        scheduling_preserved: { type: boolean }
+        warnings:
+          type: array
+          items: { type: string }
+
+    # ── Output ────────────────────────────────────────────────────────────
+    OutputExercise:
+      type: object
+      required: [id, exercise_type, prompt, target_word, created_at]
+      properties:
+        id:            { $ref: '#/components/schemas/UUID' }
+        exercise_type: { type: string, enum: [writing, cloze, shadowing, speaking] }
+        prompt:        { type: string }
+        target_word:   { type: string }
+        sentence:      { type: string, nullable: true }
+        audio_url:     { type: string, nullable: true }
+        created_at:    { type: string }
+    OutputExercisesResponse:
+      type: object
+      required: [exercises]
+      properties:
+        exercises:
+          type: array
+          items: { $ref: '#/components/schemas/OutputExercise' }
+    OutputSubmitRequest:
+      type: object
+      required: [exercise_id, answer_text]
+      properties:
+        exercise_id: { $ref: '#/components/schemas/UUID' }
+        answer_text: { type: string, minLength: 1, maxLength: 5000 }
+    OutputFeedback:
+      type: object
+      required: [score, feedback]
+      properties:
+        score:        { type: number, minimum: 0, maximum: 1 }
+        feedback:     { type: string }
+        grammar:      { type: string }
+        vocabulary:   { type: string }
+        naturalness:  { type: string }
+    ShadowingItem:
+      type: object
+      required: [id, audio_url]
+      properties:
+        id:               { $ref: '#/components/schemas/UUID' }
+        audio_url:        { type: string }
+        transcript:       { type: string, nullable: true }
+        times_shadowed:   { type: integer, minimum: 0 }
+        last_shadowed_at: { type: string, nullable: true }
+        card_front:       { type: string, nullable: true }
+    ShadowingQueueResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ShadowingItem' }
+    TranscribeDiff:
+      type: object
+      properties:
+        op:  { type: string, enum: [keep, sub, insert, delete] }
+        ref: { type: string }
+        hyp: { type: string }
     TranscribeResponse:
       type: object
       required: [transcript, language, diff, wer]
@@ -116,16 +628,107 @@ components:
         wer:        { type: number, minimum: 0 }
         diff:
           type: array
-          items:
-            type: object
-            properties:
-              op:  { type: string, enum: [keep, sub, insert, delete] }
-              ref: { type: string }
-              hyp: { type: string }
+          items: { $ref: '#/components/schemas/TranscribeDiff' }
+
+    # ── Sync (AnkiConnect bridge) ─────────────────────────────────────────
+    AnkiConnectTestRequest:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string, format: uri }
+    AnkiConnectTestResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:    { type: boolean }
+        decks:
+          type: array
+          items: { type: string }
+        error: { type: string }
+    AnkiConnectSyncRequest:
+      type: object
+      required: [url]
+      properties:
+        url:  { type: string, format: uri }
+        deck: { type: string }
+    AnkiConnectSyncResponse:
+      type: object
+      properties:
+        pushed: { type: integer, minimum: 0 }
+        pulled: { type: integer, minimum: 0 }
+        errors:
+          type: array
+          items: { type: string }
+
+    # ── NLP ───────────────────────────────────────────────────────────────
+    TokenizeRequest:
+      type: object
+      required: [text, language]
+      properties:
+        text:     { type: string, maxLength: 50000 }
+        language: { $ref: '#/components/schemas/LanguageCode' }
+        mode:     { type: string, enum: [A, B, C], description: "Sudachi mode (JA only)" }
+    TokenizeResponse:
+      type: object
+      required: [tokens]
+      properties:
+        tokens:
+          type: array
+          items: { type: object, additionalProperties: true }
+    LookupRequest:
+      type: object
+      required: [lemma, language]
+      properties:
+        lemma:    { type: string }
+        language: { $ref: '#/components/schemas/LanguageCode' }
+        reading:  { type: string }
+    LookupResponse:
+      type: object
+      properties:
+        entries:
+          type: array
+          items: { type: object, additionalProperties: true }
+    ScoreContentRequest:
+      type: object
+      required: [text, language]
+      properties:
+        text:     { type: string, maxLength: 200000 }
+        language: { $ref: '#/components/schemas/LanguageCode' }
+        known_lemmas:
+          type: array
+          items: { type: string }
+    ScoreContentResponse:
+      type: object
+      properties:
+        comprehension_pct: { type: number, minimum: 0, maximum: 1 }
+        unknown_count:     { type: integer, minimum: 0 }
+        known_count:       { type: integer, minimum: 0 }
+        total_tokens:      { type: integer, minimum: 0 }
+    TranslateRequest:
+      type: object
+      required: [text, target]
+      properties:
+        text:   { type: string, maxLength: 5000 }
+        source: { type: string }
+        target: { $ref: '#/components/schemas/LanguageCode' }
+    TranslateResponse:
+      type: object
+      properties:
+        translation: { type: string }
+        source:      { type: string }
+        target:      { type: string }
+
+    # ── Export ────────────────────────────────────────────────────────────
+    ExportResponse:
+      type: object
+      description: Full user data dump. Shape intentionally loose (forward-compat).
+      additionalProperties: true
 
 paths:
+  # ── System ────────────────────────────────────────────────────────────
   /health:
     get:
+      tags: [system]
       operationId: getHealth
       summary: Health check
       responses:
@@ -136,10 +739,14 @@ paths:
               schema:
                 type: object
                 required: [status]
-                properties: { status: { type: string }, service: { type: string }, version: { type: string } }
+                properties:
+                  status:  { type: string }
+                  service: { type: string }
+                  version: { type: string }
 
   /metrics:
     get:
+      tags: [system]
       operationId: getMetrics
       summary: Prometheus metrics
       responses:
@@ -148,8 +755,10 @@ paths:
           content:
             text/plain: { schema: { type: string } }
 
+  # ── Auth ──────────────────────────────────────────────────────────────
   /v1/auth/login:
     post:
+      tags: [auth]
       operationId: login
       summary: Sign in
       requestBody:
@@ -157,14 +766,13 @@ paths:
         content:
           application/json: { schema: { $ref: '#/components/schemas/AuthLoginRequest' } }
       responses:
-        '200':
-          description: OK
-          content: { application/json: { schema: { $ref: '#/components/schemas/AuthTokenResponse' } } }
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuthTokenResponse' } } } }
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/auth/register:
     post:
+      tags: [auth]
       operationId: register
       summary: Register a new user
       requestBody:
@@ -176,8 +784,26 @@ paths:
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '409': { description: Email taken, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
+  /v1/auth/refresh:
+    post:
+      tags: [auth]
+      operationId: refresh
+      summary: Refresh the access token using the refresh-token cookie
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuthTokenResponse' } } } }
+        '401': { description: No / expired refresh token, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: Invalidate the active refresh token
+      responses:
+        '204': { description: Logged out }
+
   /v1/auth/forgot:
     post:
+      tags: [auth]
       operationId: forgotPassword
       summary: Send a password-reset email
       requestBody:
@@ -185,11 +811,12 @@ paths:
         content:
           application/json: { schema: { $ref: '#/components/schemas/ForgotPasswordRequest' } }
       responses:
-        '200': { description: Always 200 to prevent email enumeration, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
+        '200': { description: Always 200 to prevent email enumeration, content: { application/json: { schema: { $ref: '#/components/schemas/Ok' } } } }
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/auth/reset:
     post:
+      tags: [auth]
       operationId: resetPassword
       summary: Complete a password reset
       requestBody:
@@ -197,21 +824,18 @@ paths:
         content:
           application/json: { schema: { $ref: '#/components/schemas/ResetPasswordRequest' } }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean } } } } } }
-        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Ok' } } } }
+        '400': { description: Bad / expired token, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
-  /v1/cards:
-    get:
-      operationId: listCards
-      summary: List the user's cards
-      security: [{ bearer: [] }]
-      parameters:
-        - in: query
-          name: language
-          schema: { type: string, enum: [ja, zh-cn, zh-tw, ko, en] }
-        - in: query
-          name: limit
-          schema: { type: integer, minimum: 1, maximum: 500 }
+  /v1/auth/verify:
+    post:
+      tags: [auth]
+      operationId: verifyEmail
+      summary: Mark the user's email as verified using a token
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/VerifyEmailRequest' } }
       responses:
         '200':
           description: OK
@@ -219,13 +843,292 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [cards]
                 properties:
-                  cards: { type: array, items: { $ref: '#/components/schemas/Card' } }
+                  verified: { type: boolean }
+        '400': { description: Bad / expired token, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/auth/verify/resend:
+    post:
+      tags: [auth]
+      operationId: resendVerify
+      summary: Resend the email-verification email
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/ResendVerifyRequest' } }
+      responses:
+        '200':
+          description: Always 200 to prevent enumeration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ok'
+
+  # ── Users ─────────────────────────────────────────────────────────────
+  /v1/users/me:
+    get:
+      tags: [users]
+      operationId: getMe
+      summary: Get the current user
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    patch:
+      tags: [users]
+      operationId: updateMe
+      summary: Update the current user
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/UserUpdateRequest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      tags: [users]
+      operationId: deleteMe
+      summary: Delete the current user (irreversible)
+      security: [{ bearer: [] }]
+      responses:
+        '204': { description: Deleted }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── Onboarding ────────────────────────────────────────────────────────
+  /v1/onboarding/known-words:
+    post:
+      tags: [onboarding]
+      operationId: onboardingKnownWords
+      summary: Mark a batch of lemmas as known
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/OnboardingKnownWordsRequest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OnboardingKnownWordsResponse' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/onboarding/starter-deck:
+    post:
+      tags: [onboarding]
+      operationId: onboardingStarterDeck
+      summary: Subscribe the user to the official starter deck for a language
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/OnboardingStarterDeckRequest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OnboardingStarterDeckResponse' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── Cards ─────────────────────────────────────────────────────────────
+  /v1/cards:
+    get:
+      tags: [cards]
+      operationId: listCards
+      summary: List the user's cards
+      security: [{ bearer: [] }]
+      parameters:
+        - in: query
+          name: language
+          schema: { $ref: '#/components/schemas/LanguageCode' }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500 }
+        - in: query
+          name: state
+          schema: { type: string, enum: [new, learning, review, relearning, suspended] }
+        - in: query
+          name: q
+          schema: { type: string }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CardListResponse' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    post:
+      tags: [cards]
+      operationId: createCard
+      summary: Create a card (mining)
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/CardCreateRequest' } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/CardCreateResponse' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/cards/bulk:
+    post:
+      tags: [cards]
+      operationId: bulkCards
+      summary: Apply a bulk action to a set of cards
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/CardBulkRequest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CardBulkResponse' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/cards/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { $ref: '#/components/schemas/UUID' }
+    get:
+      tags: [cards]
+      operationId: getCard
+      summary: Get a card by id
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Card' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    patch:
+      tags: [cards]
+      operationId: updateCard
+      summary: Update a card
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/CardUpdateRequest' } }
+      responses:
+        '204': { description: Updated }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      tags: [cards]
+      operationId: deleteCard
+      summary: Delete a card
+      security: [{ bearer: [] }]
+      responses:
+        '204': { description: Deleted }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/cards/{id}/media:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { $ref: '#/components/schemas/UUID' }
+    post:
+      tags: [cards]
+      operationId: attachMedia
+      summary: Attach an audio/image URL or upload to a card
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/AttachMediaRequest' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/cards/{id}/suspend:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { $ref: '#/components/schemas/UUID' }
+    post:
+      tags: [cards]
+      operationId: suspendCard
+      summary: Suspend a card (skip in review until manually unsuspended)
+      security: [{ bearer: [] }]
+      responses:
+        '204': { description: Suspended }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/cards/{id}/unsuspend:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { $ref: '#/components/schemas/UUID' }
+    post:
+      tags: [cards]
+      operationId: unsuspendCard
+      summary: Un-suspend a card
+      security: [{ bearer: [] }]
+      responses:
+        '204': { description: Unsuspended }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/cards/{id}/bury:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { $ref: '#/components/schemas/UUID' }
+    post:
+      tags: [cards]
+      operationId: buryCard
+      summary: Bury a card until tomorrow
+      security: [{ bearer: [] }]
+      responses:
+        '204': { description: Buried until tomorrow }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── Review ────────────────────────────────────────────────────────────
+  /v1/review/due-count:
+    get:
+      tags: [review]
+      operationId: getDueCount
+      summary: Count cards due now for the current user
+      security: [{ bearer: [] }]
+      parameters:
+        - in: query
+          name: language
+          schema: { $ref: '#/components/schemas/LanguageCode' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DueCountResponse' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/review/session:
+    get:
+      tags: [review]
+      operationId: getReviewSession
+      summary: Build the next review session (interleaved queue)
+      security: [{ bearer: [] }]
+      parameters:
+        - in: query
+          name: language
+          schema: { $ref: '#/components/schemas/LanguageCode' }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 500 }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewSessionResponse' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/review/events:
     post:
+      tags: [review]
       operationId: submitReviewEvent
       summary: Submit a review event
       security: [{ bearer: [] }]
@@ -239,35 +1142,577 @@ paths:
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Card not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
-  /v1/review/due-count:
+  /v1/review/undo:
+    post:
+      tags: [review]
+      operationId: undoReview
+      summary: Undo the user's most recent review event
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/UndoResponse' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Nothing to undo, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/review/intervals:
     get:
-      operationId: getDueCount
-      summary: Count cards due now for the current user
+      tags: [review]
+      operationId: getIntervals
+      summary: Preview the next-due dates for each rating button
+      security: [{ bearer: [] }]
+      parameters:
+        - in: query
+          name: card_id
+          required: true
+          schema: { $ref: '#/components/schemas/UUID' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IntervalsResponse' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Card not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/review/forecast:
+    get:
+      tags: [review]
+      operationId: getForecast
+      summary: 14-day workload forecast
       security: [{ bearer: [] }]
       parameters:
         - in: query
           name: language
-          schema: { type: string }
+          schema: { $ref: '#/components/schemas/LanguageCode' }
+        - in: query
+          name: days
+          schema: { type: integer, minimum: 1, maximum: 90 }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DueCountResponse' } } } }
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ForecastResponse' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
-  /v1/nlp/tokenize:
+  /v1/review/notifications:
+    get:
+      tags: [review]
+      operationId: listNotifications
+      summary: List the user's pending review notifications (leeches, optimizer, etc.)
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/NotificationsResponse' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/review/notifications/{id}/read:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { $ref: '#/components/schemas/UUID' }
     post:
-      operationId: tokenize
-      summary: Tokenize text
+      tags: [review]
+      operationId: markNotificationRead
+      summary: Mark a notification as read
+      security: [{ bearer: [] }]
+      responses:
+        '204': { description: Marked read }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── Decks ─────────────────────────────────────────────────────────────
+  /v1/decks:
+    get:
+      tags: [decks]
+      operationId: listDecks
+      summary: List the user's own decks plus subscribed/public decks
+      security: [{ bearer: [] }]
+      parameters:
+        - in: query
+          name: scope
+          schema: { type: string, enum: [mine, public, subscribed] }
+        - in: query
+          name: language
+          schema: { $ref: '#/components/schemas/LanguageCode' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DeckListResponse' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    post:
+      tags: [decks]
+      operationId: createDeck
+      summary: Create a new deck
       security: [{ bearer: [] }]
       requestBody:
         required: true
         content:
-          application/json: { schema: { $ref: '#/components/schemas/TokenizeRequest' } }
+          application/json: { schema: { $ref: '#/components/schemas/DeckCreateRequest' } }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { tokens: { type: array, items: { type: object } } } } } } }
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/DeckCreateResponse' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '422': { description: Unsupported language, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/decks/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { $ref: '#/components/schemas/UUID' }
+    patch:
+      tags: [decks]
+      operationId: updateDeck
+      summary: Update a deck the user owns
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/DeckUpdateRequest' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated: { type: boolean }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Not your deck, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      tags: [decks]
+      operationId: deleteDeck
+      summary: Delete a deck the user owns
+      security: [{ bearer: [] }]
+      responses:
+        '204': { description: Deleted }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Not your deck, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/decks/{id}/subscribe:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { $ref: '#/components/schemas/UUID' }
+    post:
+      tags: [decks]
+      operationId: subscribeDeck
+      summary: Subscribe to a public deck
+      security: [{ bearer: [] }]
+      responses:
+        '200':
+          description: Subscribed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subscribed: { type: boolean }
+                  deck_id:    { $ref: '#/components/schemas/UUID' }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Deck is not public, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    delete:
+      tags: [decks]
+      operationId: unsubscribeDeck
+      summary: Unsubscribe from a deck
+      security: [{ bearer: [] }]
+      responses:
+        '204': { description: Unsubscribed }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/decks/{id}/rate:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { $ref: '#/components/schemas/UUID' }
+    post:
+      tags: [decks]
+      operationId: rateDeck
+      summary: Rate a deck (1–5 stars)
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/DeckRateRequest' } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rated: { type: boolean }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── Export ────────────────────────────────────────────────────────────
+  /v1/export:
+    get:
+      tags: [export]
+      operationId: exportAll
+      summary: Export the user's full data (cards, decks, immersion, settings)
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ExportResponse' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── Settings ──────────────────────────────────────────────────────────
+  /v1/settings/fsrs:
+    get:
+      tags: [settings]
+      operationId: getFSRSSettings
+      summary: Get FSRS scheduler settings for the active language
+      security: [{ bearer: [] }]
+      parameters:
+        - in: query
+          name: language
+          schema: { $ref: '#/components/schemas/LanguageCode' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/FSRSSettings' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    put:
+      tags: [settings]
+      operationId: putFSRSSettings
+      summary: Update FSRS scheduler settings
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/FSRSSettingsRequest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/FSRSSettings' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/settings/workload-preview:
+    get:
+      tags: [settings]
+      operationId: workloadPreview
+      summary: Preview workload for a given target retention
+      security: [{ bearer: [] }]
+      parameters:
+        - in: query
+          name: language
+          schema: { $ref: '#/components/schemas/LanguageCode' }
+        - in: query
+          name: target_retention
+          schema: { type: number, minimum: 0.5, maximum: 0.99 }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/WorkloadPreviewResponse' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/settings/fsrs/optimize:
+    post:
+      tags: [settings]
+      operationId: optimizeFSRS
+      summary: Run FSRS optimizer over the user's review history
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/FSRSOptimizeResponse' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── Immersion ─────────────────────────────────────────────────────────
+  /v1/immersion:
+    post:
+      tags: [immersion]
+      operationId: logImmersion
+      summary: Log a completed immersion session
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/ImmersionCreateRequest' } }
+      responses:
+        '201': { description: Created }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── Billing ───────────────────────────────────────────────────────────
+  /v1/billing/subscription:
+    get:
+      tags: [billing]
+      operationId: getSubscription
+      summary: Get the user's current subscription
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Subscription' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/billing/checkout:
+    post:
+      tags: [billing]
+      operationId: createCheckout
+      summary: Create a Stripe Checkout session
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/CheckoutRequest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CheckoutResponse' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '503': { description: Billing not configured, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/billing/webhook:
+    post:
+      tags: [billing]
+      operationId: stripeWebhook
+      summary: Stripe webhook — signature verified inside handler
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { type: object, additionalProperties: true } }
+      responses:
+        '200': { description: OK }
+        '400': { description: Bad request }
+        '401': { description: Invalid signature }
+
+  # ── Stats ─────────────────────────────────────────────────────────────
+  /v1/stats:
+    get:
+      tags: [stats]
+      operationId: getStats
+      summary: Dashboard stats for a language
+      security: [{ bearer: [] }]
+      parameters:
+        - in: query
+          name: language
+          schema: { $ref: '#/components/schemas/LanguageCode' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/StatsDashboardResponse' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── Library ───────────────────────────────────────────────────────────
+  /v1/library:
+    get:
+      tags: [library]
+      operationId: listLibrary
+      summary: List the user's saved URLs and imported files
+      security: [{ bearer: [] }]
+      parameters:
+        - in: query
+          name: language
+          schema: { $ref: '#/components/schemas/LanguageCode' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/LibraryListResponse' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    post:
+      tags: [library]
+      operationId: addLibraryURL
+      summary: Add a URL to the library; score comprehension
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/LibraryAddRequest' } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/LibraryAddResponse' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/library/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { $ref: '#/components/schemas/UUID' }
+    delete:
+      tags: [library]
+      operationId: deleteLibraryItem
+      summary: Delete a library item
+      security: [{ bearer: [] }]
+      responses:
+        '204': { description: Deleted }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/library/{id}/reader:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { $ref: '#/components/schemas/UUID' }
+    get:
+      tags: [library]
+      operationId: readLibraryItem
+      summary: Tokenize a library item for the reader view
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ReaderResponse' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: Could not extract text, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/library/import:
+    post:
+      tags: [library]
+      operationId: importLibraryFile
+      summary: Import a .txt, .srt, or .epub file into the library
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, language]
+              properties:
+                file:     { type: string, format: binary }
+                language: { $ref: '#/components/schemas/LanguageCode' }
+                title:    { type: string }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/LibraryAddResponse' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── Import ────────────────────────────────────────────────────────────
+  /v1/import/anki:
+    post:
+      tags: [import]
+      operationId: importAnki
+      summary: Import an Anki .apkg archive (preserves SM-2 → FSRS scheduling)
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:     { type: string, format: binary }
+                deck_id:  { type: string }
+                language: { $ref: '#/components/schemas/LanguageCode' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ImportResultResponse' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/import/migaku-csv:
+    post:
+      tags: [import]
+      operationId: importMigakuCSV
+      summary: Import a Migaku CSV export
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:     { type: string, format: binary }
+                language: { $ref: '#/components/schemas/LanguageCode' }
+                deck_id:  { type: string }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ImportResultResponse' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/import/yomitan:
+    post:
+      tags: [import]
+      operationId: importYomitan
+      summary: Import a Yomitan vocabulary export
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:     { type: string, format: binary }
+                language: { $ref: '#/components/schemas/LanguageCode' }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ImportResultResponse' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/import/jpdb-csv:
+    post:
+      tags: [import]
+      operationId: importJPDBCSV
+      summary: Import a jpdb.io vocabulary CSV
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ImportResultResponse' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── Output ────────────────────────────────────────────────────────────
+  /v1/output/exercises:
+    get:
+      tags: [output]
+      operationId: listOutputExercises
+      summary: List due output-practice exercises
+      security: [{ bearer: [] }]
+      parameters:
+        - in: query
+          name: language
+          schema: { $ref: '#/components/schemas/LanguageCode' }
+        - in: query
+          name: type
+          schema: { type: string, enum: [writing, cloze, shadowing, speaking] }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OutputExercisesResponse' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/output/submit:
+    post:
+      tags: [output]
+      operationId: submitOutput
+      summary: Submit a written answer for AI feedback
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/OutputSubmitRequest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OutputFeedback' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Exercise not found / expired, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/output/shadowing:
+    get:
+      tags: [output]
+      operationId: getShadowingQueue
+      summary: Shadowing queue (audio playback drill)
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ShadowingQueueResponse' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/output/shadowing/{id}/complete:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { $ref: '#/components/schemas/UUID' }
+    post:
+      tags: [output]
+      operationId: completeShadowing
+      summary: Mark a shadowing item as completed
+      security: [{ bearer: [] }]
+      responses:
+        '204': { description: Completed }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/output/transcribe:
     post:
+      tags: [output]
       operationId: transcribe
       summary: Transcribe + diff a recording against a reference
       security: [{ bearer: [] }]
@@ -286,3 +1731,97 @@ paths:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TranscribeResponse' } } } }
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── Sync (AnkiConnect bridge) ─────────────────────────────────────────
+  /v1/sync/anki-connect/test:
+    post:
+      tags: [sync]
+      operationId: ankiConnectTest
+      summary: Probe a local AnkiConnect endpoint
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/AnkiConnectTestRequest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AnkiConnectTestResponse' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/sync/anki-connect:
+    post:
+      tags: [sync]
+      operationId: ankiConnectSync
+      summary: Push cards + pull events through a local AnkiConnect endpoint
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/AnkiConnectSyncRequest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AnkiConnectSyncResponse' } } } }
+        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: AnkiConnect unreachable, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  # ── NLP ───────────────────────────────────────────────────────────────
+  /v1/nlp/tokenize:
+    post:
+      tags: [nlp]
+      operationId: tokenize
+      summary: Tokenize text
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/TokenizeRequest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TokenizeResponse' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: Unsupported language, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: NLP service unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/nlp/lookup:
+    post:
+      tags: [nlp]
+      operationId: lookup
+      summary: Dictionary lookup
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/LookupRequest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/LookupResponse' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: NLP service unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/nlp/score-content:
+    post:
+      tags: [nlp]
+      operationId: scoreContent
+      summary: Score a chunk of text against the user's vocabulary
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/ScoreContentRequest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ScoreContentResponse' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: NLP service unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/nlp/translate:
+    post:
+      tags: [nlp]
+      operationId: translate
+      summary: Translate a short snippet
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/TranslateRequest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TranslateResponse' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: NLP service unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }

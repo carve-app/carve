@@ -1,0 +1,7 @@
+aws_region            = "us-east-1"
+env                   = "prod"
+domain                = "carve.app"
+cloudflare_account_id = "REPLACE_ME"
+cloudflare_zone_id    = "REPLACE_ME"
+github_owner          = "carve-app"
+github_repo           = "carve"
