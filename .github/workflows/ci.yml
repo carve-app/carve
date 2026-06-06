@@ -529,10 +529,10 @@ jobs:
         working-directory: apps/web
         run: npm ci && npx stryker run || true
 
-  # ── L11 streaming canary (hourly via schedule) ────────────────────────────
+  # ── L11 streaming canary (hourly via schedule, on-demand via dispatch) ─────
   streaming-canary:
     name: L11 — Streaming canary
-    if: github.event_name == 'schedule'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
