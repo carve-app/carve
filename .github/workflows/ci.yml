@@ -22,10 +22,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python 3.13
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
           cache: pip
@@ -77,10 +77,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.26"
           cache-dependency-path: services/api/go.sum
@@ -106,7 +106,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -137,10 +137,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.26"
 
@@ -160,10 +160,10 @@ jobs:
         browser: [chrome, firefox, safari]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
@@ -192,7 +192,7 @@ jobs:
           echo "✓ ${{ matrix.browser }} extension artifacts present"
 
       - name: Upload extension artifact (${{ matrix.browser }})
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: extension-${{ matrix.browser }}
           path: apps/extension/dist/${{ matrix.browser }}/
@@ -204,10 +204,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
@@ -232,23 +232,23 @@ jobs:
     needs: [extension]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: apps/extension/package-lock.json
 
       - name: Download Chrome extension artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: extension-chrome
           path: apps/extension/dist/chrome
 
       - name: Download Firefox extension artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: extension-firefox
           path: apps/extension/dist/firefox
@@ -267,7 +267,7 @@ jobs:
 
       - name: Upload screenshot on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: extension-e2e-screenshot
           path: e2e/extension-e2e.png
@@ -279,7 +279,7 @@ jobs:
     needs: [nlp, api, wasm, media]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download JMdict for NLP image
         working-directory: services/nlp
@@ -363,10 +363,10 @@ jobs:
           - 5432:5432
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version: "1.26"
           cache-dependency-path: services/api/go.sum
@@ -384,8 +384,8 @@ jobs:
     name: L3 — Integration (testcontainers)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with: { go-version: "1.26", cache-dependency-path: services/api/go.sum }
       - name: Run integration tests
         working-directory: services/api
@@ -405,10 +405,10 @@ jobs:
         options: --health-cmd "pg_isready -U carve" --health-interval 5s --health-retries 10
         ports: [ "5432:5432" ]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with: { go-version: "1.26", cache-dependency-path: services/api/go.sum }
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with: { python-version: "3.13" }
       - name: Apply migrations
         working-directory: services/api
@@ -446,8 +446,8 @@ jobs:
       matrix:
         project: [web-chromium, web-firefox, web-webkit]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with: { node-version: "22" }
       - name: Install web deps
         working-directory: apps/web
@@ -464,7 +464,7 @@ jobs:
         run: npx playwright test --project=${{ matrix.project }} --grep-invert "extension|visual"
       - name: Upload report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: playwright-${{ matrix.project }}
           path: e2e/playwright-report/
@@ -474,8 +474,8 @@ jobs:
     name: L6 — Extension fixture replay
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with: { node-version: "22", cache-dependency-path: apps/extension/package-lock.json }
       - name: Install
         working-directory: apps/extension
@@ -491,8 +491,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [web]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with: { node-version: "22" }
       - name: Install lhci
         run: npm install -g @lhci/cli@0.13.x
@@ -508,12 +508,12 @@ jobs:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with: { go-version: "1.26", cache-dependency-path: services/api/go.sum }
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with: { python-version: "3.13", cache: pip }
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with: { node-version: "22" }
       - name: Install Go mutation tool
         run: go install github.com/avito-tech/go-mutesting/cmd/go-mutesting@latest
@@ -535,16 +535,27 @@ jobs:
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with: { node-version: "22" }
       - name: Build extension
         working-directory: apps/extension
         run: npm ci && npm run build:chrome
+      # Playwright's webServer (see e2e/playwright.config.ts) launches `vite` from
+      # apps/web, so its deps must be installed here too — without this the canary
+      # died with `vite: not found` / exit 127 on every scheduled run.
+      - name: Web deps
+        working-directory: apps/web
+        run: npm ci
       - name: e2e deps
         working-directory: e2e
         run: npm ci && npx playwright install --with-deps chromium
       - name: Run streaming canary
         working-directory: e2e
-        run: npx playwright test tests/extension-streaming.spec.ts || \
-             echo "::warning ::canary failed — DOM drift suspected; investigate within the hour"
+        env: { CI: "true" }
+        # Canary is informational only: never fail the job (see hourly-schedule comment above).
+        # A broken `|| \` line-continuation previously turned the fallback into `\ echo`,
+        # which exited 127 and failed every scheduled run.
+        run: |
+          npx playwright test tests/extension-streaming.spec.ts \
+            || echo "::warning ::canary failed — DOM drift suspected; investigate within the hour"
