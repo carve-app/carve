@@ -192,7 +192,7 @@ jobs:
           echo "✓ ${{ matrix.browser }} extension artifacts present"
 
       - name: Upload extension artifact (${{ matrix.browser }})
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: extension-${{ matrix.browser }}
           path: apps/extension/dist/${{ matrix.browser }}/
@@ -242,13 +242,13 @@ jobs:
           cache-dependency-path: apps/extension/package-lock.json
 
       - name: Download Chrome extension artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: extension-chrome
           path: apps/extension/dist/chrome
 
       - name: Download Firefox extension artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: extension-firefox
           path: apps/extension/dist/firefox
@@ -267,7 +267,7 @@ jobs:
 
       - name: Upload screenshot on failure
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: extension-e2e-screenshot
           path: e2e/extension-e2e.png
@@ -464,7 +464,7 @@ jobs:
         run: npx playwright test --project=${{ matrix.project }} --grep-invert "extension|visual"
       - name: Upload report
         if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: playwright-${{ matrix.project }}
           path: e2e/playwright-report/
