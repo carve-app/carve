@@ -26,13 +26,32 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+// MinJWTSecretLen is the minimum acceptable length for JWT_SECRET. The server
+// refuses to start (see RequireJWTSecret) with a shorter or empty secret, so
+// the dev fallback below is only ever reachable under `go test`.
+const MinJWTSecretLen = 32
+
 func jwtSecret() []byte {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
-		// Development fallback — fail loudly in production
+		// Dev/test-only fallback. Production cannot reach this branch:
+		// cmd/api/main.go calls RequireJWTSecret at startup and exits if
+		// JWT_SECRET is unset or too short.
 		secret = "dev-secret-change-in-production-at-least-32-chars"
 	}
 	return []byte(secret)
+}
+
+// RequireJWTSecret returns an error if JWT_SECRET is unset or shorter than
+// MinJWTSecretLen. The server's entrypoint calls this before serving traffic so
+// a misconfigured deployment fails loudly instead of silently signing tokens
+// with the dev fallback (which would allow trivial token forgery).
+func RequireJWTSecret() error {
+	secret := os.Getenv("JWT_SECRET")
+	if len(secret) < MinJWTSecretLen {
+		return fmt.Errorf("JWT_SECRET must be set and at least %d bytes (got %d)", MinJWTSecretLen, len(secret))
+	}
+	return nil
 }
 
 // IssueAccessToken creates a signed JWT for the given user.

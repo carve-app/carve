@@ -24,15 +24,31 @@ resource "aws_iam_role_policy_attachment" "ecs_execution_managed" {
 # defs can inject them as env vars.
 data "aws_iam_policy_document" "ecs_execution_ssm" {
   statement {
+    sid = "ReadSSMParameters"
     actions = [
       "ssm:GetParameters",
       "ssm:GetParameter",
-      "kms:Decrypt",
     ]
     resources = [
       "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project}/${var.env}/*",
+    ]
+  }
+
+  # SecureString parameters are encrypted with the AWS-managed alias/aws/ssm
+  # key, so reading them still requires kms:Decrypt. Constrain that grant to
+  # decryption performed *on behalf of SSM* (kms:ViaService) so the execution
+  # role can't decrypt unrelated CMK ciphertext (EBS, other apps) account-wide.
+  statement {
+    sid     = "DecryptSSMSecrets"
+    actions = ["kms:Decrypt"]
+    resources = [
       "arn:aws:kms:${var.aws_region}:${data.aws_caller_identity.current.account_id}:key/*",
     ]
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["ssm.${var.aws_region}.amazonaws.com"]
+    }
   }
 }
 

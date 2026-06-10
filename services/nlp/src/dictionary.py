@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -60,16 +61,23 @@ class DictionaryService:
                 str(Path(__file__).parent.parent / "data" / "dictionary.db"),
             )
         self._db_path = db_path
-        self._conn: sqlite3.Connection | None = None
+        # One sqlite3.Connection per thread. A single shared Connection is NOT
+        # safe for concurrent use even with check_same_thread=False: FastAPI
+        # runs sync endpoints across a threadpool, and interleaved access on one
+        # Connection raises InterfaceError/ProgrammingError and can cross-wire
+        # rows between requests. threading.local() gives each worker thread its
+        # own Connection, opened lazily on first use.
+        self._local = threading.local()
 
     def _get_conn(self) -> sqlite3.Connection | None:
-        if self._conn is not None:
-            return self._conn
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            return conn
         if not Path(self._db_path).exists():
             return None
         conn = sqlite3.connect(self._db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
-        self._conn = conn
+        self._local.conn = conn
         return conn
 
     def lookup(

@@ -3,13 +3,22 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// isUniqueViolation reports whether err is a PostgreSQL unique-constraint
+// violation (SQLSTATE 23505).
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
 
 const refreshTokenCookie = "carve_refresh"
 
@@ -131,17 +140,30 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	userID := NewID()
 	ctx := r.Context()
 
-	_, err = h.db.Exec(ctx,
+	// Create the user and its password row atomically so a failure of the
+	// second insert can't leave an orphaned users row that permanently locks
+	// the email out of both registration and login.
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Exec(ctx,
 		`INSERT INTO users (id, email, display_name) VALUES ($1, $2, $3)`,
 		userID, req.Email, req.DisplayName,
 	)
 	if err != nil {
-		// Duplicate email (unique constraint)
-		writeError(w, http.StatusConflict, "email already in use")
+		if isUniqueViolation(err) {
+			writeError(w, http.StatusConflict, "email already in use")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	_, err = h.db.Exec(ctx,
+	_, err = tx.Exec(ctx,
 		`INSERT INTO user_auth (id, user_id, provider, password_hash)
 		 VALUES ($1, $2, 'email', $3)`,
 		NewID(), userID, string(hash),
@@ -151,6 +173,13 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// Token issuance writes a refresh_tokens row + the HTTP response; run it
+	// after the user-creation tx has committed.
 	if err := h.issueTokenPair(ctx, w, userID, req.Email, req.DisplayName); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -228,11 +257,28 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Rotate: revoke old token, issue new pair
-	h.db.Exec(ctx,
-		`UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1`,
+	// Rotate atomically: only the request that flips revoked_at from NULL wins.
+	// If RowsAffected()==0 the token was already revoked — treat it as a reuse
+	// event, revoke the whole token family, and reject.
+	tag, err := h.db.Exec(ctx,
+		`UPDATE refresh_tokens SET revoked_at = now()
+		 WHERE token_hash = $1 AND revoked_at IS NULL`,
 		hashed,
 	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		h.db.Exec(ctx,
+			`UPDATE refresh_tokens SET revoked_at = now()
+			 WHERE user_id = $1 AND revoked_at IS NULL`,
+			userID,
+		)
+		writeError(w, http.StatusUnauthorized, "invalid or expired refresh token")
+		return
+	}
+
 	if err := h.issueTokenPair(ctx, w, userID, email, displayName); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return

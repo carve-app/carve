@@ -10,6 +10,11 @@ on:
     - cron: "0 * * * *"
   workflow_dispatch: {}
 
+# Least privilege: these are build/test-only jobs (no GitHub API writes), and
+# this workflow runs untrusted PR code. Restrict the default GITHUB_TOKEN.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true

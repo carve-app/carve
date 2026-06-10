@@ -252,11 +252,6 @@ components:
       type: object
       properties:
         affected: { type: integer, minimum: 0 }
-    AttachMediaRequest:
-      type: object
-      properties:
-        url: { type: string }
-
     # ── Review ────────────────────────────────────────────────────────────
     DueCountResponse:
       type: object
@@ -677,11 +672,12 @@ components:
           items: { type: object, additionalProperties: true }
     LookupRequest:
       type: object
-      required: [lemma, language]
+      required: [surface, language]
       properties:
-        lemma:    { type: string }
-        language: { $ref: '#/components/schemas/LanguageCode' }
-        reading:  { type: string }
+        surface:     { type: string, maxLength: 200 }
+        language:    { $ref: '#/components/schemas/LanguageCode' }
+        target_lang: { type: string, maxLength: 5, default: en }
+        context:     { type: string, maxLength: 500 }
     LookupResponse:
       type: object
       properties:
@@ -706,17 +702,17 @@ components:
         total_tokens:      { type: integer, minimum: 0 }
     TranslateRequest:
       type: object
-      required: [text, target]
+      required: [text]
       properties:
-        text:   { type: string, maxLength: 5000 }
-        source: { type: string }
-        target: { $ref: '#/components/schemas/LanguageCode' }
+        text:            { type: string, maxLength: 5000 }
+        source_language: { type: string, default: ja }
+        target_language: { $ref: '#/components/schemas/LanguageCode' }
     TranslateResponse:
       type: object
       properties:
-        translation: { type: string }
-        source:      { type: string }
-        target:      { type: string }
+        translation:     { type: string }
+        source_language: { type: string }
+        target_language: { type: string }
 
     # ── Export ────────────────────────────────────────────────────────────
     ExportResponse:
@@ -1028,12 +1024,24 @@ paths:
     post:
       tags: [cards]
       operationId: attachMedia
-      summary: Attach an audio/image URL or upload to a card
+      summary: Upload image/audio (and subtitle metadata) for a card
+      description: >
+        Multipart upload. All parts are optional; the handler stores whatever is
+        provided and returns the resulting URLs (null when not uploaded).
       security: [{ bearer: [] }]
       requestBody:
         required: true
         content:
-          application/json: { schema: { $ref: '#/components/schemas/AttachMediaRequest' } }
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                image:                { type: string, format: binary }
+                audio:                { type: string, format: binary }
+                subtitle_start_ms:    { type: integer }
+                subtitle_end_ms:      { type: integer }
+                video_source_url:     { type: string }
+                subtitle_translation: { type: string }
       responses:
         '200':
           description: OK
@@ -1042,9 +1050,11 @@ paths:
               schema:
                 type: object
                 properties:
-                  url: { type: string }
+                  image_url: { type: string, nullable: true }
+                  audio_url: { type: string, nullable: true }
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Card not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/cards/{id}/suspend:
     parameters:

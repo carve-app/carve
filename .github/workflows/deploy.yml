@@ -42,8 +42,13 @@ jobs:
       - uses: actions/checkout@v5
         with: { fetch-depth: 2 }
       - id: f
+        # Pass the dispatch input via env (not GitHub-expression interpolation)
+        # so a crafted `service` value can't break out of the quotes and run
+        # arbitrary commands in this id-token:write job.
+        env:
+          SERVICE: ${{ github.event.inputs.service }}
         run: |
-          force="${{ github.event.inputs.service }}"
+          force="$SERVICE"
           if [[ "$force" == "all" || "$force" == "api"   ]]; then echo "api=true"   >> "$GITHUB_OUTPUT"; fi
           if [[ "$force" == "all" || "$force" == "nlp"   ]]; then echo "nlp=true"   >> "$GITHUB_OUTPUT"; fi
           if [[ "$force" == "all" || "$force" == "media" ]]; then echo "media=true" >> "$GITHUB_OUTPUT"; fi

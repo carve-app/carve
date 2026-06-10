@@ -2,6 +2,7 @@ package decks
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/carve-app/carve/services/api/internal/auth"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -223,13 +225,19 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	// Verify ownership
-	var ownerID string
+	// Verify ownership. owner_id is nullable (official/seed decks, or decks
+	// whose owner was deleted → ON DELETE SET NULL), so scan into a pointer:
+	// a NULL owner means the deck exists but isn't the caller's → 403, not 404.
+	var ownerID *string
 	if err := h.db.QueryRow(ctx, `SELECT owner_id FROM decks WHERE id = $1 AND deleted_at IS NULL`, deckID).Scan(&ownerID); err != nil {
-		writeError(w, http.StatusNotFound, "deck not found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "deck not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "internal error")
+		}
 		return
 	}
-	if ownerID != claims.UserID {
+	if ownerID == nil || *ownerID != claims.UserID {
 		writeError(w, http.StatusForbidden, "not your deck")
 		return
 	}
@@ -262,12 +270,16 @@ func (h *Handler) DeleteDeck(w http.ResponseWriter, r *http.Request) {
 	deckID := chi.URLParam(r, "id")
 	ctx := r.Context()
 
-	var ownerID string
+	var ownerID *string
 	if err := h.db.QueryRow(ctx, `SELECT owner_id FROM decks WHERE id = $1 AND deleted_at IS NULL`, deckID).Scan(&ownerID); err != nil {
-		writeError(w, http.StatusNotFound, "deck not found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "deck not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "internal error")
+		}
 		return
 	}
-	if ownerID != claims.UserID {
+	if ownerID == nil || *ownerID != claims.UserID {
 		writeError(w, http.StatusForbidden, "not your deck")
 		return
 	}
@@ -305,9 +317,10 @@ func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Add subscription record
+	// Add subscription record. Track whether a NEW row was actually inserted so
+	// re-subscribes / double-clicks don't inflate download_count below.
 	subID := auth.NewID()
-	_, err = h.db.Exec(ctx,
+	subTag, err := h.db.Exec(ctx,
 		`INSERT INTO user_deck_subscriptions (id, user_id, deck_id)
 		 VALUES ($1, $2, $3)
 		 ON CONFLICT (user_id, deck_id) DO NOTHING`,
@@ -318,6 +331,7 @@ func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	newSubscription := subTag.RowsAffected() == 1
 
 	// Copy all deck cards into user's collection (new FSRS state)
 	_, err = h.db.Exec(ctx,
@@ -343,11 +357,14 @@ func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Increment download count
-	h.db.Exec(ctx,
-		`UPDATE decks SET download_count = download_count + 1 WHERE id = $1`,
-		deckID,
-	)
+	// Increment download count only for a genuinely new subscription, so the
+	// public ranking metric isn't inflated by unsubscribe/re-subscribe churn.
+	if newSubscription {
+		h.db.Exec(ctx,
+			`UPDATE decks SET download_count = download_count + 1 WHERE id = $1`,
+			deckID,
+		)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"subscribed": true, "deck_id": deckID})
 }

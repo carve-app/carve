@@ -110,6 +110,42 @@ func TestNewCardEasy(t *testing.T) {
 	}
 }
 
+// TestNewCardIntervalDays pins the actual scheduled day counts (not just the
+// Easy>=Good ordering) so a regression that re-introduces a spurious interval
+// multiplier — like the old w[16] bug that ~3x-inflated Easy intervals — is
+// caught. At TargetRetention=0.90 the interval equals round(initialStability):
+// Good → round(w[2]=3.1262)=3, Easy → round(w[3]=15.4722)=15.
+func TestNewCardIntervalDays(t *testing.T) {
+	goodDays := int(Schedule(p, newCard(), Good, now).Due.Sub(now).Hours() / 24)
+	easyDays := int(Schedule(p, newCard(), Easy, now).Due.Sub(now).Hours() / 24)
+	if goodDays != 3 {
+		t.Errorf("new Good interval = %d days, want 3", goodDays)
+	}
+	if easyDays != 15 {
+		t.Errorf("new Easy interval = %d days, want 15", easyDays)
+	}
+}
+
+// TestIntervalDaysClamped verifies the interval clamp prevents the int64
+// nanosecond overflow that previously corrupted Due for very large stability.
+func TestIntervalDaysClamped(t *testing.T) {
+	card := CardState{
+		State:      StateReview,
+		Stability:  1e9, // absurdly large; round(S) would dwarf the overflow point
+		Difficulty: 5,
+		Reps:       100,
+		LastReview: now.Add(-24 * time.Hour),
+	}
+	res := Schedule(p, card, Good, now)
+	gotDays := res.Due.Sub(now).Hours() / 24
+	if gotDays <= 0 {
+		t.Fatalf("Due overflowed into the past: %v days", gotDays)
+	}
+	if int(gotDays+0.5) > MaxIntervalDays {
+		t.Errorf("interval %v days exceeds MaxIntervalDays %d", gotDays, MaxIntervalDays)
+	}
+}
+
 // ── Difficulty initialization ─────────────────────────────────────────────────
 
 func TestDifficultyRange(t *testing.T) {

@@ -1,6 +1,7 @@
 package cards
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/carve-app/carve/services/api/internal/audio"
@@ -383,7 +385,7 @@ func (h *Handler) AttachMedia(w http.ResponseWriter, r *http.Request) {
 
 	if f, _, err := r.FormFile("image"); err == nil {
 		defer f.Close()
-		if url, err := uploadToMediaService(mediaBase+"/screenshots", f, "image/jpeg"); err == nil {
+		if url, err := uploadToMediaService(r.Context(), mediaBase+"/screenshots", f, "image/jpeg"); err == nil {
 			imageURL = &url
 		} else {
 			slog.Warn("card media: upload image", "error", err)
@@ -392,7 +394,7 @@ func (h *Handler) AttachMedia(w http.ResponseWriter, r *http.Request) {
 
 	if f, _, err := r.FormFile("audio"); err == nil {
 		defer f.Close()
-		if url, err := uploadToMediaService(mediaBase+"/audio", f, "audio/webm"); err == nil {
+		if url, err := uploadToMediaService(r.Context(), mediaBase+"/audio", f, "audio/webm"); err == nil {
 			audioURL = &url
 		} else {
 			slog.Warn("card media: upload audio", "error", err)
@@ -427,12 +429,17 @@ func (h *Handler) AttachMedia(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func uploadToMediaService(url string, body io.Reader, contentType string) (string, error) {
-	req, err := http.NewRequest(http.MethodPost, url, body)
+func uploadToMediaService(ctx context.Context, url string, body io.Reader, contentType string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", contentType)
+	// Authenticate to the media service when an internal token is configured
+	// (production). Empty in dev/e2e, where media writes are open.
+	if tok := os.Getenv("MEDIA_INTERNAL_TOKEN"); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -452,6 +459,11 @@ func uploadToMediaService(url string, body io.Reader, contentType string) (strin
 		return "", err
 	}
 
+	// The R2 backend returns an absolute (Cloudflare) URL; the local backend
+	// returns a path that we must qualify with the media service's base.
+	if strings.HasPrefix(result.URL, "http://") || strings.HasPrefix(result.URL, "https://") {
+		return result.URL, nil
+	}
 	mediaBase := os.Getenv("MEDIA_SERVICE_URL")
 	if mediaBase == "" {
 		mediaBase = "http://localhost:8002"

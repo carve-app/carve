@@ -246,15 +246,11 @@ func (h *Handler) scoreURL(
 	pageURL, language string,
 	knownLemmas, learningLemmas []string,
 ) (*scoreResult, string, error) {
-	// Fetch page content.
+	// Fetch page content. The URL is user-supplied, so use the hardened client
+	// that blocks internal/metadata addresses and refuses redirects (SSRF).
 	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, pageURL, nil)
-	if err != nil {
-		return nil, "", err
-	}
-	req.Header.Set("User-Agent", "Carve/1.0 (+https://carve.app/bot)")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := fetchUserURL(fetchCtx, pageURL, "Carve/1.0 (+https://carve.app/bot)")
 	if err != nil {
 		return nil, "", err
 	}
@@ -414,14 +410,11 @@ func (h *Handler) Read(w http.ResponseWriter, r *http.Request) {
 	if text == "" && pageURL != nil {
 		fetchCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		defer cancel()
-		fetchReq, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, *pageURL, nil)
-		if err == nil {
-			fetchReq.Header.Set("User-Agent", "Carve/1.0 (+https://carve.app/bot)")
-			if resp, err := http.DefaultClient.Do(fetchReq); err == nil {
-				defer resp.Body.Close()
-				raw, _ := io.ReadAll(io.LimitReader(resp.Body, 500_000))
-				text = stripHTML(string(raw))
-			}
+		// User-supplied URL — use the hardened, SSRF-guarded client.
+		if resp, err := fetchUserURL(fetchCtx, *pageURL, "Carve/1.0 (+https://carve.app/bot)"); err == nil {
+			defer resp.Body.Close()
+			raw, _ := io.ReadAll(io.LimitReader(resp.Body, 500_000))
+			text = stripHTML(string(raw))
 		}
 	}
 

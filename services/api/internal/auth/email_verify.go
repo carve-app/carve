@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
@@ -127,15 +128,21 @@ func (h *Handler) ResendVerification(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if appBase := os.Getenv("APP_BASE_URL"); appBase != "" {
-		// In real life this gets queued to an email worker; in CI / dev we
-		// log the link for the test harness to scrape.
+	verifyURL := os.Getenv("APP_BASE_URL") + "/verify-email?token=" + rawToken
+
+	// Returning the raw token in the HTTP body would let anyone who knows a
+	// victim's email bypass the email-ownership check entirely. Only expose it
+	// when an explicit test flag is set (CI/dev) — never in production, where
+	// APP_BASE_URL is always set. In production the link is delivered via the
+	// email worker; here we log it server-side (mirroring password reset).
+	if os.Getenv("EXPOSE_VERIFY_TOKENS") == "1" {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":              true,
-			"verify_url_test": appBase + "/verify-email?token=" + rawToken,
+			"verify_url_test": verifyURL,
 		})
 		return
 	}
 
+	slog.Info("email verification link issued", "user_id", userID, "url", verifyURL)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

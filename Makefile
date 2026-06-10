@@ -1,5 +1,5 @@
-.PHONY: help setup \
-        colima-start infra-up infra-down infra-logs \
+.PHONY: help setup docker-check \
+        infra-up infra-down infra-logs \
         dev dev-api dev-nlp dev-web \
         test-nlp test-api test-extension test-promo test-all \
         test-property test-integration test-contract test-e2e \
@@ -20,17 +20,17 @@ JWT_SECRET ?= dev-secret-change-in-production-at-least-32-chars
 
 help:
 	@echo ""
-	@echo "Carve development — no Docker Desktop required"
+	@echo "Carve development"
 	@echo ""
 	@echo "First-time setup:"
-	@echo "  brew install colima docker docker-compose"
+	@echo "  Install Docker (Docker Desktop, Colima, OrbStack, ...) + docker-compose"
 	@echo "  make setup"
 	@echo ""
 	@echo "Daily workflow:"
 	@echo "  make dev            — start everything (infra + api + nlp + web), Ctrl+C stops all"
 	@echo ""
 	@echo "Infrastructure:"
-	@echo "  make infra-up       — start postgres + redis + minio (via Colima)"
+	@echo "  make infra-up       — start postgres + redis + minio"
 	@echo "  make infra-down     — stop infrastructure containers"
 	@echo "  make infra-logs     — tail infrastructure logs"
 	@echo "  make migrate        — apply DB migrations against local postgres"
@@ -56,9 +56,9 @@ help:
 # ── Setup ─────────────────────────────────────────────────────────────────────
 
 setup:
-	@echo "→ Checking Colima + Docker CLI..."
-	@command -v colima >/dev/null 2>&1 || { echo "✗ colima not found. Run: brew install colima docker docker-compose"; exit 1; }
-	@command -v docker  >/dev/null 2>&1 || { echo "✗ docker CLI not found. Run: brew install docker"; exit 1; }
+	@echo "→ Checking Docker CLI..."
+	@command -v docker  >/dev/null 2>&1 || { echo "✗ docker CLI not found. Install Docker Desktop, Colima, or OrbStack."; exit 1; }
+	@docker info >/dev/null 2>&1 || { echo "✗ Docker daemon not reachable. Start your Docker runtime first."; exit 1; }
 	@echo "→ Setting up Python venv (requires python3.13)..."
 	cd $(NLP_DIR) && python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt
 	@echo "→ Downloading Go modules..."
@@ -70,22 +70,19 @@ setup:
 	@echo "  Next: make infra-up   (starts postgres/redis/minio)"
 	@echo "  Then: make dev-api    make dev-nlp    make dev-web"
 
-# ── Colima (Docker Desktop replacement) ───────────────────────────────────────
+# ── Docker ─────────────────────────────────────────────────────────────────────
 
-colima-start:
-	@command -v colima >/dev/null 2>&1 || { \
-		echo "✗ colima not found. Run: brew install colima docker docker-compose"; exit 1; }
-	@if colima status 2>/dev/null | grep -q "Running"; then \
-		echo "✓ Colima already running"; \
-	else \
-		echo "→ Starting Colima..."; \
-		colima start --cpu 2 --memory 4; \
-		echo "✓ Colima started"; \
-	fi
+# Verify a Docker daemon is reachable, whatever the runtime (Docker Desktop,
+# Colima, OrbStack, ...). Targets that need containers depend on this.
+docker-check:
+	@command -v docker >/dev/null 2>&1 || { \
+		echo "✗ docker CLI not found. Install Docker Desktop, Colima, or OrbStack."; exit 1; }
+	@docker info >/dev/null 2>&1 || { \
+		echo "✗ Docker daemon not reachable. Start your Docker runtime first."; exit 1; }
 
 # ── Infrastructure ────────────────────────────────────────────────────────────
 
-infra-up: colima-start
+infra-up: docker-check
 	@echo "→ Starting postgres, redis, minio..."
 	docker-compose up -d postgres redis minio
 	@echo "→ Waiting for postgres to be ready..."
@@ -194,10 +191,9 @@ test-property:
 	cd apps/extension && npx vitest run src/content/popup/__tests__/property.test.ts
 
 # L3 — testcontainers integration
-test-integration:
+test-integration: docker-check
 	@echo "→ L3 testcontainers integration tests..."
-	cd $(API_DIR) && DOCKER_HOST=$$(colima ssh -- echo unix:///Users/$$USER/.colima/default/docker.sock 2>/dev/null) \
-		TESTCONTAINERS_RYUK_DISABLED=true \
+	cd $(API_DIR) && TESTCONTAINERS_RYUK_DISABLED=true \
 		go test ./internal/importer/... -run TestImportAnki_ -count=1 -timeout 10m
 
 # L4 — OpenAPI contract + schemathesis fuzz
@@ -273,7 +269,7 @@ build:
 
 # ── Docker (full stack, for CI parity) ───────────────────────────────────────
 
-docker-up: colima-start
+docker-up: docker-check
 	docker-compose up -d --build
 
 docker-down:

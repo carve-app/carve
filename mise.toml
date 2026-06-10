@@ -1,0 +1,21 @@
+# Project toolchain — managed by mise (https://mise.jdx.dev).
+#
+# One-time setup for a fresh checkout:
+#
+#     mise install      # installs every tool below at the pinned version
+#
+# After that, `node`, `pnpm`, `go`, `python`, and `cargo` resolve to these
+# versions automatically inside this directory (mise shims / `mise activate`).
+# Versions mirror .github/workflows/ci.yml and the service go.mod files so
+# local builds match CI.
+
+[tools]
+node = "22"        # ci.yml: node-version 22 (web, extension, e2e)
+pnpm = "11.5.2"    # workspace package manager (pnpm-workspace.yaml)
+go = "1.26.3"      # services/*/go.mod
+python = "3.13"    # ci.yml: python-version 3.13 (nlp service)
+rust = "stable"    # ci.yml: dtolnay/rust-toolchain@stable (wasm tokenizers)
+
+[settings]
+# Let `mise install` run without prompting for each tool.
+idiomatic_version_file_enable_tools = []

@@ -42,6 +42,13 @@ func main() {
 	}))
 	slog.SetDefault(log)
 
+	// Fail fast on a missing/weak signing secret rather than silently falling
+	// back to the published dev default (which would allow token forgery).
+	if err := auth.RequireJWTSecret(); err != nil {
+		slog.Error("refusing to start", "error", err)
+		os.Exit(1)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -100,7 +107,6 @@ func main() {
 	decksHandler := decks.NewHandler(pool)
 	exportHandler := export.NewHandler(pool)
 	settingsHandler := settings.NewHandler(pool)
-	billingHandler := billing.NewHandler(pool)
 	statsHandler := stats.NewHandler(pool)
 	libraryHandler := library.NewHandler(pool)
 	importerHandler := importer.NewHandler(pool)
@@ -167,10 +173,6 @@ func main() {
 		// Immersion
 		r.Post("/immersion", immersionHandler.Create)
 
-		// Billing
-		r.Get("/billing/subscription", billingHandler.Subscription)
-		r.Post("/billing/checkout", billingHandler.Checkout)
-
 		// Stats dashboard
 		r.Get("/stats", statsHandler.Dashboard)
 
@@ -209,8 +211,21 @@ func main() {
 
 	})
 
-	// Stripe webhook — no auth middleware; signature verified inside handler.
-	r.Post("/v1/billing/webhook", billingHandler.Webhook)
+	// Billing is disabled during the free-alpha milestone: the web UI has no
+	// checkout/portal and no endpoint enforces subscription tiers. Registering
+	// the routes only when Stripe is configured keeps the unfinished payment
+	// surface (incl. the webhook) off the public API by default. Set
+	// STRIPE_SECRET_KEY to re-enable post-alpha.
+	if os.Getenv("STRIPE_SECRET_KEY") != "" {
+		billingHandler := billing.NewHandler(pool)
+		r.Group(func(r chi.Router) {
+			r.Use(auth.Middleware)
+			r.Get("/v1/billing/subscription", billingHandler.Subscription)
+			r.Post("/v1/billing/checkout", billingHandler.Checkout)
+		})
+		// Stripe webhook — no auth middleware; signature verified inside handler.
+		r.Post("/v1/billing/webhook", billingHandler.Webhook)
+	}
 
 	// NLP proxy routes get their own subrouter without the global 30s timeout
 	// middleware, since SudachiPy can take up to 2 minutes on first request.

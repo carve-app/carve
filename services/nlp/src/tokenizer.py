@@ -167,8 +167,12 @@ def arabic_numeral_reading(s: str) -> str | None:
 # Mixed large-unit patterns: 100万, 5万4000, 1億2500万, 12兆3000億…
 # Must contain at least one large unit character; allows chained units.
 _LARGE_UNIT_CHARS = frozenset("万億兆")
+# Digit groups are bounded to 15 chars: real numerals never have 16+ contiguous
+# digits in one unit segment, and the bound keeps int() far under Python's
+# 4300-digit string→int conversion limit (which would otherwise raise ValueError
+# → 500 on crafted input).
 _HYBRID_NUM_RE = re.compile(
-    r'^(?:(\d+)兆)?(?:(\d+)億)?(?:(\d+)万)?(\d+)?$'
+    r'^(?:(\d{1,15})兆)?(?:(\d{1,15})億)?(?:(\d{1,15})万)?(\d{1,15})?$'
 )
 _LARGE_UNIT_RE = re.compile(r'[万億兆]')  # kept for the _tokenize_raw guard
 
@@ -516,8 +520,46 @@ class JapaneseTokenizer:
 
         return TokenizedText(tokens=c_tokens, a_tokens=a_tokens)
 
+    # SudachiPy raises on inputs over ~49149 UTF-8 bytes. Our request models
+    # allow far more (50k–100k chars ≈ up to 300KB for CJK), so we split
+    # oversized input into byte-bounded chunks on safe boundaries and tokenize
+    # each, rather than letting a valid long request crash as a 500.
+    _SUDACHI_MAX_BYTES = 40000
+
+    def _sudachi_tokenize(self, text: str, mode: sudachipy.SplitMode):
+        if len(text.encode("utf-8")) <= self._SUDACHI_MAX_BYTES:
+            return self._tokenizer.tokenize(text, mode)
+        morphemes = []
+        for chunk in self._split_for_sudachi(text):
+            morphemes.extend(self._tokenizer.tokenize(chunk, mode))
+        return morphemes
+
+    @classmethod
+    def _split_for_sudachi(cls, text: str) -> list[str]:
+        """Split text into <=_SUDACHI_MAX_BYTES UTF-8 chunks, preferring to
+        break after Japanese/ASCII sentence punctuation so tokens aren't cut
+        mid-word."""
+        chunks: list[str] = []
+        buf: list[str] = []
+        size = 0
+        for ch in text:
+            b = len(ch.encode("utf-8"))
+            if size + b > cls._SUDACHI_MAX_BYTES and buf:
+                chunks.append("".join(buf))
+                buf, size = [], 0
+            buf.append(ch)
+            size += b
+            # Flush on a sentence boundary once the chunk is reasonably full, to
+            # avoid splitting in the middle of a word.
+            if ch in "。．.！!？?\n" and size >= cls._SUDACHI_MAX_BYTES // 2:
+                chunks.append("".join(buf))
+                buf, size = [], 0
+        if buf:
+            chunks.append("".join(buf))
+        return chunks
+
     def _tokenize_raw(self, text: str, mode: sudachipy.SplitMode) -> list[Token]:
-        morphemes = self._tokenizer.tokenize(text, mode)
+        morphemes = self._sudachi_tokenize(text, mode)
         tokens = []
         for m in morphemes:
             pos_tuple = m.part_of_speech()

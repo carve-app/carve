@@ -153,3 +153,100 @@ export async function uploadCardMedia(
     body: form,
   }).catch(() => {/* non-fatal */});
 }
+
+// ── DRM-resilient capture path ────────────────────────────────────────────────
+//
+// captureFrame() above draws the <video> to a canvas, which the browser blanks
+// to black on EME/DRM-protected streams (Netflix, Disney+, Prime). The path
+// below instead records audio in the page (captureStream — works wherever the
+// media element exposes a stream) and hands the *frame* capture to the
+// background worker, which screenshots the rendered tab via captureVisibleTab
+// and crops to the video rect. That composited screenshot includes DRM video,
+// matching how Migaku captures Netflix frames.
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      // result is a data URL: "data:<mime>;base64,<payload>"
+      const comma = result.indexOf(',');
+      resolve(comma >= 0 ? result.slice(comma + 1) : '');
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('read failed'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+export interface VideoMediaResult {
+  success: boolean;
+  hasImage: boolean;
+  hasAudio: boolean;
+  error?: string;
+}
+
+/**
+ * Capture audio + frame for a mined video card and attach them to `cardId`.
+ *
+ * Audio is recorded here (in the page) for `cueDurationMs`; the frame is
+ * captured by the background worker (DRM-safe). Returns what actually landed so
+ * the caller can give honest feedback ("media unavailable on this site").
+ */
+export async function attachVideoMedia(
+  video: HTMLVideoElement,
+  cardId: string,
+  cueDurationMs: number,
+  opts: { sourceUrl?: string; subtitleTranslation?: string } = {},
+): Promise<VideoMediaResult> {
+  const duration = Math.min(Math.max(cueDurationMs || 4000, 1000), 8000);
+  // The audio is recorded FORWARD from the current playhead, so the stored
+  // window must match: [T, T+duration]. (The frame is grabbed at T.)
+  const startMs = Math.round(video.currentTime * 1000);
+  const endMs = startMs + duration;
+
+  // Capture the frame NOW (at mine-time) and record audio CONCURRENTLY. The
+  // frame must reflect the moment the user mined — if we awaited the full audio
+  // clip first (as the original code did), captureVisibleTab would fire up to
+  // 8 s later and grab a stale/blank frame. Both run in parallel:
+  const r = video.getBoundingClientRect();
+  const rect = { x: r.left, y: r.top, width: r.width, height: r.height };
+  const dpr = window.devicePixelRatio || 1;
+  const framePromise = browser.runtime.sendMessage({ type: 'CAPTURE_VIDEO_FRAME', rect, dpr });
+  const audioPromise = recordAudioClip(video, duration);
+
+  const [frameResult, audioBlob] = await Promise.all([framePromise, audioPromise]);
+  const imageBase64: string | null = frameResult?.imageBase64 ?? null;
+
+  let audioBase64: string | null = null;
+  let audioMime: string | null = null;
+  if (audioBlob && audioBlob.size > 0) {
+    try {
+      audioBase64 = await blobToBase64(audioBlob);
+      audioMime = audioBlob.type || 'audio/webm';
+    } catch {
+      audioBase64 = null;
+    }
+  }
+
+  // Upload the already-captured frame + audio through the background worker
+  // (which holds the host permission, sidestepping the content-script CORS
+  // wall in prod).
+  const result = await browser.runtime.sendMessage({
+    type: 'ATTACH_VIDEO_MEDIA',
+    cardId,
+    imageBase64,
+    audioBase64,
+    audioMime,
+    startMs,
+    endMs,
+    sourceUrl: opts.sourceUrl,
+    subtitleTranslation: opts.subtitleTranslation,
+  });
+
+  return {
+    success: !!result?.success,
+    hasImage: !!result?.hasImage,
+    hasAudio: !!result?.hasAudio,
+    error: result?.error,
+  };
+}

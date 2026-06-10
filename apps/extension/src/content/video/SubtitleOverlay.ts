@@ -2,7 +2,7 @@ import { browser } from '../../shared/browser';
 import type { VocabCache } from '../../nlp/VocabCache';
 import type { PopupManager } from '../popup/PopupManager';
 import type { Token } from '../../shared/types';
-import { getVideoElement, captureVideoMedia, uploadCardMedia } from './VideoCapture';
+import { getVideoElement, attachVideoMedia } from './VideoCapture';
 
 export interface ActiveCue {
   text: string;
@@ -226,18 +226,28 @@ export class SubtitleOverlay {
       await this.vocabCache.markLearning(lemma);
       if (targetToken) targetToken.setAttribute('data-status', 'learning');
 
-      this.setMineStatus('Mined! Capturing…');
-
-      // Capture + upload media asynchronously
+      // Capture frame + audio and attach to the card. Frame capture runs in
+      // the background worker (DRM-safe screenshot+crop); audio is recorded
+      // here. We report what actually landed so DRM sites that block media
+      // give an honest message instead of a silent failure.
       const video = getVideoElement();
       if (video) {
+        this.setMineStatus('Mined! Capturing media…');
         const cueDurationMs = cue.endMs - cue.startMs || 4000;
-        captureVideoMedia(video, Math.min(cueDurationMs, 8000)).then(capture =>
-          uploadCardMedia(cardId, capture, {
-            sourceUrl: window.location.href,
-            subtitleTranslation: cue.nativeText,
-          }),
-        );
+        const media = await attachVideoMedia(video, cardId, cueDurationMs, {
+          sourceUrl: window.location.href,
+          subtitleTranslation: cue.nativeText,
+        });
+        if (media.hasImage || media.hasAudio) {
+          const parts = [media.hasImage ? 'image' : null, media.hasAudio ? 'audio' : null].filter(Boolean);
+          this.setMineStatus(`Mined! (+${parts.join(' & ')})`);
+        } else {
+          // Card saved with subtitle + translation, but this player blocks
+          // frame/audio capture (e.g. HDCP-protected DRM).
+          this.setMineStatus('Mined! (media unavailable on this site)');
+        }
+      } else {
+        this.setMineStatus('Mined!');
       }
 
       setTimeout(() => this.setMineStatus(''), 2500);

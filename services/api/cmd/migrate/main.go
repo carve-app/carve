@@ -61,8 +61,15 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, dir string) error {
 	applied := map[string]bool{}
 	for rows.Next() {
 		var v string
-		rows.Scan(&v)
+		if err := rows.Scan(&v); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan version: %w", err)
+		}
 		applied[v] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("iterate migrations: %w", err)
 	}
 	rows.Close()
 

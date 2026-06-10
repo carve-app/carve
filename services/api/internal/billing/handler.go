@@ -161,11 +161,16 @@ func (h *Handler) Webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if h.webhookSecret != "" {
-		if !verifyStripeSignature(body, r.Header.Get("Stripe-Signature"), h.webhookSecret) {
-			writeError(w, http.StatusUnauthorized, "invalid stripe signature")
-			return
-		}
+	// Fail closed: without a configured signing secret we cannot authenticate
+	// the payload, so we must NOT process it — otherwise any anonymous caller
+	// could POST forged events that mutate the subscriptions/billing tables.
+	if h.webhookSecret == "" {
+		writeError(w, http.StatusServiceUnavailable, "billing not configured")
+		return
+	}
+	if !verifyStripeSignature(body, r.Header.Get("Stripe-Signature"), h.webhookSecret) {
+		writeError(w, http.StatusUnauthorized, "invalid stripe signature")
+		return
 	}
 
 	var event struct {

@@ -545,24 +545,33 @@ async function _importFile(path: string, file: File, language: string): Promise<
 
 // ── Export ────────────────────────────────────────────────────────────────────
 
-export function getExportUrl(): string {
-  const token = getToken();
-  return `${API_BASE}/v1/export${token ? `?token=${encodeURIComponent(token)}` : ''}`;
-}
-
 export async function triggerExport(): Promise<void> {
   const token = getToken();
   const headers: Record<string, string> = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
   const res = await fetch(`${API_BASE}/v1/export`, { headers });
-  if (!res.ok) throw new ApiError(res.status, 'Export failed');
+  if (!res.ok) {
+    // Mirror apiFetch's auth handling so an expired session logs out instead
+    // of leaving the user on a broken page, and surface the real error.
+    if (res.status === 401 && typeof window !== 'undefined' && localStorage.getItem('carve_access_token')) {
+      localStorage.removeItem('carve_access_token');
+      window.location.href = '/login';
+      throw new ApiError(401, 'Session expired');
+    }
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, body.error ?? body.detail ?? body.message ?? `HTTP ${res.status}`);
+  }
 
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = `carve-export-${new Date().toISOString().slice(0, 10)}.json`;
+  // Append to the DOM (Firefox requires it), click, then defer revocation so
+  // the browser has begun reading the blob before the object URL is released.
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

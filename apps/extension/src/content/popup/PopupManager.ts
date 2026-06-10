@@ -443,8 +443,11 @@ export function pitchSvg(accent: string, morae: number): string {
   const colors: Record<number, string> = { 0: '#4caf50', 1: '#e57373' };
   const color = n < 2 ? (colors[n] ?? '#64b5f6') : '#64b5f6';
 
+  // Use the validated integer `n` — never the raw `accent` string — so this
+  // SVG (assigned via innerHTML) can't be an injection sink if pitch_accent
+  // ever carries untrusted data.
   return `<svg class="carve-pitch-svg" width="${totalW}" height="${H}"
-    viewBox="0 0 ${totalW} ${H}" aria-label="Pitch accent ${accent}"
+    viewBox="0 0 ${totalW} ${H}" aria-label="Pitch accent ${n}"
     style="vertical-align:middle;margin-left:4px">
     <polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>
     ${levels.map((high, i) =>

@@ -26,9 +26,15 @@ export class ImmersionTracker {
   }
 
   private bindEvents(): void {
-    // Page visibility
+    // Page visibility. Flush BEFORE marking hidden: visibilitychange→hidden
+    // fires while the page is still alive (tab switch / close / mobile
+    // backgrounding), so the runtime message to the service worker reliably
+    // lands — unlike the pagehide/beforeunload path, where the content-script
+    // context is torn down before an async message is delivered. This is the
+    // primary flush for navigation losses.
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
+        this.flush();
         this.pauseTick();
         this.isVisible = false;
       } else {
@@ -49,12 +55,11 @@ export class ImmersionTracker {
       }, { passive: true });
     }
 
-    // Flush on page unload
+    // Last-ditch flush on unload. The reliable flush is visibilitychange above
+    // (which fires first); this is best-effort for the rare case the page goes
+    // straight to unload without a prior hidden transition.
     window.addEventListener('pagehide', () => {
-      this.flush(true);
-    });
-    window.addEventListener('beforeunload', () => {
-      this.flush(true);
+      this.flush();
     });
   }
 
@@ -71,7 +76,7 @@ export class ImmersionTracker {
     }
   }
 
-  private flush(synchronous = false): void {
+  private flush(): void {
     // Accumulate since last tick
     if (this.lastTickAt !== null && this.isVisible) {
       const elapsed = (Date.now() - this.lastTickAt) / 1000;
@@ -96,12 +101,7 @@ export class ImmersionTracker {
       url: window.location.href,
     };
 
-    if (synchronous && typeof navigator.sendBeacon === 'function') {
-      // Best-effort sync send — fall back to async message on failure
-      browser.runtime.sendMessage(payload).catch(() => {});
-    } else {
-      browser.runtime.sendMessage(payload).catch(() => {});
-    }
+    browser.runtime.sendMessage(payload).catch(() => {});
   }
 
   destroy(): void {
@@ -109,6 +109,6 @@ export class ImmersionTracker {
       clearInterval(this.tickInterval);
       this.tickInterval = null;
     }
-    this.flush(true);
+    this.flush();
   }
 }

@@ -12,6 +12,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -57,7 +58,11 @@ _INTERNAL_SECRET = os.environ.get("NLP_INTERNAL_SECRET", "")
 
 
 def _check_auth(x_internal_secret: str | None) -> None:
-    if _INTERNAL_SECRET and x_internal_secret != _INTERNAL_SECRET:
+    # Constant-time compare so the shared secret can't be recovered byte-by-byte
+    # via response-timing. hmac.compare_digest raises on None, hence the guard.
+    if _INTERNAL_SECRET and not (
+        x_internal_secret and hmac.compare_digest(x_internal_secret, _INTERNAL_SECRET)
+    ):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 

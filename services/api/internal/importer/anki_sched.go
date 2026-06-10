@@ -79,7 +79,9 @@ func Map(a AnkiCardSched, collectionCreated time.Time, now time.Time) FSRSSched 
 	// cards, use a small positive value so the scheduler still has a real
 	// number to work with rather than NULL.
 	if out.State == "review" || out.State == "suspended" || out.State == "relearning" {
-		s := math.Max(1, float64(a.IVL))
+		// Clamp to the FSRS horizon: a crafted/huge IVL would otherwise overflow
+		// the nanosecond Due math downstream and corrupt the schedule.
+		s := math.Min(36500, math.Max(1, float64(a.IVL)))
 		out.Stability = &s
 	} else if out.State == "learning" {
 		s := 0.5
@@ -106,7 +108,14 @@ func Map(a AnkiCardSched, collectionCreated time.Time, now time.Time) FSRSSched 
 	// cards, due is seconds-since-epoch (in queue 1) or a position (queue 3),
 	// which we treat as "due now" since the carve scheduler will re-anchor it.
 	if out.State == "review" || out.State == "suspended" {
-		t := collectionCreated.Add(time.Duration(a.Due) * 24 * time.Hour)
+		// Bound the day offset so the duration math can't overflow int64 ns.
+		dueDays := a.Due
+		if dueDays > 36500 {
+			dueDays = 36500
+		} else if dueDays < -36500 {
+			dueDays = -36500
+		}
+		t := collectionCreated.Add(time.Duration(dueDays) * 24 * time.Hour)
 		out.Due = &t
 	} else if out.State == "learning" || out.State == "relearning" {
 		// Schedule learning cards in a few minutes — matches Anki's behavior

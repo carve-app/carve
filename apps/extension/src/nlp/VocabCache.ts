@@ -41,11 +41,7 @@ export class VocabCache {
     this.learning.add(lemma);
     this.known.delete(lemma);
     this.ignored.delete(lemma);
-    await Promise.all([
-      storageSet('learningLemmas', this.getLearningLemmas()),
-      storageSet('knownLemmas', this.getKnownLemmas()),
-      storageSet('ignoredLemmas', Array.from(this.ignored)),
-    ]);
+    await this.persistMembership(lemma, 'learning');
   }
 
   /**
@@ -55,10 +51,44 @@ export class VocabCache {
     this.ignored.add(lemma);
     this.learning.delete(lemma);
     this.known.delete(lemma);
+    await this.persistMembership(lemma, 'ignored');
+  }
+
+  /**
+   * Persist a single lemma's membership across the three lemma sets, merging
+   * with the latest stored values rather than overwriting from this context's
+   * (possibly stale) page-load snapshot. Without this, a lemma marked
+   * known/ignored in another tab — or by the background IGNORE_WORD handler —
+   * after this page loaded would be silently dropped on the next write.
+   */
+  private async persistMembership(
+    lemma: string,
+    target: 'learning' | 'ignored',
+  ): Promise<void> {
+    const [knownArr, learningArr, ignoredArr] = await Promise.all([
+      storageGet('knownLemmas'),
+      storageGet('learningLemmas'),
+      storageGet('ignoredLemmas'),
+    ]);
+    const known = new Set(knownArr ?? []);
+    const learning = new Set(learningArr ?? []);
+    const ignored = new Set(ignoredArr ?? []);
+
+    // Apply this mutation: the lemma belongs to exactly one set now.
+    known.delete(lemma);
+    learning.delete(lemma);
+    ignored.delete(lemma);
+    (target === 'learning' ? learning : ignored).add(lemma);
+
+    // Keep the in-memory sets consistent with what we just merged + wrote.
+    this.known = known;
+    this.learning = learning;
+    this.ignored = ignored;
+
     await Promise.all([
-      storageSet('ignoredLemmas', Array.from(this.ignored)),
-      storageSet('learningLemmas', this.getLearningLemmas()),
-      storageSet('knownLemmas', this.getKnownLemmas()),
+      storageSet('knownLemmas', Array.from(known)),
+      storageSet('learningLemmas', Array.from(learning)),
+      storageSet('ignoredLemmas', Array.from(ignored)),
     ]);
   }
 

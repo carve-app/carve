@@ -90,20 +90,30 @@ resource "aws_security_group" "ecs_tasks" {
   description = "Fargate tasks: ingress from ALB"
   vpc_id      = aws_vpc.main.id
 
+  # ALB only fronts api (8080) and media (8002); nlp is internal-only. Listing
+  # the exact ports (instead of 0-65535) limits a compromised task's reach.
   ingress {
-    from_port       = 0
-    to_port         = 65535
+    from_port       = 8080
+    to_port         = 8080
     protocol        = "tcp"
     security_groups = [aws_security_group.alb.id]
-    description     = "ALB to tasks"
+    description     = "ALB to api"
+  }
+  ingress {
+    from_port       = 8002
+    to_port         = 8002
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+    description     = "ALB to media"
   }
 
-  # Tasks need to talk to each other (api -> nlp).
+  # api -> nlp over the internal service-discovery DNS (port 8001 only).
   ingress {
-    from_port = 0
-    to_port   = 65535
-    protocol  = "tcp"
-    self      = true
+    from_port   = 8001
+    to_port     = 8001
+    protocol    = "tcp"
+    self        = true
+    description = "api to nlp"
   }
 
   egress {

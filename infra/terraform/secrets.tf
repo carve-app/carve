@@ -44,6 +44,18 @@ resource "aws_ssm_parameter" "nlp_internal_secret" {
   value = random_password.nlp_internal.result
 }
 
+resource "random_password" "media_internal" {
+  length  = 48
+  special = false
+}
+
+# Shared bearer the API presents to the media service on write endpoints.
+resource "aws_ssm_parameter" "media_internal_token" {
+  name  = "${local.ssm_prefix}/MEDIA_INTERNAL_TOKEN"
+  type  = "SecureString"
+  value = random_password.media_internal.result
+}
+
 # ── Third-party API keys (placeholders — set real values out of band) ────────
 
 variable "placeholder_secrets" {
@@ -61,7 +73,8 @@ variable "placeholder_secrets" {
     "R2_SECRET_ACCESS_KEY",
     "SENTRY_DSN",
     "POSTHOG_API_KEY",
-    "SMTP_PASSWORD",
+    # SMTP credentials are provisioned for real in ses.tf (SMTP_USER /
+    # SMTP_PASSWORD_REAL), so no placeholder is needed here.
   ]
 }
 
