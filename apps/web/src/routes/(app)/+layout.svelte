@@ -16,6 +16,7 @@
   const NAV = [
     { href: '/review',   label: 'Review'   },
     { href: '/cards',    label: 'Cards'    },
+    { href: '/grammar',  label: 'Grammar'  },
     { href: '/library',  label: 'Library'  },
     { href: '/discover', label: 'Discover' },
     { href: '/import',   label: 'Import'   },

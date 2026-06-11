@@ -577,3 +577,46 @@ export async function triggerExport(): Promise<void> {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// ── Grammar ─────────────────────────────────────────────────────────────────
+
+export interface GrammarPattern {
+  id: string;
+  name: string;
+  jlpt: string;
+  description: string;
+}
+
+export interface GrammarCatalogResponse {
+  patterns: GrammarPattern[];
+}
+
+export interface KnownPatternsResponse {
+  pattern_ids: string[];
+}
+
+/** Catalog of detectable grammar patterns (proxied from the NLP service). JA-only today. */
+export async function getGrammarCatalog(lang = 'ja'): Promise<GrammarCatalogResponse> {
+  return apiFetch<GrammarCatalogResponse>(`/v1/nlp/grammar/patterns?language=${encodeURIComponent(lang)}`);
+}
+
+/** Ids of grammar patterns the current user has marked known for `lang`. */
+export async function getKnownPatterns(lang = 'ja'): Promise<KnownPatternsResponse> {
+  return apiFetch<KnownPatternsResponse>(`/v1/grammar/known?language=${encodeURIComponent(lang)}`);
+}
+
+/** Mark a grammar pattern as known (idempotent). */
+export async function markPattern(lang: string, id: string): Promise<void> {
+  await apiFetch('/v1/grammar/known', {
+    method: 'POST',
+    body: JSON.stringify({ language_code: lang, pattern_id: id }),
+  });
+}
+
+/** Unmark a grammar pattern (idempotent). */
+export async function unmarkPattern(lang: string, id: string): Promise<void> {
+  await apiFetch('/v1/grammar/known', {
+    method: 'DELETE',
+    body: JSON.stringify({ language_code: lang, pattern_id: id }),
+  });
+}
