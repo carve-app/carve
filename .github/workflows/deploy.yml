@@ -108,16 +108,21 @@ jobs:
       - id: tag
         run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
-      - name: Prepare JMdict
+      - name: Prepare dictionaries
         working-directory: services/nlp
         run: |
           # NLP image bundles a pre-built SQLite dict. Build it in CI so the
-          # image is self-contained at runtime.
+          # image is self-contained at runtime. JMdict (ja) needs SudachiPy;
+          # the multilingual importers are pure stdlib (sqlite3/urllib/tarfile).
           pip install sudachipy sudachidict-core
           mkdir -p data
           curl -sL "http://ftp.edrdg.org/pub/Nihongo/JMdict_e.gz" -o data/JMdict_e.gz
           gzip -d data/JMdict_e.gz
           python scripts/import_jmdict.py
+          # zh (CC-CEDICT), ko (curated list), es/de/fr/it/pt (FreeDict)
+          python scripts/import_cedict_sqlite.py
+          python scripts/import_kde4_sqlite.py
+          python scripts/import_freedict.py
 
       - name: Build & push
         working-directory: services/nlp
