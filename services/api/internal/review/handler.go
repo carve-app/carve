@@ -109,6 +109,7 @@ func (h *Handler) DueCount(w http.ResponseWriter, r *http.Request) {
 type sessionCard struct {
 	ID            string     `json:"id"`
 	FrontText     string     `json:"front_text"`
+	CardType      string     `json:"card_type"`
 	BackText      *string    `json:"back_text"`
 	Sentence      *string    `json:"sentence"`
 	Translation   *string    `json:"subtitle_translation"`
@@ -145,7 +146,7 @@ func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch all due cards, learning-priority first (smallest due time first)
 	rows, err := h.db.Query(r.Context(),
-		`SELECT id, front_text, back_text, sentence, subtitle_translation, source_url,
+		`SELECT id, front_text, card_type, back_text, sentence, subtitle_translation, source_url,
 		        front_audio_url, sentence_audio_url, front_image_url,
 		        fsrs_state, fsrs_stability, fsrs_difficulty, fsrs_due,
 		        fsrs_reps, fsrs_lapses
@@ -183,7 +184,7 @@ func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c rawCard
 		if err := rows.Scan(
-			&c.ID, &c.FrontText, &c.BackText, &c.Sentence, &c.Translation, &c.SourceURL,
+			&c.ID, &c.FrontText, &c.CardType, &c.BackText, &c.Sentence, &c.Translation, &c.SourceURL,
 			&c.AudioURL, &c.SentenceAudio, &c.ImageURL,
 			&c.FsrsState, &c.Stability, &c.Difficulty, &c.Due,
 			&c.Reps, &c.Lapses,
