@@ -6,7 +6,13 @@ import { ImmersionTracker } from './tracker/ImmersionTracker';
 import { SubtitleHook } from './video/SubtitleHook';
 import { injectStyles } from './annotator/styles';
 
+// All active subsystems are held so the "enable on this site" toggle can tear
+// them down (and rebuild them) cleanly, without a page reload. `active` guards
+// init/teardown so repeated toggles never double-mount or leave leaks.
 let annotator: PageAnnotator | null = null;
+let subtitleHook: SubtitleHook | null = null;
+let immersionTracker: ImmersionTracker | null = null;
+let active = false;
 let overlayVisible = false;
 
 async function isSiteDisabled(): Promise<boolean> {
@@ -16,37 +22,50 @@ async function isSiteDisabled(): Promise<boolean> {
 }
 
 function teardown(): void {
-  // Remove all token spans, restoring original text nodes
-  document.querySelectorAll('[data-carve="processed"]').forEach(el => {
-    el.removeAttribute('data-carve');
-  });
-  document.querySelectorAll('[data-carve="token"]').forEach(span => {
-    span.replaceWith(span.textContent ?? '');
-  });
-  document.getElementById('carve-popup')?.remove();
-  document.getElementById('carve-styles')?.remove();
+  if (!active) return;
+  active = false;
+
+  annotator?.stop();              // disconnect observer + unwrap token spans
   annotator = null;
+  subtitleHook?.destroy();        // remove the video subtitle overlay
+  subtitleHook = null;
+  immersionTracker?.destroy();    // clear interval + remove listeners + flush
+  immersionTracker = null;
+
+  document.getElementById('carve-popup')?.remove();
+  document.getElementById('carve-overlay')?.remove();
+  document.getElementById('carve-styles')?.remove();
+  overlayVisible = false;
 }
 
 async function init(): Promise<void> {
+  if (active) return;             // already running on this page
   if (await isSiteDisabled()) return;
 
   const lang = await detectLanguage();
   if (!lang) return;
 
+  active = true;
   injectStyles();
 
   const vocabCache = new VocabCache();
   await vocabCache.load();
 
-  const popupManager = new PopupManager(vocabCache);
-  new ImmersionTracker(lang);
+  // Re-check: a disable toggle could have raced the async load above.
+  if (!active) return;
 
-  const subtitleHook = new SubtitleHook(lang, vocabCache, popupManager);
+  const popupManager = new PopupManager(vocabCache);
+  immersionTracker = new ImmersionTracker(lang);
+
+  subtitleHook = new SubtitleHook(lang, vocabCache, popupManager);
   subtitleHook.mount();
 
   annotator = new PageAnnotator(lang, vocabCache, popupManager);
   annotator.start();
+
+  // Restore the comprehension overlay if the user had it on.
+  const ov = await browser.storage.local.get('overlayEnabled');
+  if (ov['overlayEnabled']) showOverlay();
 }
 
 async function detectLanguage(): Promise<string | null> {
@@ -129,8 +148,13 @@ function toggleOverlay(): void {
 // Listen for messages from the popup or background script.
 browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'SET_SITE_ENABLED') {
-    if (msg.enabled) { init(); } else { teardown(); }
-    sendResponse({});
+    // Apply immediately, both ways, without a page reload.
+    if (msg.enabled) {
+      init().then(() => sendResponse({ ok: true })).catch(() => sendResponse({ ok: false }));
+      return true; // async response
+    }
+    teardown();
+    sendResponse({ ok: true });
     return;
   }
   if (msg.type === 'GET_COMPREHENSION') {

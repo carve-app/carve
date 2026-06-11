@@ -35,6 +35,28 @@ export class PageAnnotator {
     this.observer.observe(document.body, { childList: true, subtree: true });
   }
 
+  /**
+   * Stop observing and unwrap every token span this annotator added, restoring
+   * the original text. Idempotent — safe to call when never started. Used by
+   * the "enable on this site" toggle to disable cleanly without a page reload.
+   */
+  stop(): void {
+    this.observer.disconnect();
+    const touched = new Set<Node>();
+    document.querySelectorAll('[data-carve="token"]').forEach((span) => {
+      const parent = span.parentNode;
+      // Replace the span with its plain text so the page reads normally again.
+      span.replaceWith(document.createTextNode(span.textContent ?? ''));
+      if (parent) touched.add(parent);
+    });
+    document.querySelectorAll('[data-carve="processed"]').forEach((el) => {
+      el.removeAttribute('data-carve');
+    });
+    // Merge the adjacent text nodes left behind by unwrapping, so a later
+    // re-enable sees clean, whole text rather than many fragments.
+    touched.forEach((node) => (node as Element | Text).normalize?.());
+  }
+
   private scriptMatcher(): (text: string) => boolean {
     switch (this.lang) {
       case 'ja':
