@@ -5,3 +5,12 @@ cloudflare_account_id = "REPLACE_ME"
 cloudflare_zone_id    = "REPLACE_ME"
 github_owner          = "carve-app"
 github_repo           = "carve"
+ssh_public_key        = "ssh-ed25519 REPLACE_ME"
+
+# Tighten this after first access, for example: ["203.0.113.10/32"].
+ssh_allowed_cidr_blocks = ["0.0.0.0/0"]
+
+# Phase 1 defaults. Raise only when real usage asks for it.
+vm_instance_type        = "t3.small"
+db_instance_class       = "db.t4g.micro"
+db_allocated_storage_gb = 20

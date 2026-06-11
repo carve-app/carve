@@ -13,15 +13,27 @@ export interface ActiveCue {
 
 const OVERLAY_ID = 'carve-sub-overlay';
 const MAX_HISTORY = 30;
+const CUE_IDLE_FINALIZE_DELAY_MS = 1200;
+const MAX_CHUNK_CHARS = 120;
+const MAX_CUE_GAP_MS = 1600;
+const SENTENCE_END_RE = /[.!?。！？…]["')\]]*$/u;
 
 export class SubtitleOverlay {
   private container: HTMLElement;
   private cueHistory: ActiveCue[] = [];
   private historyIndex = -1;
-  private pauseOnSub = false;
   private showNative = true;
   private miningInProgress = false;
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
+  private renderVersion = 0;
+  private hoverPausedVideo: HTMLVideoElement | null = null;
+  private nativeHideStyles: Array<{ selector: string; element: HTMLStyleElement }> = [];
+  private resizeObserver: ResizeObserver | null = null;
+  private observedVideo: HTMLVideoElement | null = null;
+  private readonly updatePositionBound = () => this.updatePosition();
+  private pendingCue: ActiveCue | null = null;
+  private pendingHistoryIndex = -1;
+  private pendingFinalizeTimer: number | null = null;
 
   constructor(
     private lang: string,
@@ -30,6 +42,8 @@ export class SubtitleOverlay {
   ) {
     this.container = this.buildContainer();
     document.body.appendChild(this.container);
+    this.bindPositionUpdates();
+    this.updatePosition();
     this.bindKeys();
   }
 
@@ -37,16 +51,10 @@ export class SubtitleOverlay {
     const el = document.createElement('div');
     el.id = OVERLAY_ID;
     el.innerHTML = `
-      <div class="cso-bar">
-        <button class="cso-btn cso-prev" title="Previous subtitle (←)">◀</button>
-        <div class="cso-toggles">
-          <button class="cso-btn cso-pause" title="Pause on subtitle">⏸</button>
-          <button class="cso-btn cso-native-toggle" title="Toggle native subtitle">CC</button>
-        </div>
-        <button class="cso-btn cso-next" title="Next subtitle (→)">▶</button>
+      <div class="cso-lines">
+        <div class="cso-target" id="cso-target"></div>
+        <div class="cso-native" id="cso-native"></div>
       </div>
-      <div class="cso-target" id="cso-target"><span class="cso-hint">Subtitles will appear here</span></div>
-      <div class="cso-native" id="cso-native"></div>
       <div class="cso-mine-status" id="cso-mine-status"></div>
     `;
 
@@ -58,24 +66,106 @@ export class SubtitleOverlay {
       document.head.appendChild(style);
     }
 
-    el.querySelector('.cso-prev')?.addEventListener('click', () => this.stepHistory(-1));
-    el.querySelector('.cso-next')?.addEventListener('click', () => this.stepHistory(+1));
-    el.querySelector('.cso-pause')?.addEventListener('click', () => this.togglePause());
-    el.querySelector('.cso-native-toggle')?.addEventListener('click', () => this.toggleNative());
+    const lines = el.querySelector<HTMLElement>('.cso-lines');
+    lines?.addEventListener('mouseenter', () => this.pauseForHover());
+    lines?.addEventListener('mouseleave', () => {
+      this.popupManager.hidePopup();
+      this.resumeAfterHover();
+    });
 
     return el;
   }
 
   /** Called by platform hooks when a new subtitle cue becomes active. */
   onCue(cue: ActiveCue): void {
+    this.queueCue(cue);
+  }
+
+  private queueCue(cue: ActiveCue): void {
+    const normalized = normalizeCue(cue);
+    if (!normalized) return;
+
+    this.updatePosition();
+
+    if (!this.pendingCue) {
+      this.startPendingCue(normalized);
+      return;
+    }
+
+    const pending = this.pendingCue;
+    const gapMs = normalized.startMs > 0 && pending.endMs > 0
+      ? normalized.startMs - pending.endMs
+      : 0;
+    const mergedText = mergeSubtitleText(pending.text, normalized.text);
+    const textWouldOverflow = mergedText.length > MAX_CHUNK_CHARS;
+
+    if (isSentenceComplete(pending.text) || gapMs > MAX_CUE_GAP_MS || textWouldOverflow) {
+      this.finalizePendingCue();
+      this.startPendingCue(normalized);
+      return;
+    }
+
+    this.pendingCue = {
+      text: mergedText,
+      startMs: pending.startMs,
+      endMs: Math.max(pending.endMs, normalized.endMs),
+      nativeText: mergeOptionalSubtitleText(pending.nativeText, normalized.nativeText),
+    };
+    this.renderPendingCue();
+    this.finalizeOrSchedulePendingCue();
+  }
+
+  private startPendingCue(cue: ActiveCue): void {
+    this.pendingCue = cue;
+    this.pendingHistoryIndex = -1;
+    this.renderPendingCue();
+    this.finalizeOrSchedulePendingCue();
+  }
+
+  private finalizeOrSchedulePendingCue(): void {
+    if (!this.pendingCue) return;
+    if (shouldFinalizeCue(this.pendingCue)) {
+      this.finalizePendingCue();
+      return;
+    }
+    this.schedulePendingFinalize();
+  }
+
+  private schedulePendingFinalize(): void {
+    this.clearPendingFinalize();
+    this.pendingFinalizeTimer = window.setTimeout(() => {
+      this.pendingFinalizeTimer = null;
+      this.finalizePendingCue();
+    }, CUE_IDLE_FINALIZE_DELAY_MS);
+  }
+
+  private clearPendingFinalize(): void {
+    if (this.pendingFinalizeTimer == null) return;
+    window.clearTimeout(this.pendingFinalizeTimer);
+    this.pendingFinalizeTimer = null;
+  }
+
+  private finalizePendingCue(): void {
+    this.clearPendingFinalize();
+    this.pendingCue = null;
+    this.pendingHistoryIndex = -1;
+  }
+
+  private renderPendingCue(): void {
+    const cue = this.pendingCue;
+    if (!cue) return;
+
+    if (this.pendingHistoryIndex >= 0 && this.cueHistory[this.pendingHistoryIndex]) {
+      this.cueHistory[this.pendingHistoryIndex] = cue;
+      this.historyIndex = this.pendingHistoryIndex;
+      this.renderAt(this.historyIndex);
+      return;
+    }
+
     this.cueHistory.push(cue);
     if (this.cueHistory.length > MAX_HISTORY) this.cueHistory.shift();
     this.historyIndex = this.cueHistory.length - 1;
-
-    if (this.pauseOnSub) {
-      getVideoElement()?.pause();
-    }
-
+    this.pendingHistoryIndex = this.historyIndex;
     this.renderAt(this.historyIndex);
   }
 
@@ -89,12 +179,13 @@ export class SubtitleOverlay {
   private async renderAt(idx: number): Promise<void> {
     const cue = this.cueHistory[idx];
     if (!cue) return;
+    const version = ++this.renderVersion;
 
     const targetEl = document.getElementById('cso-target');
     const nativeEl = document.getElementById('cso-native');
     if (!targetEl || !nativeEl) return;
 
-    targetEl.innerHTML = '<span class="cso-hint">Tokenizing…</span>';
+    targetEl.textContent = cue.text;
 
     // Tokenize via background
     const response = await browser.runtime.sendMessage({
@@ -104,6 +195,8 @@ export class SubtitleOverlay {
       knownLemmas: this.vocabCache.getKnownLemmas(),
       learningLemmas: this.vocabCache.getLearningLemmas(),
     });
+
+    if (version !== this.renderVersion) return;
 
     if (!response?.tokens?.length) {
       targetEl.textContent = cue.text;
@@ -136,6 +229,13 @@ export class SubtitleOverlay {
         span.className = 'cso-token';
         if (tok.is_content_word) {
           span.classList.add(`cso-${this.vocabCache.getStatus(tok.lemma)}`);
+          span.addEventListener('mouseenter', () => {
+            this.pauseForHover();
+            void this.popupManager.showForElement(span);
+          });
+          span.addEventListener('mouseleave', () => {
+            this.popupManager.hidePopup();
+          });
           span.addEventListener('click', e => {
             e.stopPropagation();
             this.popupManager.showForElement(span);
@@ -156,27 +256,10 @@ export class SubtitleOverlay {
     } else {
       nativeEl.style.display = 'none';
     }
-
-    // Prev/next button state
-    this.container.querySelector<HTMLButtonElement>('.cso-prev')!.disabled = idx === 0;
-    this.container.querySelector<HTMLButtonElement>('.cso-next')!.disabled = idx === this.cueHistory.length - 1;
-  }
-
-  private togglePause(): void {
-    this.pauseOnSub = !this.pauseOnSub;
-    const btn = this.container.querySelector('.cso-pause');
-    if (btn) btn.classList.toggle('cso-active', this.pauseOnSub);
-  }
-
-  private toggleNative(): void {
-    this.showNative = !this.showNative;
-    const btn = this.container.querySelector('.cso-native-toggle');
-    if (btn) btn.classList.toggle('cso-active', this.showNative);
-    const nativeEl = document.getElementById('cso-native');
-    if (nativeEl) nativeEl.style.display = this.showNative ? '' : 'none';
   }
 
   private async mineCurrentCue(): Promise<void> {
+    this.finalizePendingCue();
     if (this.miningInProgress || this.historyIndex < 0) return;
     const cue = this.cueHistory[this.historyIndex];
     if (!cue) return;
@@ -346,6 +429,84 @@ export class SubtitleOverlay {
     el.className = 'cso-mine-status' + (error ? ' cso-mine-error' : msg ? ' cso-mine-ok' : '');
   }
 
+  private bindPositionUpdates(): void {
+    window.addEventListener('resize', this.updatePositionBound, { passive: true });
+    window.addEventListener('scroll', this.updatePositionBound, { capture: true, passive: true });
+    document.addEventListener('fullscreenchange', this.updatePositionBound);
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(() => this.updatePosition());
+    }
+  }
+
+  private updatePosition(): void {
+    const video = getVideoElement();
+    if (!video) {
+      this.observedVideo = null;
+      this.resizeObserver?.disconnect();
+      this.applyViewportPosition();
+      return;
+    }
+
+    if (this.observedVideo !== video) {
+      this.resizeObserver?.disconnect();
+      this.resizeObserver?.observe(video);
+      this.observedVideo = video;
+    }
+
+    const rect = video.getBoundingClientRect();
+    const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+    if (rect.width < 20 || rect.height < 20 || viewportW <= 0 || viewportH <= 0) {
+      this.applyViewportPosition();
+      return;
+    }
+
+    const margin = 8;
+    const visibleLeft = Math.max(rect.left, margin);
+    const visibleRight = Math.min(rect.right, viewportW - margin);
+    const width = visibleRight - visibleLeft;
+    if (width < 20) {
+      this.applyViewportPosition();
+      return;
+    }
+    const visibleTop = clamp(rect.top, 0, viewportH);
+    const visibleBottom = clamp(rect.bottom, 0, viewportH);
+    const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+    const offset = Math.round(clamp(visibleHeight * 0.12, 34, 86));
+    const bottom = Math.max(margin, viewportH - visibleBottom + offset);
+
+    this.container.style.left = `${visibleLeft}px`;
+    this.container.style.width = `${width}px`;
+    this.container.style.bottom = `${bottom}px`;
+    this.container.style.transform = 'none';
+  }
+
+  private applyViewportPosition(): void {
+    this.container.style.left = '50%';
+    this.container.style.width = 'min(1180px, 92vw)';
+    this.container.style.bottom = window.innerWidth <= 720 ? '58px' : '86px';
+    this.container.style.transform = 'translateX(-50%)';
+  }
+
+  private pauseForHover(): void {
+    const video = getVideoElement();
+    if (!video || this.hoverPausedVideo === video) return;
+    if (!video.paused) {
+      video.pause();
+      this.hoverPausedVideo = video;
+    }
+  }
+
+  private resumeAfterHover(): void {
+    const video = this.hoverPausedVideo;
+    this.hoverPausedVideo = null;
+    if (!video || !video.paused) return;
+    void video.play().catch(() => {
+      // Browser autoplay policy or a streaming-player guard can reject resume;
+      // the user can still press play manually.
+    });
+  }
+
   private bindKeys(): void {
     this.keyHandler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
@@ -361,126 +522,162 @@ export class SubtitleOverlay {
 
   /** Hide the native subtitle container for a given selector. */
   hideNativeContainer(selector: string): void {
-    const el = document.querySelector<HTMLElement>(selector);
-    if (el) el.style.visibility = 'hidden';
+    document.querySelectorAll<HTMLElement>(selector).forEach((el) => {
+      el.style.visibility = 'hidden';
+    });
+    if (this.nativeHideStyles.some((entry) => entry.selector === selector)) return;
+    const style = document.createElement('style');
+    style.textContent = `${selector} { visibility: hidden !important; }`;
+    document.head.appendChild(style);
+    this.nativeHideStyles.push({ selector, element: style });
   }
 
   showNativeContainer(selector: string): void {
-    const el = document.querySelector<HTMLElement>(selector);
-    if (el) el.style.visibility = '';
+    document.querySelectorAll<HTMLElement>(selector).forEach((el) => {
+      el.style.visibility = '';
+    });
+    this.nativeHideStyles = this.nativeHideStyles.filter((entry) => {
+      if (entry.selector !== selector) return true;
+      entry.element.remove();
+      return false;
+    });
   }
 
   destroy(): void {
+    this.popupManager.hidePopup();
+    this.nativeHideStyles.forEach((entry) => entry.element.remove());
+    this.nativeHideStyles = [];
+    this.resumeAfterHover();
+    this.clearPendingFinalize();
+    this.resizeObserver?.disconnect();
+    window.removeEventListener('resize', this.updatePositionBound);
+    window.removeEventListener('scroll', this.updatePositionBound, true);
+    document.removeEventListener('fullscreenchange', this.updatePositionBound);
     this.container.remove();
     if (this.keyHandler) document.removeEventListener('keydown', this.keyHandler);
     document.getElementById('carve-sub-overlay-styles')?.remove();
   }
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function normalizeCue(cue: ActiveCue): ActiveCue | null {
+  const text = normalizeSubtitleText(cue.text);
+  if (!text) return null;
+  const nativeText = cue.nativeText ? normalizeSubtitleText(cue.nativeText) : undefined;
+  return { ...cue, text, nativeText };
+}
+
+function normalizeSubtitleText(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function isSentenceComplete(text: string): boolean {
+  return SENTENCE_END_RE.test(text.trim());
+}
+
+function shouldFinalizeCue(cue: ActiveCue): boolean {
+  return isSentenceComplete(cue.text) || cue.text.length >= MAX_CHUNK_CHARS;
+}
+
+function mergeOptionalSubtitleText(prev: string | undefined, next: string | undefined): string | undefined {
+  if (!prev) return next;
+  if (!next) return prev;
+  return mergeSubtitleText(prev, next);
+}
+
+function mergeSubtitleText(prev: string, next: string): string {
+  if (!prev) return next;
+  if (!next || next === prev) return prev;
+  if (next.startsWith(prev)) return next;
+  if (prev.startsWith(next)) return prev;
+  if (next.includes(prev)) return next;
+  if (prev.includes(next)) return prev;
+  return `${prev} ${next}`.replace(/\s+/g, ' ').trim();
+}
+
 const OVERLAY_STYLES = `
 #carve-sub-overlay {
   position: fixed;
-  bottom: 120px;
+  bottom: 86px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 2147483647;
-  background: linear-gradient(180deg, rgba(20,22,28,0.94), rgba(13,15,20,0.94));
-  border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 14px;
-  padding: 10px 18px 14px;
-  max-width: min(900px, 80vw);
-  min-width: 360px;
-  width: max-content;
+  width: min(1180px, 92vw);
+  padding: 0 18px;
   box-sizing: border-box;
   font-family: 'Noto Sans JP', 'Hiragino Sans', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  pointer-events: auto;
+  pointer-events: none;
   user-select: none;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04);
+  text-align: center;
 }
 
-.cso-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 8px;
-  opacity: 0.55;
-  transition: opacity 0.15s ease;
-}
-#carve-sub-overlay:hover .cso-bar { opacity: 1; }
-
-.cso-toggles {
-  display: flex;
-  gap: 0.4rem;
-}
-
-.cso-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 26px;
-  height: 26px;
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.10);
-  color: #aeb9cf;
-  border-radius: 7px;
-  padding: 0 0.55rem;
-  font-size: 0.72rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
-  line-height: 1;
-}
-.cso-btn:hover { background: rgba(255,255,255,0.14); color: #fff; }
-.cso-btn:disabled { opacity: 0.25; cursor: default; }
-.cso-btn.cso-active { background: rgba(76,175,80,0.22); border-color: rgba(76,175,80,0.7); color: #6ddf72; }
+.cso-lines { display: inline-block; pointer-events: auto; max-width: min(100%, 1180px); }
 
 .cso-target {
-  font-size: 1.7rem;
-  line-height: 1.5;
-  color: #f1f3f8;
+  font-size: 34px;
+  line-height: 1.25;
+  color: #fff;
   text-align: center;
-  min-height: 2rem;
-  letter-spacing: 0.01em;
-  font-weight: 500;
+  min-height: 42px;
+  letter-spacing: 0;
+  font-weight: 700;
   overflow-wrap: break-word;
   word-break: normal;
-  text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  text-shadow:
+    0 2px 2px #000,
+    0 -2px 2px #000,
+    2px 0 2px #000,
+    -2px 0 2px #000,
+    0 4px 10px rgba(0,0,0,0.95);
 }
-
-.cso-hint { color: #5a6478; font-size: 0.95rem; font-weight: 400; }
 
 .cso-token {
   cursor: default;
   border-radius: 3px;
-  transition: background 0.1s;
+  padding: 0 1px;
+  transition: background 0.08s, color 0.08s;
 }
-.cso-token.cso-unknown { color: #ff9b9b; cursor: pointer; }
-.cso-token.cso-learning { color: #ffc266; cursor: pointer; }
-.cso-token.cso-known { color: #f1f3f8; cursor: pointer; }
+.cso-token.cso-unknown { color: #ff9f9f; cursor: pointer; }
+.cso-token.cso-learning { color: #ffc46b; cursor: pointer; }
+.cso-token.cso-known { color: #fff; cursor: pointer; }
 .cso-token.cso-unknown:hover,
 .cso-token.cso-learning:hover,
-.cso-token.cso-known:hover { background: rgba(255,255,255,0.12); }
+.cso-token.cso-known:hover { background: rgba(0,0,0,0.52); }
 
 .cso-native {
-  font-size: 1rem;
-  color: #93a0bb;
+  font-size: 22px;
+  color: #fff;
   text-align: center;
-  margin-top: 6px;
-  line-height: 1.4;
+  margin-top: 8px;
+  line-height: 1.25;
+  font-weight: 650;
+  text-shadow:
+    0 2px 2px #000,
+    0 -2px 2px #000,
+    2px 0 2px #000,
+    -2px 0 2px #000,
+    0 4px 10px rgba(0,0,0,0.95);
 }
 
 .cso-mine-status {
-  font-size: 0.78rem;
+  font-size: 13px;
   text-align: center;
-  min-height: 1rem;
-  margin-top: 6px;
+  min-height: 18px;
+  margin-top: 8px;
   transition: color 0.2s;
-  font-weight: 500;
+  font-weight: 650;
+  text-shadow: 0 2px 6px #000;
 }
 .cso-mine-ok { color: #6ddf72; }
 .cso-mine-error { color: #ff6b6b; }
+
+@media (max-width: 720px) {
+  #carve-sub-overlay { bottom: 58px; width: 96vw; padding: 0 10px; }
+  .cso-target { font-size: 24px; min-height: 30px; }
+  .cso-native { font-size: 18px; }
+}
 `;

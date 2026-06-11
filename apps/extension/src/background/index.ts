@@ -1,5 +1,5 @@
 import { browser } from '../shared/browser';
-import { nlpTokenize, nlpLookup, createCard, logImmersion, getDueCount, getReviewSession, submitReviewEvent, translateText, selectMiningSentence, findSimilarCards, explainWord, getWordAudio, getWordImage } from '../shared/api';
+import { nlpTokenize, nlpLookup, createCard, markKnownWords, logImmersion, getDueCount, getReviewSession, submitReviewEvent, translateText, selectMiningSentence, findSimilarCards, explainWord, getWordAudio, getWordImage } from '../shared/api';
 import { getAccessToken, getApiBaseUrl, storageGet, storageSet, type OfflineReviewEvent, type CachedReviewCard } from '../shared/storage';
 import type { Message, MessageResponse } from '../shared/messages';
 
@@ -85,11 +85,18 @@ async function handleMessage(msg: Message): Promise<MessageResponse> {
       }
     }
 
-    case 'IGNORE_WORD': {
-      const ignored = (await storageGet('ignoredLemmas')) ?? [];
-      if (!ignored.includes(msg.lemma)) {
-        await storageSet('ignoredLemmas', [...ignored, msg.lemma]);
+    case 'MARK_KNOWN_WORD': {
+      await persistLemmaMembership(msg.lemma, 'known');
+      try {
+        await markKnownWords({ language: msg.languageCode, lemmas: [msg.lemma] });
+      } catch {
+        // Local knowledge still matters immediately; server sync is best-effort.
       }
+      return { type: 'MARK_KNOWN_WORD_RESULT', success: true };
+    }
+
+    case 'IGNORE_WORD': {
+      await persistLemmaMembership(msg.lemma, 'ignored');
       return { type: 'IGNORE_WORD_RESULT', success: true };
     }
 
@@ -355,6 +362,37 @@ async function handleMessage(msg: Message): Promise<MessageResponse> {
     default:
       return { type: 'AUTH_STATE', isLoggedIn: false };
   }
+}
+
+async function persistLemmaMembership(
+  lemma: string,
+  target: 'known' | 'learning' | 'ignored',
+): Promise<void> {
+  const [knownArr, learningArr, ignoredArr] = await Promise.all([
+    storageGet('knownLemmas'),
+    storageGet('learningLemmas'),
+    storageGet('ignoredLemmas'),
+  ]);
+  const known = new Set(knownArr ?? []);
+  const learning = new Set(learningArr ?? []);
+  const ignored = new Set(ignoredArr ?? []);
+
+  known.delete(lemma);
+  learning.delete(lemma);
+  ignored.delete(lemma);
+  if (target === 'known') {
+    known.add(lemma);
+  } else if (target === 'learning') {
+    learning.add(lemma);
+  } else {
+    ignored.add(lemma);
+  }
+
+  await Promise.all([
+    storageSet('knownLemmas', Array.from(known)),
+    storageSet('learningLemmas', Array.from(learning)),
+    storageSet('ignoredLemmas', Array.from(ignored)),
+  ]);
 }
 
 function dataURLToBlob(dataUrl: string): Blob {

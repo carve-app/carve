@@ -1,13 +1,24 @@
 # Deployment docs
 
+Phase 1 is the default production path:
+
+- Terraform creates the VM, managed Postgres, Cloudflare Pages, Cloudflare R2,
+  and DNS.
+- Docker Compose on the VM runs `api`, `nlp`, `media`, and Caddy.
+- GitHub Actions builds service images, pushes them to GHCR, and SSH deploys to
+  the VM.
+
 | Doc | Read when |
 |---|---|
-| [api-keys.md](./api-keys.md) | Need to register an external service or rotate a key |
-| [runbook.md](./runbook.md) | Bootstrapping a new environment, doing day-2 ops, or breaking glass |
+| [phase1.md](./phase1.md) | Provision, deploy, operate, or roll back Phase 1 |
+| [api-keys.md](./api-keys.md) | Register or rotate external service keys |
+| [runbook.md](./runbook.md) | Looking for the old runbook path |
 
-Infrastructure-as-code lives in [`/infra/terraform/`](../../infra/terraform/) — see its README for layout and scaling levers.
+GitHub Actions workflows:
 
-GitHub Actions workflows for deploy:
-- `.github/workflows/deploy.yml` — backend services (api, nlp, media) → ECR + ECS
-- `.github/workflows/deploy-web.yml` — SvelteKit web app → Cloudflare Pages
-- `.github/workflows/terraform.yml` — Terraform plan on PR, apply on merge to main
+- `.github/workflows/terraform.yml` — Terraform plan on PR, manual apply only
+- `.github/workflows/deploy-phase1.yml` — backend images to GHCR, deploy to VM
+- `.github/workflows/deploy-web.yml` — SvelteKit web app to Cloudflare Pages
+
+The old ECS/Fargate/ALB/Redis stack has been removed. Scale up only when usage
+asks for it.

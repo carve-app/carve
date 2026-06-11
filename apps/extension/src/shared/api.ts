@@ -145,6 +145,23 @@ export async function createCard(params: {
 }
 
 /**
+ * Mark lemmas as known without creating cards.
+ */
+export async function markKnownWords(params: {
+  language: string;
+  lemmas: string[];
+}): Promise<{ marked: number }> {
+  const response = await apiFetch('/v1/onboarding/known-words', {
+    method: 'POST',
+    body: JSON.stringify({
+      language: params.language,
+      lemmas: params.lemmas,
+    }),
+  });
+  return response.json();
+}
+
+/**
  * Get cards with optional filters.
  */
 export async function getCards(

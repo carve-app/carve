@@ -54,7 +54,7 @@ async function init(): Promise<void> {
   // Re-check: a disable toggle could have raced the async load above.
   if (!active) return;
 
-  const popupManager = new PopupManager(vocabCache);
+  const popupManager = new PopupManager(lang, vocabCache);
   immersionTracker = new ImmersionTracker(lang);
 
   subtitleHook = new SubtitleHook(lang, vocabCache, popupManager);

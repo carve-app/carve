@@ -1,71 +1,73 @@
-# Carve — AWS infrastructure (Terraform)
+# Carve Phase 1 infrastructure
 
-Sizing: **solo/demo** (~$25–40/mo cloud bill, see `docs/13-infrastructure-costs.md`). Resources scale up by tuning the variables in `variables.tf` and re-applying.
+This stack provisions the practical alpha deployment:
 
-## Layout
+- one Ubuntu VM for Docker Compose (`api`, `nlp`, `media`, Caddy)
+- private AWS RDS Postgres
+- Cloudflare Pages project and custom domains for the web app
+- Cloudflare R2 buckets for media and database backups
+- Cloudflare DNS for `api` and `media-upload`
 
-```
-bootstrap/              # one-time: TF state bucket + DynamoDB lock
-versions.tf             # providers + backend declaration
-variables.tf            # input variables
-main.tf                 # locals + shared data sources
-network.tf              # VPC, subnets, security groups
-ecr.tf                  # 3 image repos
-rds.tf                  # Postgres
-redis.tf                # ElastiCache
-iam.tf                  # ECS roles
-secrets.tf              # SSM Parameter Store (placeholders for 3p keys)
-alb.tf                  # ALB + ACM cert (DNS-validated via Cloudflare)
-ecs.tf                  # Cluster, task defs, services, log groups
-ses.tf                  # Email sending domain + SMTP user
-cloudflare.tf           # R2 bucket, DNS, edge cache rules
-github_oidc.tf          # GitHub Actions deploy role
-outputs.tf
-```
+It intentionally does not create ECS, ECR, ALB, ElastiCache/Redis, NAT gateways,
+or Kubernetes.
 
-## First-time bootstrap
+## First apply
 
 ```sh
-# 1. State bucket (local backend)
 cd infra/terraform/bootstrap
 terraform init
 terraform apply
+```
 
-# Copy the backend_hcl output into ../backend.hcl
+Copy the `backend_hcl` output into `../backend.hcl`, then:
 
+```sh
 cd ..
-terraform init -backend-config=backend.hcl
-
 cp terraform.tfvars.example terraform.tfvars
-$EDITOR terraform.tfvars   # set cloudflare ids
+$EDITOR terraform.tfvars
 
-export CLOUDFLARE_API_TOKEN=...        # see docs/deploy/api-keys.md
-export AWS_PROFILE=carve-admin         # any IAM principal with Admin
+export AWS_PROFILE=carve-admin
+export CLOUDFLARE_API_TOKEN=cf_...
 
+terraform init -backend-config=backend.hcl
 terraform plan
 terraform apply
 ```
 
-After the first apply, the **placeholder** SSM secrets need real values (see `docs/deploy/api-keys.md`):
+The first apply takes roughly 15 minutes because RDS is the slow part.
+
+## Outputs to copy
 
 ```sh
-aws ssm put-parameter --name /carve/prod/STRIPE_SECRET_KEY --value 'sk_live_...' --overwrite --type SecureString
-aws ssm put-parameter --name /carve/prod/DEEPL_API_KEY     --value '...'         --overwrite --type SecureString
-# etc.
+terraform output -raw phase1_host
+terraform output -raw phase1_user
+terraform output -raw phase1_app_dir
+terraform output -raw github_terraform_role_arn
+terraform output -raw r2_media_bucket_name
+terraform output -raw r2_backup_bucket_name
+terraform output -raw media_public_url
+terraform output -raw database_url
 ```
 
-Then trigger the CI deploy workflow to push images and roll the ECS services.
+Use them in `deploy/phase1/.env` and GitHub Actions secrets as described in
+[`docs/deploy/phase1.md`](../../docs/deploy/phase1.md).
 
-## Scaling up
+## Cloudflare R2 custom domain
 
-| Tier | Set in `terraform.tfvars` |
-|---|---|
-| 1k MAU | `ecs_task_cpu = 512`, `ecs_task_memory = 1024`, `ecs_desired_count = 1`, `rds_instance_class = "db.t4g.small"` |
-| 100k MAU | `ecs_desired_count = 3`, `rds_instance_class = "db.r6g.xlarge"`, set `aws_db_instance.postgres.multi_az = true` in `rds.tf`, switch ElastiCache to `aws_elasticache_replication_group` |
+With the pinned Cloudflare v4 provider, Terraform can create R2 buckets but not
+attach a bucket custom domain. After apply, connect `media.carve.app` to the
+media bucket in the Cloudflare dashboard, then set `R2_PUBLIC_BASE` to the
+`media_public_url` output.
 
-## Manual one-time steps (cannot be Terraformed)
+## GitHub Terraform workflow
 
-1. **Cloudflare R2 custom domain** for `media.carve.app` — set in the R2 dashboard once the bucket exists (the Cloudflare TF provider doesn't yet support this resource).
-2. **SES production access request** — the SES console has a "Request production access" button. Until granted, mail only goes to verified addresses.
-3. **Cloudflare Pages — connect to GitHub** — one-click OAuth handshake in the Pages dashboard. The deploy workflow then pushes builds.
-4. **Stripe webhook endpoint** — register `https://api.carve.app/v1/billing/webhook` in the Stripe dashboard, paste the signing secret into `STRIPE_WEBHOOK_SECRET`.
+The first apply must be local because GitHub needs an AWS role before it can run
+Terraform. After the first apply, set:
+
+- `AWS_TF_ROLE_ARN` = `terraform output -raw github_terraform_role_arn`
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_ZONE_ID`
+- `PHASE1_SSH_PUBLIC_KEY`
+
+Then `.github/workflows/terraform.yml` can run plans on PRs and manual applies.

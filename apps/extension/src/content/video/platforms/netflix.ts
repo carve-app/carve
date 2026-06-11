@@ -1,5 +1,6 @@
 import type { SubtitleOverlay } from '../SubtitleOverlay';
 import { extractNativeCueText } from './nativeText';
+import { readAnyActiveTextTrackTiming, readTargetTextTrackCue } from './textTrackCue';
 
 const NATIVE_SELECTOR = '.player-timedtext';
 // Netflix renders each span of dialogue in .player-timedtext-text-container spans
@@ -7,6 +8,7 @@ const TEXT_SELECTOR = '.player-timedtext-text-container';
 
 export class NetflixHook {
   private observer: MutationObserver | null = null;
+  private pollId: number | null = null;
   private lastText = '';
 
   constructor(private overlay: SubtitleOverlay, private lang: string = '') {}
@@ -17,26 +19,27 @@ export class NetflixHook {
 
     this.observer = new MutationObserver(() => this.checkSubtitle());
     this.observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    this.pollId = window.setInterval(() => this.checkSubtitle(), 300);
 
     // Process any already-visible subtitle
     this.checkSubtitle();
   }
 
   private checkSubtitle(): void {
+    const video = document.querySelector<HTMLVideoElement>('video');
     const els = document.querySelectorAll<HTMLElement>(TEXT_SELECTOR);
-    if (!els.length) return;
-
-    const text = Array.from(els)
+    const domText = Array.from(els)
       .map(el => el.textContent?.trim() ?? '')
       .filter(Boolean)
       .join(' ');
+    const trackCue = readTargetTextTrackCue(video, this.lang);
+    const text = domText || trackCue?.text || '';
 
     if (!text || text === this.lastText) return;
     this.lastText = text;
 
     // Attempt to get timing from the video's text track
-    const video = document.querySelector<HTMLVideoElement>('video');
-    const { startMs, endMs } = this.getActiveCueTiming(video);
+    const { startMs, endMs } = domText ? this.getActiveCueTiming(video) : trackCue ?? defaultTiming();
     const nativeText = extractNativeCueText(video, this.lang);
 
     this.overlay.onCue({ text, startMs, endMs, nativeText });
@@ -44,6 +47,8 @@ export class NetflixHook {
 
   private getActiveCueTiming(video: HTMLVideoElement | null): { startMs: number; endMs: number } {
     if (!video) return defaultTiming();
+    const timing = readAnyActiveTextTrackTiming(video);
+    if (timing) return timing;
 
     for (let i = 0; i < video.textTracks.length; i++) {
       const track = video.textTracks[i];
@@ -61,6 +66,7 @@ export class NetflixHook {
 
   unmount(): void {
     this.observer?.disconnect();
+    if (this.pollId != null) window.clearInterval(this.pollId);
     this.overlay.showNativeContainer(NATIVE_SELECTOR);
   }
 }

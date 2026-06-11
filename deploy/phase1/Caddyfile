@@ -1,0 +1,31 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$API_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	reverse_proxy api:8080
+}
+
+# Prefer R2 custom-domain reads for user media:
+#   R2_PUBLIC_BASE=https://media.carve.app
+# This upload domain is kept for health checks, local-storage fallback, and
+# emergency debugging. The API uploads to media internally over http://media:8002.
+{$MEDIA_UPLOAD_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	reverse_proxy media:8002
+}

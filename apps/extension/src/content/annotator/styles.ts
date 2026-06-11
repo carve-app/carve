@@ -83,6 +83,14 @@ export function injectStyles(): void {
     #carve-popup .carve-defs {
       margin: 8px 0;
     }
+    #carve-popup .carve-section-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #6b7a99;
+      margin-top: 8px;
+      margin-bottom: 3px;
+    }
     #carve-popup .carve-def {
       margin: 3px 0;
       font-size: 13px;
@@ -120,7 +128,8 @@ export function injectStyles(): void {
     }
     #carve-popup button:hover { opacity: 0.85; }
     #carve-popup .btn-mine { background: #4CAF50; color: white; }
-    #carve-popup .btn-ignore { background: #37404e; color: #9ba8c0; }
+    #carve-popup .btn-known { background: #37404e; color: #d7deef; }
+    #carve-popup .btn-ignore { background: #2a303b; color: #9ba8c0; }
     #carve-popup .carve-sentence {
       font-size: 11px;
       color: #6b7a99;

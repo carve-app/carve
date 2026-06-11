@@ -5,38 +5,36 @@ resource "random_password" "db" {
 
 resource "aws_db_subnet_group" "main" {
   name       = "${local.name_prefix}-db"
-  subnet_ids = aws_subnet.public[*].id
+  subnet_ids = aws_subnet.database[*].id
 }
 
 resource "aws_db_instance" "postgres" {
   identifier        = "${local.name_prefix}-pg"
   engine            = "postgres"
-  engine_version    = "16.4"
-  instance_class    = var.rds_instance_class
-  allocated_storage = var.rds_allocated_storage_gb
+  engine_version    = var.db_engine_version
+  instance_class    = var.db_instance_class
+  allocated_storage = var.db_allocated_storage_gb
   storage_type      = "gp3"
   storage_encrypted = true
 
-  db_name  = "carve"
-  username = "carve"
+  db_name  = var.db_name
+  username = var.db_username
   password = random_password.db.result
 
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
   publicly_accessible    = false
 
-  backup_retention_period = 7
+  backup_retention_period = var.db_backup_retention_days
   backup_window           = "03:00-04:00"
   maintenance_window      = "Mon:04:00-Mon:05:00"
-  skip_final_snapshot     = var.env != "prod"
-  deletion_protection     = var.env == "prod"
+  deletion_protection     = var.db_deletion_protection
+  skip_final_snapshot     = true
 
   performance_insights_enabled = false
-  apply_immediately            = false
+  apply_immediately            = var.db_apply_immediately
 }
 
-# Connection string for services. Stored in SSM (see secrets.tf) so task
-# definitions can inject it via the `secrets` block.
 locals {
-  database_url = "postgres://carve:${random_password.db.result}@${aws_db_instance.postgres.endpoint}/carve?sslmode=require"
+  database_url = "postgres://${var.db_username}:${random_password.db.result}@${aws_db_instance.postgres.address}:${aws_db_instance.postgres.port}/${var.db_name}?sslmode=require"
 }

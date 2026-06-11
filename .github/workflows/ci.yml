@@ -500,9 +500,15 @@ jobs:
         run: |
           go build -o ../api-bin ./cmd/api
           ../api-bin &
-          for i in $(seq 1 30); do
-            curl -sf http://127.0.0.1:8090/health && break || sleep 1
+          for attempt in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8090/health; then
+              exit 0
+            fi
+            echo "Waiting for API health... ($attempt/30)"
+            sleep 1
           done
+          echo "API did not become healthy in time"
+          exit 1
       - name: Install schemathesis
         run: pip install schemathesis
       - name: Run contract fuzz

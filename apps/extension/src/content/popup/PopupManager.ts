@@ -6,7 +6,10 @@ export class PopupManager {
   private popup: HTMLElement | null = null;
   private currentToken: HTMLElement | null = null;
 
-  constructor(private vocabCache: VocabCache) {
+  constructor(
+    private language: string,
+    private vocabCache: VocabCache,
+  ) {
     this.setupListeners();
   }
 
@@ -44,7 +47,7 @@ export class PopupManager {
     const response = await browser.runtime.sendMessage({
       type: 'LOOKUP',
       surface: lemma,
-      language: 'ja',
+      language: this.language,
     });
 
     if (this.currentToken !== tokenEl) return;
@@ -60,9 +63,12 @@ export class PopupManager {
     _status: string,
   ): void {
     const popup = this.getOrCreatePopup();
+    const readingHtml = shouldShowReading(this.language, reading)
+      ? `<div class="carve-reading">${escapeHtml(reading)}</div>`
+      : '';
     popup.innerHTML = `
       <div class="carve-word">${escapeHtml(surface)}</div>
-      <div class="carve-reading">${escapeHtml(reading)}</div>
+      ${readingHtml}
       <div class="carve-defs"><span style="color:#6b7a99">Loading…</span></div>
     `;
     this.positionPopup(tokenEl);
@@ -77,9 +83,10 @@ export class PopupManager {
     entry: DictEntry | null,
   ): void {
     const popup = this.getOrCreatePopup();
+    const isJapanese = this.language === 'ja';
 
     const furiganaHtml =
-      entry?.furigana?.length
+      isJapanese && entry?.furigana?.length
         ? buildFurigana(entry.furigana)
         : `<span>${escapeHtml(surface)}</span>`;
 
@@ -101,27 +108,30 @@ export class PopupManager {
       : '';
     const freqHtml = frequencyBandHtml(entry?.frequency_rank ?? null);
     const morae = (entry?.reading ?? reading).length || 1;
-    const pitchHtml = entry?.pitch_accent != null
+    const pitchHtml = isJapanese && entry?.pitch_accent != null
       ? pitchSvg(entry.pitch_accent, morae)
       : '';
 
     const sentence = getSurroundingSentence(tokenEl);
     const audioReading = entry?.reading ?? reading;
+    const readingHtml = popupMetaHtml(this.language, audioReading, jlptHtml, freqHtml, pitchHtml);
 
     popup.innerHTML = `
       <div>
         <div class="carve-furigana">${furiganaHtml}</div>
-        <div class="carve-reading">${escapeHtml(audioReading)}${jlptHtml}${freqHtml}${pitchHtml}<button class="carve-audio-btn" title="Play audio" aria-label="Play word audio" style="display:none;flex:0 0 auto;width:22px;height:22px;padding:0;margin-left:6px;border:none;border-radius:50%;background:#37404e;color:#cdd6e8;font-size:11px;line-height:22px;cursor:pointer;vertical-align:middle">▶</button></div>
+        ${readingHtml}
         <span class="carve-status ${escapeHtml(status)}">${escapeHtml(status)}</span>
         <img class="carve-word-image" alt="" style="display:none;max-width:120px;max-height:120px;border-radius:8px;margin-top:8px" />
+        <div class="carve-section-label">Meaning</div>
         <div class="carve-defs">${defsHtml}</div>
         <div class="carve-ai" style="display:none;margin-top:8px;padding-top:6px;border-top:1px solid #2d3344">
-          <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.04em;color:#6b7a99;margin-bottom:3px">AI explanation</div>
+          <div class="carve-section-label">In this sentence</div>
           <div class="carve-ai-body" style="font-size:12px;color:#b8c2d8;line-height:1.45"></div>
         </div>
         ${sentence ? `<div class="carve-sentence">${escapeHtml(sentence)}</div>` : ''}
         <div class="carve-actions">
           <button class="btn-mine" data-lemma="${escapeHtml(lemma)}" data-sentence="${escapeHtml(sentence ?? '')}">Mine</button>
+          <button class="btn-known" data-lemma="${escapeHtml(lemma)}">I know this</button>
           <button class="btn-ignore" data-lemma="${escapeHtml(lemma)}">Ignore</button>
         </div>
       </div>
@@ -131,9 +141,8 @@ export class PopupManager {
     // plays it via the Audio API. Best-effort — silently stays hidden on failure.
     this.loadWordAudio(popup, tokenEl, lemma, audioReading);
 
-    // Lazy-load the AI contextual explanation. Reveals the section with a subtle
-    // "explaining…" placeholder, then the text; the whole section stays hidden
-    // when the server returns null (e.g. no API key configured).
+    // Lazy-load the AI contextual explanation. The section stays hidden unless
+    // the server returns text (e.g. when an API key is configured).
     this.loadExplanation(popup, tokenEl, lemma, sentence);
 
     // Lazily fetch a best-effort dictionary image. Only show the slot if a URL
@@ -152,13 +161,24 @@ export class PopupManager {
       this.showMineForm(popup, tokenEl, lemma, entry?.reading ?? reading, entry, sentence, candidates);
     });
 
+    popup.querySelector('.btn-known')?.addEventListener('click', async () => {
+      await browser.runtime.sendMessage({
+        type: 'MARK_KNOWN_WORD',
+        lemma,
+        languageCode: this.language,
+      });
+      await this.vocabCache.markKnown(lemma);
+      tokenEl.setAttribute('data-status', 'known');
+      this.hidePopup();
+    });
+
     popup.querySelector('.btn-ignore')?.addEventListener('click', async () => {
       await browser.runtime.sendMessage({
         type: 'IGNORE_WORD',
         lemma,
-        languageCode: 'ja',
+        languageCode: this.language,
       });
-      await this.vocabCache.markKnown(lemma);
+      await this.vocabCache.markIgnored(lemma);
       tokenEl.setAttribute('data-status', 'known');
       this.hidePopup();
     });
@@ -180,7 +200,7 @@ export class PopupManager {
     if (!reading) return;
     browser.runtime.sendMessage({
       type: 'WORD_AUDIO',
-      language: 'ja',
+      language: this.language,
       lemma,
       reading,
     })
@@ -189,6 +209,8 @@ export class PopupManager {
         if (!url || this.currentToken !== tokenEl) return;
         const btn = popup.querySelector<HTMLButtonElement>('.carve-audio-btn');
         if (!btn) return;
+        const meta = btn.closest<HTMLElement>('.carve-reading');
+        if (meta) meta.style.display = '';
         btn.style.display = 'inline-block';
         let audio: HTMLAudioElement | null = null;
         btn.addEventListener('click', (e) => {
@@ -202,9 +224,8 @@ export class PopupManager {
   }
 
   /**
-   * Lazy-load an AI contextual explanation. Reveals the section with an
-   * "explaining…" placeholder while the request is in flight, then swaps in the
-   * text. If the server returns null (e.g. no API key) the section is hidden.
+   * Lazy-load an AI contextual explanation. If the server returns null (e.g. no
+   * API key) the section stays hidden.
    */
   private loadExplanation(
     popup: HTMLElement,
@@ -217,16 +238,11 @@ export class PopupManager {
     const body = popup.querySelector<HTMLElement>('.carve-ai-body');
     if (!section || !body) return;
 
-    section.style.display = 'block';
-    body.textContent = 'explaining…';
-    body.style.fontStyle = 'italic';
-    body.style.color = '#6b7a99';
-
     browser.runtime.sendMessage({
       type: 'EXPLAIN_WORD',
       word: lemma,
       sentence,
-      language: 'ja',
+      language: this.language,
     })
       .then((res) => {
         if (this.currentToken !== tokenEl) return;
@@ -239,6 +255,7 @@ export class PopupManager {
         body.textContent = explanation;
         body.style.fontStyle = 'normal';
         body.style.color = '#b8c2d8';
+        section.style.display = 'block';
       })
       .catch(() => {
         section.style.display = 'none';
@@ -255,7 +272,7 @@ export class PopupManager {
       const result = await browser.runtime.sendMessage({
         type: 'WORD_IMAGE',
         word: lemma,
-        language: 'ja',
+        language: this.language,
       });
       const url: string | null = result?.imageUrl ?? null;
       // Bail if the popup moved on to another token while we were fetching.
@@ -279,6 +296,7 @@ export class PopupManager {
     if (!this.popup) {
       this.popup = document.createElement('div');
       this.popup.id = 'carve-popup';
+      this.popup.setAttribute('data-carve', 'ui');
       document.body.appendChild(this.popup);
     }
     return this.popup;
@@ -330,7 +348,7 @@ export class PopupManager {
 
     // Kick off translation in background — will fill in async
     if (sentence) {
-      browser.runtime.sendMessage({ type: 'TRANSLATE', text: sentence, sourceLanguage: 'ja' })
+      browser.runtime.sendMessage({ type: 'TRANSLATE', text: sentence, sourceLanguage: this.language })
         .then((result) => {
           const t = result?.translation as string | null;
           const el = popup.querySelector<HTMLInputElement>('#mine-translation');
@@ -373,7 +391,7 @@ export class PopupManager {
       if (!sourceSentence || sourceSentence.length < 4) return;
       browser.runtime.sendMessage({
         type: 'FIND_SIMILAR_CARDS',
-        languageCode: 'ja',
+        languageCode: this.language,
         sentence: sourceSentence,
       })
         .then((res) => {
@@ -407,7 +425,7 @@ export class PopupManager {
         type: 'SELECT_SENTENCE',
         candidates: all,
         targetLemma: lemma,
-        language: 'ja',
+        language: this.language,
         knownLemmas: this.vocabCache.getKnownLemmas(),
         learningLemmas: this.vocabCache.getLearningLemmas(),
       })
@@ -459,7 +477,7 @@ export class PopupManager {
         translation: mineTranslation,
         sentence: mineSentence,
         sourceUrl: window.location.href,
-        languageCode: 'ja',
+        languageCode: this.language,
       });
 
       const isVideoPage = /netflix\.com\/watch|youtube\.com\/watch|youtu\.be\//.test(window.location.href);
@@ -508,6 +526,36 @@ export function escapeHtml(s: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function shouldShowReading(language: string, reading: string): boolean {
+  return Boolean(reading) && !isOrthographicReadingLanguage(language);
+}
+
+function isOrthographicReadingLanguage(language: string): boolean {
+  return language === 'en' || language === 'de' || language === 'es' || language === 'fr' ||
+    language === 'it' || language === 'pt' || language === 'vi';
+}
+
+function audioButtonHtml(): string {
+  return '<button class="carve-audio-btn" title="Play audio" aria-label="Play word audio" style="display:none;flex:0 0 auto;width:22px;height:22px;padding:0;margin-left:6px;border:none;border-radius:50%;background:#37404e;color:#cdd6e8;font-size:11px;line-height:22px;cursor:pointer;vertical-align:middle">▶</button>';
+}
+
+function popupMetaHtml(
+  language: string,
+  reading: string,
+  jlptHtml: string,
+  freqHtml: string,
+  pitchHtml: string,
+): string {
+  const button = audioButtonHtml();
+  if (shouldShowReading(language, reading)) {
+    return `<div class="carve-reading">${escapeHtml(reading)}${jlptHtml}${freqHtml}${pitchHtml}${button}</div>`;
+  }
+
+  const metadata = `${jlptHtml}${freqHtml}${pitchHtml}`;
+  const hidden = metadata ? '' : ' style="display:none"';
+  return `<div class="carve-reading carve-reading-meta"${hidden}>${metadata}${button}</div>`;
 }
 
 /**

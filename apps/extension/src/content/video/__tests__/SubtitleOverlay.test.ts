@@ -9,7 +9,7 @@
  * stubs chrome.runtime.sendMessage and the DOM elements the class touches.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // ── Stub browser API via vi.mock so it's available at import time ─────────────
 // vi.hoisted runs before any imports; vi.mock is hoisted automatically.
@@ -47,9 +47,16 @@ describe('SubtitleOverlay — cue history', () => {
 
   beforeEach(() => {
     document.body.innerHTML = '';
+    document.head.innerHTML = '';
     mockSendMessage.mockClear();
+    mockPopupManager.showForElement.mockClear();
+    mockPopupManager.hidePopup.mockClear();
     // SubtitleOverlay appends itself to body in constructor
     overlay = new SubtitleOverlay('ja', mockVocabCache as any, mockPopupManager as any);
+  });
+
+  afterEach(() => {
+    overlay.destroy();
   });
 
   it('appends cues to history', () => {
@@ -65,12 +72,9 @@ describe('SubtitleOverlay — cue history', () => {
     for (let i = 0; i < 35; i++) {
       overlay.onCue(cue(`cue${i}`));
     }
-    // historyIndex is private; we infer trimming worked if no error
-    // and the prev button state reflects being at the latest entry
-    const prevBtn = document.querySelector<HTMLButtonElement>('.cso-prev');
-    expect(prevBtn).not.toBeNull();
-    // After 35 cues, prev should be enabled (not at index 0 of 30-item buffer)
-    // (vitest+jsdom does not process click events, but button exists)
+    // historyIndex is private; we infer trimming worked if no error and the
+    // caption overlay is still mounted after more cues than the history cap.
+    expect(document.getElementById('carve-sub-overlay')).not.toBeNull();
   });
 
   it('destroy removes overlay from DOM and cleans up', () => {
@@ -95,6 +99,7 @@ describe('SubtitleOverlay — cue history', () => {
     document.body.appendChild(el);
     overlay.hideNativeContainer('.native-subs');
     expect(el.style.visibility).toBe('hidden');
+    expect(document.head.textContent).toContain('.native-subs { visibility: hidden !important; }');
   });
 
   it('showNativeContainer restores visibility', () => {
@@ -102,12 +107,114 @@ describe('SubtitleOverlay — cue history', () => {
     el.className = 'native-subs';
     el.style.visibility = 'hidden';
     document.body.appendChild(el);
+    overlay.hideNativeContainer('.native-subs');
     overlay.showNativeContainer('.native-subs');
     expect(el.style.visibility).toBe('');
+    expect(document.head.textContent).not.toContain('.native-subs { visibility: hidden !important; }');
   });
 
   it('hideNativeContainer is a no-op when selector matches nothing', () => {
     expect(() => overlay.hideNativeContainer('.nonexistent')).not.toThrow();
+  });
+});
+
+// ── Video-relative positioning ───────────────────────────────────────────────
+
+describe('SubtitleOverlay — positioning', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    document.head.innerHTML = '';
+    mockSendMessage.mockClear();
+    mockPopupManager.showForElement.mockClear();
+    mockPopupManager.hidePopup.mockClear();
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });
+  });
+
+  it('centers the subtitle layer over the video rect, not the viewport', () => {
+    let rect = {
+      left: 120,
+      top: 90,
+      right: 760,
+      bottom: 450,
+      width: 640,
+      height: 360,
+      x: 120,
+      y: 90,
+      toJSON: () => ({}),
+    } as DOMRect;
+    const video = document.createElement('video') as HTMLVideoElement;
+    video.getBoundingClientRect = vi.fn(() => rect);
+    document.body.appendChild(video);
+
+    const overlay = new SubtitleOverlay('en', mockVocabCache as any, mockPopupManager as any);
+    const el = document.getElementById('carve-sub-overlay')!;
+    expect(el.style.left).toBe('120px');
+    expect(el.style.width).toBe('640px');
+    expect(el.style.bottom).toBe('493px');
+    expect(el.style.transform).toBe('none');
+
+    rect = {
+      left: 40,
+      top: 0,
+      right: 540,
+      bottom: 500,
+      width: 500,
+      height: 500,
+      x: 40,
+      y: 0,
+      toJSON: () => ({}),
+    } as DOMRect;
+    window.dispatchEvent(new Event('resize'));
+    expect(el.style.left).toBe('40px');
+    expect(el.style.width).toBe('500px');
+    expect(el.style.bottom).toBe('460px');
+
+    overlay.destroy();
+  });
+});
+
+// ── Cue stabilizer ───────────────────────────────────────────────────────────
+
+describe('SubtitleOverlay — cue stabilizer', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    document.head.innerHTML = '';
+    mockSendMessage.mockClear();
+    mockPopupManager.showForElement.mockClear();
+    mockPopupManager.hidePopup.mockClear();
+    mockSendMessage.mockResolvedValue({ tokens: [] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('renders partial subtitle updates immediately as the cue grows', () => {
+    const overlay = new SubtitleOverlay('en', mockVocabCache as any, mockPopupManager as any);
+    overlay.onCue(cue('I had', 0, 500));
+    expect(document.getElementById('cso-target')?.textContent).toBe('I had');
+
+    overlay.onCue(cue('I had a conversation', 0, 1000));
+    expect(document.getElementById('cso-target')?.textContent).toBe('I had a conversation');
+    overlay.destroy();
+  });
+
+  it('renders complete sentences immediately', () => {
+    const overlay = new SubtitleOverlay('en', mockVocabCache as any, mockPopupManager as any);
+    overlay.onCue(cue('I had a conversation.', 0, 1000));
+    expect(document.getElementById('cso-target')?.textContent).toBe('I had a conversation.');
+    overlay.destroy();
+  });
+
+  it('renders the next partial immediately after a finalized sentence', () => {
+    const overlay = new SubtitleOverlay('en', mockVocabCache as any, mockPopupManager as any);
+    overlay.onCue(cue('First sentence.', 0, 1000));
+    expect(document.getElementById('cso-target')?.textContent).toBe('First sentence.');
+
+    overlay.onCue(cue('Second', 1200, 1800));
+    expect(document.getElementById('cso-target')?.textContent).toBe('Second');
+    overlay.destroy();
   });
 });
 
@@ -116,13 +223,16 @@ describe('SubtitleOverlay — cue history', () => {
 describe('SubtitleOverlay — onCue sends TOKENIZE message', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
+    document.head.innerHTML = '';
     mockSendMessage.mockClear();
+    mockPopupManager.showForElement.mockClear();
+    mockPopupManager.hidePopup.mockClear();
     mockSendMessage.mockResolvedValue({ tokens: [] });
   });
 
   it('sends TOKENIZE to background on each cue', async () => {
     const overlay = new SubtitleOverlay('ja', mockVocabCache as any, mockPopupManager as any);
-    overlay.onCue(cue('食べる'));
+    overlay.onCue(cue('食べる。'));
 
     // Wait for the async renderAt call
     await new Promise(r => setTimeout(r, 0));
@@ -130,7 +240,7 @@ describe('SubtitleOverlay — onCue sends TOKENIZE message', () => {
     expect(mockSendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         type: 'TOKENIZE',
-        text: '食べる',
+        text: '食べる。',
         language: 'ja',
       }),
     );
@@ -140,11 +250,11 @@ describe('SubtitleOverlay — onCue sends TOKENIZE message', () => {
   it('falls back to raw text when TOKENIZE returns no tokens', async () => {
     mockSendMessage.mockResolvedValue(null);
     const overlay = new SubtitleOverlay('ja', mockVocabCache as any, mockPopupManager as any);
-    overlay.onCue(cue('テスト'));
+    overlay.onCue(cue('テスト。'));
     await new Promise(r => setTimeout(r, 0));
 
     const target = document.getElementById('cso-target');
-    expect(target?.textContent).toContain('テスト');
+    expect(target?.textContent).toContain('テスト。');
     overlay.destroy();
   });
 
@@ -176,6 +286,36 @@ describe('SubtitleOverlay — onCue sends TOKENIZE message', () => {
     expect(target?.querySelectorAll('[data-carve="token"]').length).toBe(7);
     overlay.destroy();
   });
+
+  it('pauses video and shows popup immediately when hovering a subtitle token', async () => {
+    mockSendMessage.mockResolvedValue({
+      tokens: [
+        { surface: '勉強', lemma: '勉強', reading_hira: 'べんきょう', is_content_word: true },
+      ],
+    });
+
+    const video = document.createElement('video') as HTMLVideoElement;
+    let paused = false;
+    Object.defineProperty(video, 'paused', { configurable: true, get: () => paused });
+    video.pause = vi.fn(() => { paused = true; });
+    video.play = vi.fn(() => { paused = false; return Promise.resolve(); });
+    document.body.appendChild(video);
+
+    const overlay = new SubtitleOverlay('ja', mockVocabCache as any, mockPopupManager as any);
+    overlay.onCue(cue('勉強。'));
+    await new Promise(r => setTimeout(r, 0));
+
+    const token = document.querySelector<HTMLElement>('.cso-token.cso-unknown');
+    expect(token).not.toBeNull();
+    token!.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(video.pause).toHaveBeenCalled();
+    expect(mockPopupManager.showForElement).toHaveBeenCalledWith(token);
+
+    document.querySelector<HTMLElement>('.cso-lines')!.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(mockPopupManager.hidePopup).toHaveBeenCalled();
+    expect(video.play).toHaveBeenCalled();
+    overlay.destroy();
+  });
 });
 
 // ── Native subtitle display ───────────────────────────────────────────────────
@@ -183,12 +323,15 @@ describe('SubtitleOverlay — onCue sends TOKENIZE message', () => {
 describe('SubtitleOverlay — native subtitle', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
+    document.head.innerHTML = '';
+    mockPopupManager.showForElement.mockClear();
+    mockPopupManager.hidePopup.mockClear();
     mockSendMessage.mockResolvedValue({ tokens: [] });
   });
 
   it('renders native text from cue.nativeText', async () => {
     const overlay = new SubtitleOverlay('ja', mockVocabCache as any, mockPopupManager as any);
-    overlay.onCue(cue('食べる', 0, 2000, 'to eat'));
+    overlay.onCue(cue('食べる。', 0, 2000, 'to eat'));
     await new Promise(r => setTimeout(r, 0));
 
     const native = document.getElementById('cso-native');
@@ -198,7 +341,7 @@ describe('SubtitleOverlay — native subtitle', () => {
 
   it('hides native element when no nativeText', async () => {
     const overlay = new SubtitleOverlay('ja', mockVocabCache as any, mockPopupManager as any);
-    overlay.onCue(cue('食べる')); // no nativeText
+    overlay.onCue(cue('食べる。')); // no nativeText
     await new Promise(r => setTimeout(r, 0));
 
     const native = document.getElementById('cso-native');

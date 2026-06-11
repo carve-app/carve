@@ -45,9 +45,21 @@ export class VocabCache {
   }
 
   /**
-   * Mark a lemma as known/ignored and persist.
+   * Mark a lemma as known and persist.
    */
   async markKnown(lemma: string): Promise<void> {
+    this.known.add(lemma);
+    this.learning.delete(lemma);
+    this.ignored.delete(lemma);
+    await this.persistMembership(lemma, 'known');
+  }
+
+  /**
+   * Mark a lemma as ignored and persist. Ignored entries are suppressed during
+   * annotation like known words, but are kept out of the learner's known-word
+   * list.
+   */
+  async markIgnored(lemma: string): Promise<void> {
     this.ignored.add(lemma);
     this.learning.delete(lemma);
     this.known.delete(lemma);
@@ -57,13 +69,13 @@ export class VocabCache {
   /**
    * Persist a single lemma's membership across the three lemma sets, merging
    * with the latest stored values rather than overwriting from this context's
-   * (possibly stale) page-load snapshot. Without this, a lemma marked
-   * known/ignored in another tab — or by the background IGNORE_WORD handler —
-   * after this page loaded would be silently dropped on the next write.
+   * (possibly stale) page-load snapshot. Without this, a lemma marked known,
+   * learning, or ignored in another tab — or by the background action handlers
+   * — after this page loaded would be silently dropped on the next write.
    */
   private async persistMembership(
     lemma: string,
-    target: 'learning' | 'ignored',
+    target: 'known' | 'learning' | 'ignored',
   ): Promise<void> {
     const [knownArr, learningArr, ignoredArr] = await Promise.all([
       storageGet('knownLemmas'),
@@ -78,7 +90,13 @@ export class VocabCache {
     known.delete(lemma);
     learning.delete(lemma);
     ignored.delete(lemma);
-    (target === 'learning' ? learning : ignored).add(lemma);
+    if (target === 'known') {
+      known.add(lemma);
+    } else if (target === 'learning') {
+      learning.add(lemma);
+    } else {
+      ignored.add(lemma);
+    }
 
     // Keep the in-memory sets consistent with what we just merged + wrote.
     this.known = known;

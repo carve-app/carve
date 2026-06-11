@@ -29,13 +29,17 @@ function uuid() {
   });
 }
 
+function applyCors(req, res) {
+  const origin = req.headers.origin || 'http://localhost:5173';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,PUT,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Authorization,Content-Type');
+  res.setHeader('Vary', 'Origin');
+}
+
 function send(res, status, body) {
-  res.writeHead(status, {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,PATCH,PUT,DELETE,OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization,Content-Type',
-  });
+  res.writeHead(status, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify(body));
 }
 
@@ -59,6 +63,7 @@ function auth(req) {
 }
 
 const server = http.createServer(async (req, res) => {
+  applyCors(req, res);
   if (req.method === 'OPTIONS') { send(res, 204, {}); return; }
   const url = new URL(req.url, 'http://localhost');
   const path = url.pathname;

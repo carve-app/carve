@@ -1,0 +1,16 @@
+[Unit]
+Description=Carve Phase 1 Docker Compose stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/carve/phase1
+RemainAfterExit=yes
+ExecStart=/usr/bin/docker compose --env-file .env --env-file release.env -f docker-compose.yml up -d
+ExecStop=/usr/bin/docker compose --env-file .env --env-file release.env -f docker-compose.yml down
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

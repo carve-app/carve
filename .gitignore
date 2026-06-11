@@ -72,3 +72,9 @@ e2e/fixtures/media/
 # Local dev runtime (logs + local media store)
 dev-logs/
 dev-data/
+
+# Phase 1 VM deployment runtime files
+deploy/phase1/.env
+deploy/phase1/release.env
+deploy/phase1/backups/
+deploy/phase1/secrets/

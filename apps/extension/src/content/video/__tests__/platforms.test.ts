@@ -13,7 +13,7 @@
  * load-bearing property of this layer.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -25,6 +25,7 @@ import { CrunchyrollHook } from '../platforms/crunchyroll';
 import { VikiHook }        from '../platforms/viki';
 
 interface CueLike { text: string; startMs: number; endMs: number; nativeText?: string }
+let mountedHooks: Array<{ unmount?: () => void }> = [];
 
 function makeStubOverlay() {
   const cues: CueLike[] = [];
@@ -102,6 +103,11 @@ const CASES: PlatformCase[] = [
 ];
 
 describe('streaming-platform hooks against recorded fixtures', () => {
+  afterEach(() => {
+    for (const hook of mountedHooks) hook.unmount?.();
+    mountedHooks = [];
+  });
+
   for (const { name, ctor, fixture, expected } of CASES) {
     describe(name, () => {
       beforeEach(() => {
@@ -111,6 +117,7 @@ describe('streaming-platform hooks against recorded fixtures', () => {
       it('fires a cue with the recorded text', async () => {
         const overlay = makeStubOverlay();
         const hook = new ctor(overlay);
+        mountedHooks.push(hook);
         hook.mount();
         // Give the MutationObserver a microtask to flush.
         await new Promise((r) => setTimeout(r, 0));
@@ -126,6 +133,7 @@ describe('streaming-platform hooks against recorded fixtures', () => {
       it('hides the native subtitle container', () => {
         const overlay = makeStubOverlay();
         const hook = new ctor(overlay);
+        mountedHooks.push(hook);
         hook.mount();
         expect(overlay.hideNativeContainer).toHaveBeenCalled();
       });
@@ -140,6 +148,11 @@ describe('streaming-platform hooks against recorded fixtures', () => {
  * mined cards carry the human translation.
  */
 describe('dual-subtitle native text capture (textTracks)', () => {
+  afterEach(() => {
+    for (const hook of mountedHooks) hook.unmount?.();
+    mountedHooks = [];
+  });
+
   // Each platform's <video> selector as the hook queries it.
   const DUAL_CASES: { name: string; ctor: any; fixture: string; videoSelector: string }[] = [
     { name: 'YouTube', ctor: YouTubeHook, fixture: 'youtube.html', videoSelector: 'video.video-stream' },
@@ -156,6 +169,7 @@ describe('dual-subtitle native text capture (textTracks)', () => {
         installTextTracks(videoSelector, DUAL_TRACKS);
         const overlay = makeStubOverlay();
         const hook = new ctor(overlay, 'ja');
+        mountedHooks.push(hook);
         hook.mount();
         await new Promise((r) => setTimeout(r, 0));
 
@@ -172,6 +186,7 @@ describe('dual-subtitle native text capture (textTracks)', () => {
         installTextTracks(videoSelector, [DUAL_TRACKS[0]]);
         const overlay = makeStubOverlay();
         const hook = new ctor(overlay, 'ja');
+        mountedHooks.push(hook);
         hook.mount();
         await new Promise((r) => setTimeout(r, 0));
 
@@ -191,6 +206,7 @@ describe('dual-subtitle native text capture (textTracks)', () => {
         ]);
         const overlay = makeStubOverlay();
         const hook = new ctor(overlay, 'ja');
+        mountedHooks.push(hook);
         hook.mount();
         await new Promise((r) => setTimeout(r, 0));
 
@@ -198,4 +214,85 @@ describe('dual-subtitle native text capture (textTracks)', () => {
       });
     });
   }
+
+  it('uses a hidden target text track when native subtitle DOM is absent', async () => {
+    document.documentElement.innerHTML = '<html><body><video class="video-stream"></video></body></html>';
+    const tracks: FakeTrack[] = [{
+      kind: 'subtitles',
+      language: 'en',
+      mode: 'disabled',
+      activeCues: [{ text: 'Hidden text-track caption.', startTime: 12, endTime: 14.5 }],
+    }];
+    installTextTracks('video.video-stream', tracks);
+
+    const overlay = makeStubOverlay();
+    const hook = new YouTubeHook(overlay, 'en');
+    mountedHooks.push(hook);
+    hook.mount();
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(tracks[0].mode).toBe('hidden');
+    expect(overlay.onCue).toHaveBeenCalled();
+    expect(overlay.cues[0]).toMatchObject({
+      text: 'Hidden text-track caption.',
+      startMs: 12000,
+      endMs: 14500,
+    });
+  });
+
+  it('clicks YouTube CC when captions are off so text tracks load after navigation', () => {
+    document.documentElement.innerHTML = `
+      <html><body>
+        <video class="video-stream"></video>
+        <button class="ytp-subtitles-button" aria-pressed="false"></button>
+      </body></html>
+    `;
+    const button = document.querySelector<HTMLButtonElement>('.ytp-subtitles-button')!;
+    button.click = vi.fn();
+
+    const overlay = makeStubOverlay();
+    const hook = new YouTubeHook(overlay, 'en');
+    mountedHooks.push(hook);
+    hook.mount();
+
+    expect(button.click).toHaveBeenCalledTimes(1);
+  });
+
+  it('clicks YouTube CC once when YouTube exposes no aria pressed state', async () => {
+    document.documentElement.innerHTML = `
+      <html><body>
+        <video class="video-stream"></video>
+        <button class="ytp-subtitles-button" aria-label="Subtitles/closed captions"></button>
+      </body></html>
+    `;
+    const button = document.querySelector<HTMLButtonElement>('.ytp-subtitles-button')!;
+    button.click = vi.fn();
+
+    const overlay = makeStubOverlay();
+    const hook = new YouTubeHook(overlay, 'en');
+    mountedHooks.push(hook);
+    hook.mount();
+    document.body.appendChild(document.createElement('div'));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(button.click).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not click YouTube CC when captions already look enabled', () => {
+    document.documentElement.innerHTML = `
+      <html><body>
+        <video class="video-stream"></video>
+        <button class="ytp-subtitles-button" aria-pressed="true"></button>
+      </body></html>
+    `;
+    const button = document.querySelector<HTMLButtonElement>('.ytp-subtitles-button')!;
+    button.click = vi.fn();
+
+    const overlay = makeStubOverlay();
+    const hook = new YouTubeHook(overlay, 'en');
+    mountedHooks.push(hook);
+    hook.mount();
+
+    expect(button.click).not.toHaveBeenCalled();
+  });
 });

@@ -1,0 +1,103 @@
+name: carve
+
+services:
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+      - media
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL}
+      API_DOMAIN: ${API_DOMAIN}
+      MEDIA_UPLOAD_DOMAIN: ${MEDIA_UPLOAD_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["local-db"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  api-migrate:
+    image: ${IMAGE_REGISTRY:-ghcr.io/carve-app/carve}/api:${IMAGE_TAG:-latest}
+    profiles: ["tools"]
+    restart: "no"
+    command: ["./migrate", "--dir", "./migrations"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+
+  api:
+    image: ${IMAGE_REGISTRY:-ghcr.io/carve-app/carve}/api:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      PORT: "8080"
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      APP_BASE_URL: ${APP_BASE_URL}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+      NLP_SERVICE_URL: ${NLP_SERVICE_URL:-http://nlp:8001}
+      NLP_INTERNAL_SECRET: ${NLP_INTERNAL_SECRET}
+      MEDIA_SERVICE_URL: ${MEDIA_SERVICE_URL:-http://media:8002}
+      MEDIA_INTERNAL_TOKEN: ${MEDIA_INTERNAL_TOKEN}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      STT_BACKEND_URL: ${STT_BACKEND_URL:-}
+      STT_BACKEND_KEY: ${STT_BACKEND_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+    depends_on:
+      - nlp
+      - media
+
+  nlp:
+    image: ${IMAGE_REGISTRY:-ghcr.io/carve-app/carve}/nlp:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      PORT: "8001"
+      DICT_DB_PATH: /app/data/dictionary.db
+      NLP_INTERNAL_SECRET: ${NLP_INTERNAL_SECRET}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+
+  media:
+    image: ${IMAGE_REGISTRY:-ghcr.io/carve-app/carve}/media:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      PORT: "8002"
+      MEDIA_INTERNAL_TOKEN: ${MEDIA_INTERNAL_TOKEN}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-r2}
+      MEDIA_STORAGE_DIR: /var/lib/carve-media
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_BUCKET: ${R2_BUCKET:-}
+      R2_PUBLIC_BASE: ${R2_PUBLIC_BASE:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+    volumes:
+      - media_data:/var/lib/carve-media
+
+volumes:
+  caddy_data:
+  caddy_config:
+  postgres_data:
+  media_data:

@@ -1,10 +1,8 @@
-# Minimal 2-AZ VPC. For solo/demo we put Fargate tasks in public subnets with
-# assigned public IPs to skip the $32/mo NAT gateway. Inbound is locked down to
-# the ALB security group; egress is open. Add private subnets + NAT when you
-# stop wanting Fargate tasks to have public IPs (anything with PII compliance).
+# Small Phase 1 network: one public VM subnet and private DB subnets.
+# No NAT gateway, load balancer, ECS service network, or Redis subnet group.
 
 resource "aws_vpc" "main" {
-  cidr_block           = "10.20.0.0/16"
+  cidr_block           = var.vpc_cidr
   enable_dns_hostnames = true
   enable_dns_support   = true
   tags                 = { Name = "${local.name_prefix}-vpc" }
@@ -24,6 +22,14 @@ resource "aws_subnet" "public" {
   tags                    = { Name = "${local.name_prefix}-public-${local.azs[count.index]}" }
 }
 
+resource "aws_subnet" "database" {
+  count             = length(local.azs)
+  vpc_id            = aws_vpc.main.id
+  cidr_block        = cidrsubnet(aws_vpc.main.cidr_block, 8, count.index + 16)
+  availability_zone = local.azs[count.index]
+  tags              = { Name = "${local.name_prefix}-db-${local.azs[count.index]}" }
+}
+
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
   route {
@@ -39,81 +45,33 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
-# ── Security groups ───────────────────────────────────────────────────────────
-
-resource "aws_security_group" "alb" {
-  name        = "${local.name_prefix}-alb"
-  description = "ALB ingress from Cloudflare"
+resource "aws_security_group" "app" {
+  name        = "${local.name_prefix}-app"
+  description = "Phase 1 VM ingress"
   vpc_id      = aws_vpc.main.id
 
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-# Cloudflare edge IPs (https://www.cloudflare.com/ips-v4/). Refreshed via the
-# `data` source below. Restricting ingress to Cloudflare blocks direct origin
-# scrapes that bypass WAF/DDoS.
-data "http" "cloudflare_ips_v4" {
-  url = "https://www.cloudflare.com/ips-v4"
-}
-
-locals {
-  cloudflare_ipv4 = compact(split("\n", data.http.cloudflare_ips_v4.response_body))
-}
-
-resource "aws_security_group_rule" "alb_https_from_cloudflare" {
-  type              = "ingress"
-  from_port         = 443
-  to_port           = 443
-  protocol          = "tcp"
-  cidr_blocks       = local.cloudflare_ipv4
-  security_group_id = aws_security_group.alb.id
-  description       = "HTTPS from Cloudflare edge"
-}
-
-resource "aws_security_group_rule" "alb_http_redirect" {
-  type              = "ingress"
-  from_port         = 80
-  to_port           = 80
-  protocol          = "tcp"
-  cidr_blocks       = local.cloudflare_ipv4
-  security_group_id = aws_security_group.alb.id
-  description       = "HTTP from Cloudflare (redirects to 443)"
-}
-
-resource "aws_security_group" "ecs_tasks" {
-  name        = "${local.name_prefix}-ecs"
-  description = "Fargate tasks: ingress from ALB"
-  vpc_id      = aws_vpc.main.id
-
-  # ALB only fronts api (8080) and media (8002); nlp is internal-only. Listing
-  # the exact ports (instead of 0-65535) limits a compromised task's reach.
   ingress {
-    from_port       = 8080
-    to_port         = 8080
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
-    description     = "ALB to api"
-  }
-  ingress {
-    from_port       = 8002
-    to_port         = 8002
-    protocol        = "tcp"
-    security_groups = [aws_security_group.alb.id]
-    description     = "ALB to media"
-  }
-
-  # api -> nlp over the internal service-discovery DNS (port 8001 only).
-  ingress {
-    from_port   = 8001
-    to_port     = 8001
+    from_port   = 22
+    to_port     = 22
     protocol    = "tcp"
-    self        = true
-    description = "api to nlp"
+    cidr_blocks = var.ssh_allowed_cidr_blocks
+    description = "SSH deploy/admin"
+  }
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTP for Caddy/ACME"
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTPS for API/media upload"
   }
 
   egress {
@@ -125,28 +83,15 @@ resource "aws_security_group" "ecs_tasks" {
 }
 
 resource "aws_security_group" "rds" {
-  name   = "${local.name_prefix}-rds"
-  vpc_id = aws_vpc.main.id
+  name        = "${local.name_prefix}-rds"
+  description = "Postgres from Phase 1 VM only"
+  vpc_id      = aws_vpc.main.id
 
   ingress {
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
-    security_groups = [aws_security_group.ecs_tasks.id]
-    description     = "Postgres from ECS"
+    security_groups = [aws_security_group.app.id]
+    description     = "Postgres from app VM"
   }
 }
-
-resource "aws_security_group" "redis" {
-  name   = "${local.name_prefix}-redis"
-  vpc_id = aws_vpc.main.id
-
-  ingress {
-    from_port       = 6379
-    to_port         = 6379
-    protocol        = "tcp"
-    security_groups = [aws_security_group.ecs_tasks.id]
-    description     = "Redis from ECS"
-  }
-}
-

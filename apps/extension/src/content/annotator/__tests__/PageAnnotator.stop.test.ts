@@ -66,4 +66,15 @@ describe('PageAnnotator.stop()', () => {
   it('is idempotent / safe when nothing was annotated', () => {
     expect(() => makeAnnotator().stop()).not.toThrow();
   });
+
+  it('does not collect text from Carve UI roots', () => {
+    const popup = document.createElement('div');
+    popup.id = 'carve-popup';
+    popup.setAttribute('data-carve', 'ui');
+    popup.textContent = 'conversation';
+    document.body.appendChild(popup);
+
+    const nodes = (makeAnnotator() as any).collectTextNodes(popup) as Text[];
+    expect(nodes).toEqual([]);
+  });
 });
