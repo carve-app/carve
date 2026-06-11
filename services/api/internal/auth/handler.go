@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -46,7 +47,14 @@ type loginRequest struct {
 type authResponse struct {
 	AccessToken string      `json:"access_token"`
 	ExpiresIn   int         `json:"expires_in"` // seconds
-	User        userPayload `json:"user"`
+	// RefreshToken is also returned in the body (in addition to the HttpOnly
+	// cookie) for clients that can't rely on cookies — notably the browser
+	// extension, whose service-worker fetches to the API origin are cross-site
+	// and don't carry the SameSite cookie. The web app ignores this and uses
+	// the cookie. Treat it like a credential: store it in extension-local
+	// storage, never expose it to page context.
+	RefreshToken string      `json:"refresh_token"`
+	User         userPayload `json:"user"`
 }
 
 type userPayload struct {
@@ -67,14 +75,27 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// cookieSecure reports whether the refresh cookie should carry the Secure flag.
+// A Secure cookie is dropped by browsers over plain http, which silently breaks
+// refresh in local dev (http://localhost). Default to secure; disable it only
+// when COOKIE_INSECURE=1 (set in dev/compose) so localhost works while prod
+// stays Secure.
+func cookieSecure() bool {
+	return os.Getenv("COOKIE_INSECURE") != "1"
+}
+
 func setRefreshCookie(w http.ResponseWriter, raw string, exp time.Time) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     refreshTokenCookie,
 		Value:    raw,
 		Expires:  exp,
 		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
+		Secure:   cookieSecure(),
+		// Lax (not Strict): the web app and API are different localhost ports
+		// (and different subdomains in prod), so the refresh POST is
+		// cross-site; Strict would withhold the cookie. Lax still sends it on
+		// top-level + same-site requests, which covers /v1/auth/refresh.
+		SameSite: http.SameSiteLaxMode,
 		Path:     "/v1/auth",
 	})
 }
@@ -106,9 +127,10 @@ func (h *Handler) issueTokenPair(
 
 	setRefreshCookie(w, rawRefresh, refreshExp)
 	writeJSON(w, http.StatusOK, authResponse{
-		AccessToken: access,
-		ExpiresIn:   int(AccessTokenTTL.Seconds()),
-		User:        userPayload{ID: userID, Email: email, DisplayName: displayName},
+		AccessToken:  access,
+		ExpiresIn:    int(AccessTokenTTL.Seconds()),
+		RefreshToken: rawRefresh,
+		User:         userPayload{ID: userID, Email: email, DisplayName: displayName},
 	})
 	return nil
 }
@@ -229,13 +251,27 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 // POST /auth/refresh
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(refreshTokenCookie)
-	if err != nil {
+	// Accept the refresh token from the HttpOnly cookie (web app) OR a JSON
+	// body {"refresh_token": "..."} (browser extension, which can't rely on
+	// cross-site cookies). Cookie takes precedence when both are present.
+	raw := ""
+	if cookie, err := r.Cookie(refreshTokenCookie); err == nil {
+		raw = cookie.Value
+	}
+	if raw == "" && r.Body != nil {
+		var body struct {
+			RefreshToken string `json:"refresh_token"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) == nil {
+			raw = body.RefreshToken
+		}
+	}
+	if raw == "" {
 		writeError(w, http.StatusUnauthorized, "no refresh token")
 		return
 	}
 
-	hashed := HashRefreshToken(cookie.Value)
+	hashed := HashRefreshToken(raw)
 	ctx := r.Context()
 
 	var (
@@ -245,7 +281,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		expiresAt   time.Time
 		revokedAt   *time.Time
 	)
-	err = h.db.QueryRow(ctx,
+	err := h.db.QueryRow(ctx,
 		`SELECT u.id, u.email, u.display_name, rt.expires_at, rt.revoked_at
 		 FROM refresh_tokens rt
 		 JOIN users u ON u.id = rt.user_id

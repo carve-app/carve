@@ -71,10 +71,11 @@ func TestAccessTokenTTL(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// TTL should be ~15 minutes from now
+	// TTL should be ~4 hours from now (long enough for a study session; the
+	// rotating refresh token extends the session beyond this transparently).
 	ttl := time.Until(exp)
-	if ttl < 14*time.Minute || ttl > 16*time.Minute {
-		t.Errorf("unexpected TTL: %v (expected ~15min)", ttl)
+	if ttl < 3*time.Hour+59*time.Minute || ttl > 4*time.Hour {
+		t.Errorf("unexpected TTL: %v (expected ~4h)", ttl)
 	}
 }
 

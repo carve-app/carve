@@ -14,7 +14,12 @@ import (
 )
 
 const (
-	AccessTokenTTL  = 15 * time.Minute
+	// Access tokens are short-lived bearer JWTs. 15 minutes was far too short
+	// for a study app — users hit "session expired" mid-review. 4 hours covers
+	// a long immersion/review session; the rotating 30-day refresh token (used
+	// transparently by the clients on 401) keeps the session alive beyond that
+	// without re-login, so a leaked access token is still only valuable briefly.
+	AccessTokenTTL  = 4 * time.Hour
 	RefreshTokenTTL = 30 * 24 * time.Hour
 )
 

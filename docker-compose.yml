@@ -78,6 +78,10 @@ services:
       DATABASE_URL: postgres://carve:carve@postgres:5432/carve?sslmode=disable
       JWT_SECRET: dev-secret-change-in-production-at-least-32-chars
       PORT: "8080"
+      # Dev runs over plain http, so the refresh cookie must NOT be Secure (a
+      # Secure cookie is silently dropped over http and refresh breaks). Prod
+      # leaves this unset → Secure cookie.
+      COOKIE_INSECURE: "1"
       NLP_SERVICE_URL: http://nlp:8001
       # The API proxies card media uploads to the media service; without this it
       # defaults to localhost:8002 (unreachable from inside the api container)

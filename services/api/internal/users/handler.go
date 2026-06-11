@@ -2,9 +2,13 @@ package users
 
 import (
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/carve-app/carve/services/api/internal/auth"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -31,20 +35,30 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var user struct {
-		ID          string  `json:"id"`
-		Email       string  `json:"email"`
-		DisplayName string  `json:"display_name"`
-		AvatarURL   *string `json:"avatar_url"`
-		CreatedAt   string  `json:"created_at"`
+		ID          string    `json:"id"`
+		Email       string    `json:"email"`
+		DisplayName string    `json:"display_name"`
+		AvatarURL   *string   `json:"avatar_url"`
+		CreatedAt   time.Time `json:"created_at"`
 	}
 
+	// created_at is timestamptz — it MUST be scanned into time.Time, not string,
+	// or pgx returns a scan error. The old code scanned into a string and then
+	// reported ANY error as 404, so a valid logged-in user got "user not found"
+	// and the web app bounced them to /login. Distinguish no-rows (404) from a
+	// real query/scan error (500) so this can't masquerade again.
 	err := h.db.QueryRow(r.Context(),
 		`SELECT id, email, display_name, avatar_url, created_at
 		 FROM users WHERE id = $1 AND deleted_at IS NULL`,
 		claims.UserID,
 	).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.CreatedAt)
-	if err != nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		http.Error(w, `{"error":"user not found"}`, http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		slog.Error("users.Me query", "error", err)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
 

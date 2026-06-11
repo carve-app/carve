@@ -136,6 +136,7 @@ echo "→ [5/6] Starting core api :$API_PORT..."
     NLP_SERVICE_URL="http://localhost:$NLP_PORT" \
     MEDIA_SERVICE_URL="http://localhost:$MEDIA_PORT" \
     GOOGLE_APPLICATION_CREDENTIALS="${GOOGLE_APPLICATION_CREDENTIALS:-}" \
+    COOKIE_INSECURE=1 \
     go run ./cmd/api ) >"$LOGDIR/api.log" 2>&1 &
 PIDS+=($!)
 wait_http "http://localhost:$API_PORT/health" api

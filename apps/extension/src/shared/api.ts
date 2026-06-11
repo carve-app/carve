@@ -1,4 +1,4 @@
-import { getAccessToken, getApiBaseUrl } from './storage';
+import { getAccessToken, getApiBaseUrl, getRefreshToken, setAccessToken, setRefreshToken, clearSession } from './storage';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -7,7 +7,50 @@ export class ApiError extends Error {
   }
 }
 
-async function apiFetch(path: string, options: RequestInit = {}): Promise<Response> {
+// Exchange the stored refresh token for a fresh access token. The extension
+// can't rely on the API's SameSite refresh cookie (its service-worker fetches
+// are cross-site), so it sends the refresh token in the body and persists the
+// rotated pair. Single-flight so concurrent 401s don't stampede /refresh.
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function refreshAccessToken(): Promise<boolean> {
+  // Coalesce concurrent refreshes into one in-flight call. Once it settles the
+  // shared promise is cleared so a *later* expiry triggers a fresh refresh
+  // rather than reusing the stale resolved result.
+  if (refreshInFlight) return refreshInFlight;
+  const run = (async () => {
+    try {
+      const refresh = await getRefreshToken();
+      if (!refresh) return false;
+      const baseUrl = await getApiBaseUrl();
+      const res = await fetch(`${baseUrl}/v1/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refresh }),
+      });
+      if (!res.ok) {
+        // Refresh token is invalid/expired/revoked — the session is over.
+        await clearSession();
+        return false;
+      }
+      const data = await res.json() as { access_token?: string; refresh_token?: string };
+      if (!data.access_token) return false;
+      await setAccessToken(data.access_token);
+      if (data.refresh_token) await setRefreshToken(data.refresh_token); // rotation
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  refreshInFlight = run;
+  try {
+    return await run;
+  } finally {
+    refreshInFlight = null;
+  }
+}
+
+async function apiFetch(path: string, options: RequestInit = {}, _retried = false): Promise<Response> {
   const baseUrl = await getApiBaseUrl();
   const token = await getAccessToken();
 
@@ -26,6 +69,13 @@ async function apiFetch(path: string, options: RequestInit = {}): Promise<Respon
   });
 
   if (!response.ok) {
+    // Access token expired → refresh once and retry transparently, so mining/
+    // lookups during a long immersion session never silently fail on expiry.
+    if (response.status === 401 && !_retried && token) {
+      if (await refreshAccessToken()) {
+        return apiFetch(path, options, true);
+      }
+    }
     const body = await response.text().catch(() => '');
     throw new ApiError(response.status, `HTTP ${response.status}: ${body}`);
   }

@@ -14,12 +14,14 @@ async function getToken(): Promise<string | null> {
   return (r['accessToken'] as string | undefined) ?? null;
 }
 
-async function setToken(token: string): Promise<void> {
-  await browser.storage.local.set({ accessToken: token });
+async function setToken(token: string, refreshToken?: string): Promise<void> {
+  const data: Record<string, string> = { accessToken: token };
+  if (refreshToken) data.refreshToken = refreshToken;
+  await browser.storage.local.set(data);
 }
 
 async function clearToken(): Promise<void> {
-  await browser.storage.local.remove('accessToken');
+  await browser.storage.local.remove(['accessToken', 'refreshToken']);
 }
 
 // ── Site toggle helpers ───────────────────────────────────────────────────────
@@ -90,8 +92,8 @@ function showLogin(errorMsg?: string): void {
         return;
       }
 
-      const data = await res.json() as { access_token: string };
-      await setToken(data.access_token);
+      const data = await res.json() as { access_token: string; refresh_token?: string };
+      await setToken(data.access_token, data.refresh_token);
       await showDueCount();
     } catch {
       showLogin('Could not reach API — is Docker running?');

@@ -137,9 +137,52 @@ export interface Notification {
   created_at: string;
 }
 
+// ── Token refresh ─────────────────────────────────────────────────────────────
+// The access token is short-lived; the API also sets a long-lived HttpOnly
+// refresh cookie at login. On a 401 we transparently exchange that cookie for a
+// fresh access token and retry the request, so a study session never gets
+// kicked to the login screen mid-use. Single-flight: concurrent 401s share one
+// refresh call rather than stampeding the endpoint.
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function tryRefresh(): Promise<boolean> {
+  // Coalesce concurrent refreshes; clear once settled so a later expiry retries.
+  if (refreshInFlight) return refreshInFlight;
+  const run = (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/v1/auth/refresh`, {
+        method: 'POST',
+        credentials: 'include', // send the HttpOnly refresh cookie
+      });
+      if (!res.ok) return false;
+      const data = (await res.json()) as { access_token?: string };
+      if (!data.access_token) return false;
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('carve_access_token', data.access_token);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  refreshInFlight = run;
+  try {
+    return await run;
+  } finally {
+    refreshInFlight = null;
+  }
+}
+
+function expireSession(): never {
+  if (typeof localStorage !== 'undefined') localStorage.removeItem('carve_access_token');
+  if (typeof window !== 'undefined') window.location.href = '/login';
+  throw new ApiError(401, 'Session expired');
+}
+
 // ── Fetch helper ─────────────────────────────────────────────────────────────
 
-export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function apiFetch<T>(path: string, options: RequestInit = {}, _retried = false): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -149,14 +192,16 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers, credentials: 'include' });
 
   if (!res.ok) {
-    // Expired/invalid session: clear token and redirect
-    if (res.status === 401 && typeof window !== 'undefined' && localStorage.getItem('carve_access_token')) {
-      localStorage.removeItem('carve_access_token');
-      window.location.href = '/login';
-      throw new ApiError(401, 'Session expired');
+    // Access token expired/invalid: try a silent refresh once, then retry.
+    if (res.status === 401 && !_retried && typeof localStorage !== 'undefined' && localStorage.getItem('carve_access_token')) {
+      if (await tryRefresh()) {
+        return apiFetch<T>(path, options, true);
+      }
+      // Refresh failed → the session is truly over.
+      expireSession();
     }
 
     let message = `HTTP ${res.status}`;
@@ -176,7 +221,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
  * Upload a multipart form. The browser sets the Content-Type with the boundary,
  * so we omit it here and only pass the Authorization header.
  */
-export async function postMultipart<T>(path: string, form: FormData): Promise<T> {
+export async function postMultipart<T>(path: string, form: FormData, _retried = false): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -185,9 +230,14 @@ export async function postMultipart<T>(path: string, form: FormData): Promise<T>
     method: 'POST',
     body: form,
     headers,
+    credentials: 'include',
   });
 
   if (!res.ok) {
+    if (res.status === 401 && !_retried && typeof localStorage !== 'undefined' && localStorage.getItem('carve_access_token')) {
+      if (await tryRefresh()) return postMultipart<T>(path, form, true);
+      expireSession();
+    }
     let message = `HTTP ${res.status}`;
     try {
       const body = await res.json();
@@ -210,6 +260,8 @@ export async function fetchDueCount(language = 'ja'): Promise<{ due_count: numbe
 }
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
+  // apiFetch already sends credentials:'include', so the refresh cookie set by
+  // this response is stored by the browser for later silent refresh.
   return apiFetch<LoginResponse>('/v1/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
@@ -539,7 +591,7 @@ async function _importFile(path: string, file: File, language: string): Promise<
   const headers: Record<string, string> = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, { method: 'POST', headers, body: form });
+  const res = await fetch(`${API_BASE}${path}`, { method: 'POST', headers, body: form, credentials: 'include' });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`);
@@ -549,19 +601,17 @@ async function _importFile(path: string, file: File, language: string): Promise<
 
 // ── Export ────────────────────────────────────────────────────────────────────
 
-export async function triggerExport(): Promise<void> {
+export async function triggerExport(_retried = false): Promise<void> {
   const token = getToken();
   const headers: Record<string, string> = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}/v1/export`, { headers });
+  const res = await fetch(`${API_BASE}/v1/export`, { headers, credentials: 'include' });
   if (!res.ok) {
-    // Mirror apiFetch's auth handling so an expired session logs out instead
-    // of leaving the user on a broken page, and surface the real error.
-    if (res.status === 401 && typeof window !== 'undefined' && localStorage.getItem('carve_access_token')) {
-      localStorage.removeItem('carve_access_token');
-      window.location.href = '/login';
-      throw new ApiError(401, 'Session expired');
+    // Mirror apiFetch: silently refresh + retry once before giving up.
+    if (res.status === 401 && !_retried && typeof localStorage !== 'undefined' && localStorage.getItem('carve_access_token')) {
+      if (await tryRefresh()) return triggerExport(true);
+      expireSession();
     }
     const body = await res.json().catch(() => ({}));
     throw new ApiError(res.status, body.error ?? body.detail ?? body.message ?? `HTTP ${res.status}`);
