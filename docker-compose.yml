@@ -83,6 +83,12 @@ services:
       # defaults to localhost:8002 (unreachable from inside the api container)
       # and every screenshot/audio upload silently no-ops.
       MEDIA_SERVICE_URL: http://media:8002
+      # Google Cloud TTS (best-on-market). Synthesizes word/sentence audio via a
+      # service account and persists MP3s to the media service. When unset, cards
+      # simply have no audio (no lower-quality fallback). Mount the SA JSON and
+      # point this at it, e.g.:
+      #   volumes: [ "./secrets/gcp-sa.json:/secrets/gcp-sa.json:ro" ]
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -104,14 +110,13 @@ services:
       DICT_DB_PATH: /app/data/dictionary.db
       NLP_INTERNAL_SECRET: ""   # empty = no auth check in dev
       PORT: "8001"
-      # Fluent sentence translation (Google Translate). Off by default; the
-      # /translate endpoint falls back to the Tatoeba corpus (JA) + word gloss.
-      #   MT_PROVIDER: google_cloud | google | off
-      #   GOOGLE_TRANSLATE_API_KEY: <key>   # enables google_cloud automatically
-      #   MT_ENABLED: "1"                    # enables the key-less google endpoint
-      MT_PROVIDER: ${MT_PROVIDER:-off}
-      MT_ENABLED: ${MT_ENABLED:-}
-      GOOGLE_TRANSLATE_API_KEY: ${GOOGLE_TRANSLATE_API_KEY:-}
+      # Fluent sentence translation via Google Cloud Translation v3 (Translation
+      # LLM) — the single engine, no gloss/corpus fallback. Authenticated with a
+      # service account; set GOOGLE_APPLICATION_CREDENTIALS to the mounted SA
+      # JSON. When unset, /translate returns null (cards have no translation
+      # rather than a low-quality one).
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8001/health || exit 1"]
       interval: 10s

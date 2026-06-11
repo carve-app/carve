@@ -1,30 +1,28 @@
 """
-Fluent sentence machine translation via Google Translate.
+Fluent sentence machine translation via Google Cloud Translation v3 — the
+Translation LLM (TLLM) model, which is best-on-market for the languages Carve
+supports and auto-detects the source language.
 
-This produces an actual fluent target-language sentence (e.g.
-"los gatos negros duermen" -> "the black cats are sleeping"), as opposed to the
-word-by-word gloss the dictionary path builds. It mirrors the audio TTS provider
-pattern: env-selectable, best-effort, and it NEVER raises — on any failure it
-returns None so the caller falls back to the gloss.
+This is the SINGLE translation engine. There is deliberately NO word-by-word
+gloss / keyless / corpus fallback: a word-for-word gloss is worse than nothing,
+so when translation is unavailable we return None and the card simply has no
+translation rather than a bad one.
 
-Provider selection (MT_PROVIDER overrides; otherwise inferred):
-  - "google_cloud": official Cloud Translation API v2 (needs GOOGLE_TRANSLATE_API_KEY)
-  - "google":       key-less translate.googleapis.com endpoint (dev/best-effort,
-                    undocumented — not an SLA'd API)
-  - "off":          disabled (default)
-Inference when MT_PROVIDER is unset/blank: GOOGLE_TRANSLATE_API_KEY set ->
-google_cloud; else MT_ENABLED truthy -> google; else off.
+Auth: Google Cloud service account. Set GOOGLE_APPLICATION_CREDENTIALS to the
+service-account JSON path (standard ADC). The project id is taken from the
+credentials (or GOOGLE_CLOUD_PROJECT). When credentials are absent the engine is
+disabled and translate_sentence() returns None.
 """
 from __future__ import annotations
 
 import json
 import os
-import urllib.parse
+import threading
+import urllib.error
 import urllib.request
 
-# Carve language code -> Google Translate language code. Google expects the
-# mixed-case region tags for Chinese; everything else passes through.
-_GOOGLE_LANG = {
+# Carve language code -> BCP-47 code understood by Cloud Translation.
+_LANG = {
     "ja": "ja",
     "zh-cn": "zh-CN",
     "zh-tw": "zh-TW",
@@ -39,109 +37,137 @@ _GOOGLE_LANG = {
     "vi": "vi",
 }
 
-# Overridable in tests so they never hit the network.
-GOOGLE_FREE_URL = "https://translate.googleapis.com/translate_a/single"
-GOOGLE_CLOUD_URL = "https://translation.googleapis.com/language/translate/v2"
+# v3 TLLM endpoint (global location). Overridable in tests.
+TRANSLATE_V3_URL = "https://translate.googleapis.com/v3/projects/{project}/locations/global:translateText"
 
-_TIMEOUT = 8  # seconds
-_MAX_CHARS = 5000  # Google's per-request limit; refuse longer up front.
+_TIMEOUT = 15  # seconds
+_MAX_CHARS = 5000  # Cloud Translation per-request limit; refuse longer up front.
+
+_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+
+# Lazily-built, process-wide credentials (thread-safe). google.auth handles
+# token refresh internally once we hold the Credentials object.
+_lock = threading.Lock()
+_creds = None
+_project: str | None = None
+_init_done = False
 
 
-def _google_lang(code: str) -> str | None:
-    return _GOOGLE_LANG.get(code.lower())
+def _bcp47(code: str) -> str | None:
+    return _LANG.get(code.lower())
 
 
-def _is_truthy(v: str) -> bool:
-    return v.strip().lower() in ("1", "true", "yes", "on")
+def _ensure_creds():
+    """Load ADC service-account credentials once. Returns (creds, project) or
+    (None, None) when unavailable. Never raises."""
+    global _creds, _project, _init_done
+    if _init_done:
+        return _creds, _project
+    with _lock:
+        if _init_done:
+            return _creds, _project
+        _init_done = True
+        try:
+            import google.auth  # noqa: PLC0415
+
+            creds, project = google.auth.default(scopes=[_SCOPE])
+            _creds = creds
+            _project = os.environ.get("GOOGLE_CLOUD_PROJECT") or project
+        except Exception:
+            _creds, _project = None, None
+        return _creds, _project
 
 
-def mt_mode() -> str:
-    """Which MT provider to use. See module docstring for the matrix."""
-    explicit = os.environ.get("MT_PROVIDER", "").strip().lower()
-    if explicit in ("google", "google_cloud", "off"):
-        return explicit
-    if os.environ.get("GOOGLE_TRANSLATE_API_KEY", "").strip():
-        return "google_cloud"
-    if _is_truthy(os.environ.get("MT_ENABLED", "")):
-        return "google"
-    return "off"
+def _token() -> str | None:
+    """Return a fresh OAuth2 bearer token, or None if unavailable."""
+    creds, _ = _ensure_creds()
+    if creds is None:
+        return None
+    try:
+        from google.auth.transport.requests import Request  # noqa: PLC0415
+
+        if not creds.valid:
+            creds.refresh(Request())
+        return creds.token
+    except Exception:
+        return None
+
+
+def is_enabled() -> bool:
+    """True when service-account credentials + a project are available."""
+    creds, project = _ensure_creds()
+    return creds is not None and bool(project)
 
 
 def translate_sentence(text: str, source_language: str, target_language: str) -> str | None:
     """
-    Return a fluent MT translation of `text`, or None on any failure / when MT
-    is disabled / when the language pair is unsupported. Never raises.
+    Return a fluent TLLM translation of `text`, or None when translation is
+    unavailable (no creds, unsupported language, identical languages, or any
+    API error). Never raises, and never returns a degraded gloss.
     """
     text = text.strip()
     if not text or len(text) > _MAX_CHARS:
         return None
 
-    src = _google_lang(source_language)
-    tgt = _google_lang(target_language)
-    if not src or not tgt or src == tgt:
+    tgt = _bcp47(target_language)
+    if not tgt:
+        return None
+    src = _bcp47(source_language) if source_language else None
+    if src and src == tgt:
         return None
 
-    mode = mt_mode()
+    creds, project = _ensure_creds()
+    if creds is None or not project:
+        return None
+    tok = _token()
+    if not tok:
+        return None
+
+    body = {
+        "contents": [text],
+        "targetLanguageCode": tgt,
+        "mimeType": "text/plain",
+        "model": f"projects/{project}/locations/global/models/general/translation-llm",
+    }
+    # TLLM auto-detects when sourceLanguageCode is omitted; only pin it when we
+    # have a confident mapping (avoids mis-tagging hurting quality).
+    if src:
+        body["sourceLanguageCode"] = src
+
+    url = TRANSLATE_V3_URL.format(project=project)
     try:
-        if mode == "google_cloud":
-            return _translate_cloud(text, src, tgt)
-        if mode == "google":
-            return _translate_free(text, src, tgt)
+        out = _post_json(url, body, tok, project)
     except Exception:
-        # Best-effort: any network/parse error falls back to the gloss.
         return None
-    return None
+    return _parse_v3_response(out)
 
 
-def _http_post_json(url: str, payload: dict, headers: dict) -> dict:
+def _post_json(url: str, payload: dict, token: str, project: str) -> dict:
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            "Authorization": "Bearer " + token,
+            "Content-Type": "application/json",
+            "x-goog-user-project": project,
+        },
+        method="POST",
+    )
     with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def _translate_cloud(text: str, src: str, tgt: str) -> str | None:
-    """Official Cloud Translation API v2 (key-authenticated)."""
-    key = os.environ["GOOGLE_TRANSLATE_API_KEY"]
-    url = GOOGLE_CLOUD_URL + "?key=" + urllib.parse.quote(key)
-    body = {"q": text, "source": src, "target": tgt, "format": "text"}
-    out = _http_post_json(url, body, {"Content-Type": "application/json"})
-    translations = (out.get("data") or {}).get("translations") or []
-    if not translations:
+def _parse_v3_response(out) -> str | None:
+    """Extract translatedText from a v3 translateText response. Pure, so tests
+    can exercise it without the network.
+
+    Shape: {"translations": [{"translatedText": "...", ...}]}
+    """
+    if not isinstance(out, dict):
         return None
-    translated = translations[0].get("translatedText")
+    translations = out.get("translations") or []
+    if not translations or not isinstance(translations[0], dict):
+        return None
+    translated = (translations[0].get("translatedText") or "").strip()
     return translated or None
-
-
-def _translate_free(text: str, src: str, tgt: str) -> str | None:
-    """
-    Key-less translate.googleapis.com endpoint. Returns a nested JSON array;
-    the translated sentence is the concatenation of segment[0] for each segment
-    in result[0].
-    """
-    params = urllib.parse.urlencode(
-        {"client": "gtx", "sl": src, "tl": tgt, "dt": "t", "q": text}
-    )
-    url = GOOGLE_FREE_URL + "?" + params
-    req = urllib.request.Request(
-        url, headers={"User-Agent": "Mozilla/5.0 (compatible; CarveBot/1.0)"}
-    )
-    with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-        out = json.loads(resp.read().decode("utf-8"))
-    return _parse_free_response(out)
-
-
-def _parse_free_response(out) -> str | None:
-    """Extract the translated text from the key-less endpoint's array shape.
-
-    Shape: [ [ [translated, original, ...], [translated, original, ...] ], ... ].
-    Join the first element of each segment. Pure so tests can exercise it.
-    """
-    if not isinstance(out, list) or not out or not isinstance(out[0], list):
-        return None
-    parts = []
-    for seg in out[0]:
-        if isinstance(seg, list) and seg and isinstance(seg[0], str):
-            parts.append(seg[0])
-    result = "".join(parts).strip()
-    return result or None

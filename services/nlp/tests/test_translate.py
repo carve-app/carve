@@ -1,13 +1,17 @@
 """
-Tests for POST /translate endpoint — Track 2 word-gloss translation.
+Tests for POST /translate — Google Cloud Translation v3 (TLLM) only.
+
+The endpoint has a single engine and NO gloss/corpus/keyless fallback: it
+returns a fluent translation when the engine is configured, else null. Network
+is never hit here — the v3 parser is pure and the engine is monkeypatched.
 """
 from __future__ import annotations
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import pytest
 from fastapi.testclient import TestClient
 
 from src.app import app
@@ -15,8 +19,7 @@ from src.app import app
 client = TestClient(app)
 
 
-class TestTranslate:
-
+class TestTranslateEndpoint:
     def test_empty_text_returns_null(self):
         r = client.post("/translate", json={"text": "", "source_language": "ja"})
         assert r.status_code == 200
@@ -27,131 +30,113 @@ class TestTranslate:
         assert r.status_code == 200
         assert r.json()["translation"] is None
 
-    def test_non_japanese_language_produces_gloss_or_null(self):
-        # Non-JA languages now get a best-effort word gloss when the dictionary
-        # has the words (was previously hard-None). Either a gloss string or
-        # None is acceptable depending on whether the test env has the dict;
-        # the endpoint must not 422 and must stay 200.
-        r = client.post("/translate", json={"text": "Hello world", "source_language": "en"})
-        assert r.status_code == 200
-        t = r.json()["translation"]
-        assert t is None or isinstance(t, str)
-
-    def test_japanese_text_returns_gloss(self):
-        r = client.post("/translate", json={"text": "食べる", "source_language": "ja"})
-        assert r.status_code == 200
-        data = r.json()
-        # Content word should produce a gloss
-        assert data["translation"] is not None
-        assert len(data["translation"]) > 0
-        # Gloss format: word[definition]
-        assert "[" in data["translation"]
-
-    def test_japanese_sentence_gloss_covers_content_words(self):
-        r = client.post("/translate", json={
-            "text": "毎日ご飯を食べる",
-            "source_language": "ja",
-        })
-        assert r.status_code == 200
-        gloss = r.json()["translation"]
-        assert gloss is not None
-        # Should include multiple content words glossed
-        assert gloss.count("[") >= 2
-
-    def test_response_includes_languages(self):
-        r = client.post("/translate", json={
-            "text": "食べる",
-            "source_language": "ja",
-            "target_language": "en",
-        })
-        assert r.status_code == 200
-        data = r.json()
-        assert data["source_language"] == "ja"
-        assert data["target_language"] == "en"
-
-    def test_default_target_language_is_en(self):
-        r = client.post("/translate", json={"text": "食べる", "source_language": "ja"})
-        assert r.status_code == 200
-        assert r.json()["target_language"] == "en"
-
-    def test_default_source_language_is_ja(self):
-        r = client.post("/translate", json={"text": "食べる"})
-        assert r.status_code == 200
-        assert r.json()["source_language"] == "ja"
-
-    def test_particles_only_returns_null_or_empty_gloss(self):
-        # Particles are function words; gloss should be null or minimal
-        r = client.post("/translate", json={"text": "が", "source_language": "ja"})
-        assert r.status_code == 200
-        # translation may be null since が is a function word
-        data = r.json()
-        assert "translation" in data
-
-    def test_chinese_language_produces_gloss_or_null(self):
-        # Chinese now gets a best-effort gloss when CC-CEDICT is loaded; 200 +
-        # (string or None), never 422.
-        r = client.post("/translate", json={"text": "你好", "source_language": "zh"})
-        assert r.status_code == 200
-        t = r.json()["translation"]
-        assert t is None or isinstance(t, str)
-
-    def test_korean_language_produces_gloss_or_null(self):
-        r = client.post("/translate", json={"text": "안녕하세요", "source_language": "ko"})
-        assert r.status_code == 200
-        t = r.json()["translation"]
-        assert t is None or isinstance(t, str)
-
-    def test_multilingual_gloss_with_canned_dict(self, monkeypatch):
-        # Prove the gloss generalizes beyond JA without needing a real dict or
-        # tokenizer: stub the tokenizer + lookup so any content word resolves.
-        import src.app as app_module
-        from types import SimpleNamespace
-
-        class _Def:
-            definition = "cat"
-
-        monkeypatch.setattr(
-            app_module, "_tokenize_for_language",
-            lambda text, lang: [SimpleNamespace(surface="gatos", lemma="gato", is_content_word=True)],
-        )
-        monkeypatch.setattr(
-            app_module._dict_service, "lookup",
-            lambda lemma, language=None, target_lang=None: SimpleNamespace(definitions=[_Def()]),
-        )
-        r = client.post("/translate", json={"text": "los gatos", "source_language": "es"})
-        assert r.status_code == 200
-        assert r.json()["translation"] == "gatos[cat]"
-
     def test_missing_text_field_is_422(self):
         r = client.post("/translate", json={"source_language": "ja"})
         assert r.status_code == 422
+
+    def test_response_echoes_languages(self):
+        r = client.post("/translate", json={
+            "text": "x", "source_language": "ja", "target_language": "en",
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert body["source_language"] == "ja"
+        assert body["target_language"] == "en"
+
+    def test_returns_fluent_translation_when_engine_configured(self, monkeypatch):
+        import src.app as app_module
+
+        monkeypatch.setattr(app_module, "_INTERNAL_SECRET", "")
+        monkeypatch.setattr(
+            app_module.translator, "translate_sentence",
+            lambda text, src, tgt: "Black cats sleep.",
+        )
+        local = TestClient(app_module.app)
+        r = local.post("/translate", json={
+            "text": "los gatos negros duermen", "source_language": "es", "target_language": "en",
+        })
+        assert r.status_code == 200
+        assert r.json()["translation"] == "Black cats sleep."
+
+    def test_returns_null_when_engine_unavailable(self, monkeypatch):
+        # No gloss fallback: engine None -> translation null (not a word gloss).
+        import src.app as app_module
+
+        monkeypatch.setattr(app_module, "_INTERNAL_SECRET", "")
+        monkeypatch.setattr(app_module.translator, "translate_sentence", lambda *a, **k: None)
+        local = TestClient(app_module.app)
+        r = local.post("/translate", json={
+            "text": "el gato negro", "source_language": "es", "target_language": "en",
+        })
+        assert r.status_code == 200
+        assert r.json()["translation"] is None
 
     def test_internal_secret_required_when_set(self, monkeypatch):
         monkeypatch.setenv("NLP_INTERNAL_SECRET", "secret123")
         import importlib
         import src.app as app_module
         importlib.reload(app_module)
-        patched_client = TestClient(app_module.app)
+        patched = TestClient(app_module.app)
+        try:
+            assert patched.post("/translate", json={"text": "食べる"}).status_code == 401
+            ok = patched.post(
+                "/translate",
+                json={"text": "食べる"},
+                headers={"X-Internal-Secret": "secret123"},
+            )
+            assert ok.status_code == 200
+        finally:
+            monkeypatch.delenv("NLP_INTERNAL_SECRET")
+            importlib.reload(app_module)
 
-        r = patched_client.post("/translate", json={"text": "食べる"})
-        assert r.status_code == 401
 
-        r = patched_client.post(
-            "/translate",
-            json={"text": "食べる"},
-            headers={"X-Internal-Secret": "secret123"},
-        )
-        assert r.status_code == 200
-        # Restore
-        monkeypatch.delenv("NLP_INTERNAL_SECRET")
+class TestTranslatorModule:
+    """Unit tests for src/translator.py — pure logic + gating, no network."""
+
+    def test_parse_v3_response(self):
+        from src import translator as T
+        out = {"translations": [{"translatedText": "Black cats sleep.", "model": "x"}]}
+        assert T._parse_v3_response(out) == "Black cats sleep."
+
+    def test_parse_v3_response_strips_and_handles_empty(self):
+        from src import translator as T
+        assert T._parse_v3_response({"translations": [{"translatedText": "  hi "}]}) == "hi"
+        assert T._parse_v3_response({"translations": [{"translatedText": ""}]}) is None
+        assert T._parse_v3_response({"translations": []}) is None
+        assert T._parse_v3_response({}) is None
+        assert T._parse_v3_response(None) is None
+
+    def test_bcp47_mapping(self):
+        from src import translator as T
+        assert T._bcp47("zh-cn") == "zh-CN"
+        assert T._bcp47("ZH-TW") == "zh-TW"
+        assert T._bcp47("vi") == "vi"
+        assert T._bcp47("ja") == "ja"
+        assert T._bcp47("xx") is None
+
+    def test_disabled_without_credentials_returns_none(self, monkeypatch):
+        # No ADC -> engine disabled -> None, no network. Reset module cache.
+        from src import translator as T
+        monkeypatch.setattr(T, "_init_done", False)
+        monkeypatch.setattr(T, "_creds", None)
+        monkeypatch.setattr(T, "_project", None)
+        monkeypatch.delenv("GOOGLE_APPLICATION_CREDENTIALS", raising=False)
+        monkeypatch.delenv("GOOGLE_CLOUD_PROJECT", raising=False)
+        # google.auth.default raising (no creds) must be swallowed -> None.
+        assert T.translate_sentence("los gatos", "es", "en") is None
+
+    def test_unsupported_or_same_language_returns_none(self, monkeypatch):
+        # Guard checks happen before any creds/network use.
+        from src import translator as T
+        assert T.translate_sentence("hello", "en", "en") is None   # same language
+        assert T.translate_sentence("hello", "es", "xx") is None   # unknown target
+        assert T.translate_sentence("", "es", "en") is None        # empty
+        assert T.translate_sentence("x" * 6000, "es", "en") is None  # too long
 
 
 class TestSentenceTranslationFromCorpus:
-    """
-    translate_sentence() must return a real human translation from the Tatoeba
-    corpus when present, matching exactly or after punctuation normalization, and
-    return None (so the caller falls back to a gloss) when absent.
-    """
+    """The Tatoeba corpus lookup on DictionaryService still exists (no longer
+    wired into /translate, but kept + tested for reuse)."""
 
     def _service_with_corpus(self, tmp_path):
         import sqlite3
@@ -159,7 +144,6 @@ class TestSentenceTranslationFromCorpus:
 
         db = tmp_path / "dict.db"
         conn = sqlite3.connect(str(db))
-        # Minimal shape of the Tatoeba view that translate_sentence queries.
         conn.executescript(
             """
             CREATE TABLE ja_en_pairs (ja_id INTEGER, ja_text TEXT, en_text TEXT);
@@ -177,7 +161,6 @@ class TestSentenceTranslationFromCorpus:
         assert svc.translate_sentence("私は学生です。") == "I am a student."
 
     def test_normalized_corpus_match(self, tmp_path):
-        # User text drops the trailing 。 — normalization should still match.
         svc = self._service_with_corpus(tmp_path)
         assert svc.translate_sentence("私は学生です") == "I am a student."
 
@@ -186,7 +169,6 @@ class TestSentenceTranslationFromCorpus:
         assert svc.translate_sentence("これは存在しない文です") is None
 
     def test_missing_corpus_returns_none_not_error(self, tmp_path):
-        # A dictionary DB with no Tatoeba view must not raise — fall back to None.
         import sqlite3
         from src.dictionary import DictionaryService
 
@@ -194,95 +176,3 @@ class TestSentenceTranslationFromCorpus:
         sqlite3.connect(str(db)).close()
         svc = DictionaryService(db_path=str(db))
         assert svc.translate_sentence("私は学生です。") is None
-
-    def test_non_en_target_returns_none(self, tmp_path):
-        svc = self._service_with_corpus(tmp_path)
-        assert svc.translate_sentence("私は学生です。", target_lang="fr") is None
-
-
-class TestFluentMT:
-    """Google-Translate fluent MT provider (src/translator.py). Network is never
-    hit: the free-endpoint parser is pure, and the /translate integration is
-    monkeypatched."""
-
-    def test_parse_free_response_single_segment(self):
-        from src import translator as T
-        shape = [[["black cats sleep", "los gatos negros duermen", None, None, 10]], None, "es"]
-        assert T._parse_free_response(shape) == "black cats sleep"
-
-    def test_parse_free_response_multi_segment_joined(self):
-        from src import translator as T
-        shape = [[["Hello. ", "Hola. "], ["World.", "Mundo."]], None, "es"]
-        assert T._parse_free_response(shape) == "Hello. World."
-
-    def test_parse_free_response_junk_returns_none(self):
-        from src import translator as T
-        assert T._parse_free_response({}) is None
-        assert T._parse_free_response([]) is None
-        assert T._parse_free_response([None]) is None
-
-    def test_mode_selection_matrix(self, monkeypatch):
-        from src import translator as T
-        for v in ("MT_PROVIDER", "GOOGLE_TRANSLATE_API_KEY", "MT_ENABLED"):
-            monkeypatch.delenv(v, raising=False)
-        assert T.mt_mode() == "off"
-        monkeypatch.setenv("MT_ENABLED", "yes")
-        assert T.mt_mode() == "google"
-        monkeypatch.setenv("GOOGLE_TRANSLATE_API_KEY", "k")
-        assert T.mt_mode() == "google_cloud"
-        monkeypatch.setenv("MT_PROVIDER", "off")  # explicit override wins
-        assert T.mt_mode() == "off"
-
-    def test_disabled_by_default_no_network(self, monkeypatch):
-        from src import translator as T
-        for v in ("MT_PROVIDER", "GOOGLE_TRANSLATE_API_KEY", "MT_ENABLED"):
-            monkeypatch.delenv(v, raising=False)
-        assert T.translate_sentence("los gatos", "es", "en") is None
-
-    def test_unsupported_or_same_language_returns_none(self, monkeypatch):
-        from src import translator as T
-        monkeypatch.setenv("MT_ENABLED", "1")
-        assert T.translate_sentence("hello", "en", "en") is None   # same language
-        assert T.translate_sentence("hello", "xx", "en") is None   # unknown source
-        assert T.translate_sentence("", "es", "en") is None        # empty
-
-    def test_translate_endpoint_prefers_mt(self, monkeypatch):
-        # /translate should return the fluent MT result ahead of the gloss.
-        # Use a fresh client bound to the live module's app so we're not affected
-        # by other tests that reload the module (auth-secret pollution).
-        import src.app as app_module
-        monkeypatch.setattr(
-            app_module.translator, "translate_sentence",
-            lambda text, src, tgt: "the black cats sleep",
-        )
-        monkeypatch.setattr(app_module, "_INTERNAL_SECRET", "")
-        local = TestClient(app_module.app)
-        r = local.post("/translate", json={
-            "text": "los gatos negros duermen", "source_language": "es", "target_language": "en",
-        })
-        assert r.status_code == 200
-        assert r.json()["translation"] == "the black cats sleep"
-
-    def test_translate_endpoint_falls_back_to_gloss_when_mt_none(self, monkeypatch):
-        # When MT returns None, the endpoint must still try the gloss path.
-        import src.app as app_module
-        from types import SimpleNamespace
-
-        monkeypatch.setattr(app_module, "_INTERNAL_SECRET", "")
-        monkeypatch.setattr(app_module.translator, "translate_sentence", lambda *a, **k: None)
-        monkeypatch.setattr(
-            app_module, "_tokenize_for_language",
-            lambda text, lang: [SimpleNamespace(surface="gato", lemma="gato", is_content_word=True)],
-        )
-        monkeypatch.setattr(
-            app_module._dict_service, "lookup",
-            lambda lemma, language=None, target_lang=None: SimpleNamespace(
-                definitions=[SimpleNamespace(definition="cat")]
-            ),
-        )
-        local = TestClient(app_module.app)
-        r = local.post("/translate", json={
-            "text": "el gato", "source_language": "es", "target_language": "en",
-        })
-        assert r.status_code == 200
-        assert r.json()["translation"] == "gato[cat]"

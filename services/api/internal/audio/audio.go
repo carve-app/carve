@@ -1,12 +1,10 @@
 // Package audio populates pronunciation audio for flashcards.
 //
-// Word audio is resolved through a per-language chain of providers
-// (see providers.go). The first provider that returns a non-empty,
-// validated audio URL wins; results are cached in the audio_cache table
-// keyed by (language_code, lemma, provider).
-//
-// Sentence audio is synthesized via the TTS provider (Google Translate's
-// free, key-less translate_tts endpoint) and is gated behind TTS_ENABLED.
+// Word and sentence audio are synthesized by Google Cloud Text-to-Speech
+// (see providers.go), authenticated with a service account. There is no
+// lower-quality fallback: when the engine is not configured, audio is absent.
+// Results are cached in the audio_cache table keyed by
+// (language_code, lemma, provider).
 package audio
 
 import (
@@ -21,61 +19,50 @@ import (
 // (word + sentence audio combined).
 const populateTimeout = 20 * time.Second
 
-// Lookup returns a cached or freshly-resolved word-audio URL for the given
-// lemma+reading in the given language. It walks the provider chain for the
-// language, returning the first validated URL (and caching it). Returns ""
-// when no provider can supply audio.
+// provider is the single TTS engine (Google Cloud TTS via service account).
+const ttsCacheKey = "google_cloud_tts"
+
+// Lookup returns a cached or freshly-synthesized word-audio URL for the given
+// lemma in the given language. Returns "" when the engine is unconfigured, the
+// language is unsupported, or synthesis fails. (`reading` is unused — Cloud TTS
+// pronounces the lemma directly.)
 func Lookup(ctx context.Context, db *pgxpool.Pool, language, lemma, reading string) string {
 	if lemma == "" {
 		return ""
 	}
-
-	for _, p := range providersFor(language) {
-		// Cache hit for this specific provider.
-		if url := cachedURL(ctx, db, language, lemma, p.Name()); url != "" {
-			return url
-		}
-
-		audioURL := p.WordAudio(ctx, language, lemma, reading)
-		if audioURL == "" {
-			continue
-		}
-
-		cacheURL(ctx, db, language, lemma, reading, p.Name(), audioURL)
-		return audioURL
+	if url := cachedURL(ctx, db, language, lemma, ttsCacheKey); url != "" {
+		return url
 	}
-	return ""
+	audioURL := newGoogleTTSProvider().WordAudio(ctx, language, lemma, reading)
+	if audioURL == "" {
+		return ""
+	}
+	cacheURL(ctx, db, language, lemma, reading, ttsCacheKey, audioURL)
+	return audioURL
 }
 
 // SentenceAudio returns a cached or freshly-synthesized audio URL for a full
-// sentence in the given language, using the TTS provider. Returns "" when TTS
-// is disabled, the sentence is empty, or synthesis fails.
+// sentence. Returns "" when the engine is unconfigured, the language is
+// unsupported, or synthesis fails.
 //
 // The cache is keyed on the sentence text in the lemma column with a distinct
-// "tts-sentence" provider so it never collides with word-audio rows.
+// provider key so it never collides with word-audio rows.
 func SentenceAudio(ctx context.Context, db *pgxpool.Pool, language, sentence string) string {
 	if sentence == "" {
 		return ""
 	}
-
-	tts := newTTSProvider()
-	if !tts.Enabled() {
-		return ""
-	}
-	if _, ok := ttsLangCode(language); !ok {
+	if _, ok := cloudTTSLangCode(language); !ok {
 		return ""
 	}
 
-	const provider = "tts-sentence"
+	const provider = "google_cloud_tts-sentence"
 	if url := cachedURL(ctx, db, language, sentence, provider); url != "" {
 		return url
 	}
-
-	audioURL := tts.synthesize(ctx, language, sentence)
+	audioURL := newGoogleTTSProvider().Synthesize(ctx, language, sentence)
 	if audioURL == "" {
 		return ""
 	}
-
 	cacheURL(ctx, db, language, sentence, "", provider, audioURL)
 	return audioURL
 }

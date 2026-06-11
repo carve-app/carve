@@ -619,63 +619,19 @@ def translate(
     x_internal_secret: Annotated[str | None, Header()] = None,
 ) -> TranslateResponse:
     """
-    Translate a sentence to the target language.
+    Translate a sentence to the target language using Google Cloud Translation
+    v3 — the Translation LLM (best-on-market for Carve's languages).
 
-    Strategy (best available first):
-      1. Tatoeba corpus — a real human translation when the JA sentence (or a
-         punctuation-normalized form) is in the imported JA→EN pairs.
-      2. Fluent MT — Google Translate, when configured (MT_PROVIDER / API key).
-         Produces an actual target-language sentence for any supported pair.
-      3. Word-gloss fallback — the top definition of each content word, bracketed
-         so it reads as a gloss, not a fluent translation.
-
-    Returns None (never a fabricated sentence) when none apply, so the client can
-    leave the field blank rather than show a wrong translation.
+    This is the single engine: there is deliberately NO word-gloss / corpus /
+    keyless fallback. A word-for-word gloss is worse than nothing, so when
+    translation is unavailable (engine not configured, unsupported language, or
+    API error) we return null and the card simply has no translation.
     """
     _check_auth(x_internal_secret)
 
-    if not req.text.strip():
-        return TranslateResponse(
-            translation=None,
-            source_language=req.source_language,
-            target_language=req.target_language,
-        )
-
-    translation: str | None = None
-
-    # 1) Real corpus translation (Japanese only, from the Tatoeba JA→EN pairs).
-    if req.source_language == "ja":
-        translation = _dict_service.translate_sentence(req.text, req.target_language)
-
-    # 2) Fluent machine translation (Google Translate) when configured. This is
-    #    a real sentence translation for any supported language pair; it returns
-    #    None when MT is disabled/unsupported/unreachable so we fall through.
-    if not translation:
-        translation = translator.translate_sentence(
-            req.text, req.source_language, req.target_language
-        )
-
-    # 3) Word-gloss fallback for ANY tokenizable language (ja/zh/ko/en/es/de/
-    #    fr/it/pt). Best-effort: a language with no tokenizer, or a dictionary
-    #    miss, simply yields no gloss (None) — translate never 422s.
-    if not translation:
-        try:
-            tokens = _tokenize_for_language(req.text, req.source_language)
-        except HTTPException:
-            tokens = []
-        gloss_parts: list[str] = []
-        for tok in tokens:
-            if not getattr(tok, "is_content_word", False):
-                continue
-            entry = _dict_service.lookup(
-                tok.lemma,
-                language=req.source_language,
-                target_lang=req.target_language,
-            )
-            if entry and entry.definitions:
-                top_def = entry.definitions[0].definition
-                gloss_parts.append(f"{tok.surface}[{top_def}]")
-        translation = " ".join(gloss_parts) if gloss_parts else None
+    translation = translator.translate_sentence(
+        req.text, req.source_language, req.target_language
+    )
 
     return TranslateResponse(
         translation=translation,
