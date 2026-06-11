@@ -1,13 +1,15 @@
 import { test, expect } from '@playwright/test';
 import { expectNoSeriousA11y } from './a11y';
+import { TEST_PASSWORD, uniqueEmail } from './helpers';
 
 test('login → auth guard → logout', async ({ page, request }) => {
   const apiBase = process.env.API_BASE ?? 'http://localhost:8080';
-  const email = `login+${Date.now()}@example.com`;
+  const email = uniqueEmail('login');
 
-  await request.post(`${apiBase}/v1/auth/register`, {
-    data: { email, password: 'super-secret-123', display_name: 'Login Tester' },
+  const reg = await request.post(`${apiBase}/v1/auth/register`, {
+    data: { email, password: TEST_PASSWORD, display_name: 'Login Tester' },
   });
+  expect(reg.ok(), `register ${email}`).toBe(true);
 
   // Guard: hitting /cards without a token redirects to /login.
   await page.context().clearCookies();
@@ -17,7 +19,7 @@ test('login → auth guard → logout', async ({ page, request }) => {
 
   // Sign in.
   await page.fill('input[type="email"]', email);
-  await page.fill('input[type="password"]', 'super-secret-123');
+  await page.fill('input[type="password"]', TEST_PASSWORD);
   await Promise.all([
     page.waitForURL(/\/(cards|onboarding|review)/, { timeout: 10_000 }),
     page.click('button[type="submit"]'),

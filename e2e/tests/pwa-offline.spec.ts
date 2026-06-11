@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { expectNoSeriousA11y } from './a11y';
+import { createTestCard, registerTestUser, seedAuthenticatedPage } from './helpers';
 
 /**
  * L9 — PWA offline mode acceptance.
@@ -17,23 +18,16 @@ import { expectNoSeriousA11y } from './a11y';
 test('offline-mode review queues 50 events and flushes on reconnect', async ({ page, request, context, browserName }) => {
   test.skip(browserName === 'webkit', 'WebKit doesn\'t expose setOffline behaviour for SWs in Playwright');
 
-  const apiBase = process.env.API_BASE ?? 'http://localhost:8080';
-  const email = `off+${Date.now()}@example.com`;
-
-  const reg = await request.post(`${apiBase}/v1/auth/register`, {
-    data: { email, password: 'super-secret-123', display_name: 'Offline' },
-  });
-  const { access_token } = await reg.json();
+  const { apiBase, access_token } = await registerTestUser(request, 'off', 'Offline');
 
   for (let i = 0; i < 50; i++) {
-    await request.post(`${apiBase}/v1/cards`, {
-      headers: { Authorization: `Bearer ${access_token}` },
-      data: { front_text: `word${i}`, back_text: `WORD${i}`, language_code: 'en' },
+    await createTestCard(request, apiBase, access_token, {
+      lemma: `単語${i}`,
+      backText: `word ${i}`,
     });
   }
 
-  await page.goto('/');
-  await page.evaluate((t) => localStorage.setItem('carve_access_token', t), access_token);
+  await seedAuthenticatedPage(page, access_token);
   await page.goto('/review');
 
   // Wait for the first card to be visible before going offline.

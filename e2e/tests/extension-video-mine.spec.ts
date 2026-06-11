@@ -1,6 +1,7 @@
 import { test, expect, chromium, type BrowserContext } from '@playwright/test';
 import path from 'node:path';
 import fs from 'node:fs';
+import { uniqueEmail } from './helpers';
 
 /**
  * Browser-driven verification of the video-mining media path.
@@ -43,13 +44,16 @@ const YT_FIXTURE = `<!DOCTYPE html>
 
 test.describe('extension — video mining media path', () => {
   test.skip(!fs.existsSync(EXTENSION_DIR), 'extension dist not built — run the chrome build first');
+  test.skip(process.env.E2E_USE_REAL !== '1', 'requires the real API/media stack');
 
   let ctx: BrowserContext | undefined;
   test.afterEach(async () => { await ctx?.close(); ctx = undefined; });
 
-  test('mining a subtitle cue creates a card with a captured screenshot', async () => {
+  test('mining a subtitle cue creates a card with a captured screenshot', async ({ browserName }, testInfo) => {
+    test.skip(browserName !== 'chromium', 'Chrome extension media path runs once under Chromium');
+
     // 1. Register a real user and grab a token from the live API.
-    const email = `vidmine+${Date.now()}@example.com`;
+    const email = uniqueEmail('vidmine');
     const reg = await fetch(`${API}/v1/auth/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -60,7 +64,7 @@ test.describe('extension — video mining media path', () => {
     expect(token).toBeTruthy();
 
     // 2. Launch a real browser with the built extension loaded.
-    ctx = await chromium.launchPersistentContext('', {
+    ctx = await chromium.launchPersistentContext(testInfo.outputPath('profile'), {
       headless: false,
       args: [
         `--disable-extensions-except=${EXTENSION_DIR}`,

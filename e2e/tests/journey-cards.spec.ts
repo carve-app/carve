@@ -1,26 +1,20 @@
 import { test, expect } from '@playwright/test';
 import { expectNoSeriousA11y } from './a11y';
+import { createTestCard, registerTestUser, seedAuthenticatedPage } from './helpers';
 
 async function setup(page: any, request: any) {
-  const apiBase = process.env.API_BASE ?? 'http://localhost:8080';
-  const email = `cards+${Date.now()}@example.com`;
-  const reg = await request.post(`${apiBase}/v1/auth/register`, {
-    data: { email, password: 'super-secret-123', display_name: 'Cards Tester' },
-  });
-  const { access_token } = await reg.json();
+  const { apiBase, access_token } = await registerTestUser(request, 'cards', 'Cards Tester');
 
   // Seed three cards
   const cardIds: string[] = [];
-  for (const word of ['apple', 'banana', 'cherry']) {
-    const r = await request.post(`${apiBase}/v1/cards`, {
-      headers: { Authorization: `Bearer ${access_token}` },
-      data: { front_text: word, back_text: word.toUpperCase(), language_code: 'en' },
+  for (const word of ['りんご', 'バナナ', 'さくらんぼ']) {
+    const card = await createTestCard(request, apiBase, access_token, {
+      lemma: word,
+      backText: `${word} definition`,
     });
-    const card = await r.json();
     cardIds.push(card.id);
   }
-  await page.goto('/');
-  await page.evaluate((t: string) => localStorage.setItem('carve_access_token', t), access_token);
+  await seedAuthenticatedPage(page, access_token);
   return { access_token, cardIds, apiBase };
 }
 

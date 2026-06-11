@@ -1,15 +1,10 @@
 import { test, expect } from '@playwright/test';
 import { expectNoSeriousA11y } from './a11y';
+import { registerTestUser, seedAuthenticatedPage } from './helpers';
 
 test('language switcher persists across navigation', async ({ page, request }) => {
-  const apiBase = process.env.API_BASE ?? 'http://localhost:8080';
-  const email = `lang+${Date.now()}@example.com`;
-  const reg = await request.post(`${apiBase}/v1/auth/register`, {
-    data: { email, password: 'super-secret-123', display_name: 'Lang Tester' },
-  });
-  const { access_token } = await reg.json();
-  await page.goto('/');
-  await page.evaluate((t: string) => localStorage.setItem('carve_access_token', t), access_token);
+  const { access_token } = await registerTestUser(request, 'lang', 'Lang Tester');
+  await seedAuthenticatedPage(page, access_token);
 
   await page.goto('/cards');
   await page.waitForLoadState('networkidle').catch(() => {});

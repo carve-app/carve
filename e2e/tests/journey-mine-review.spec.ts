@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { expectNoSeriousA11y } from './a11y';
+import { createTestCard, registerTestUser, seedAuthenticatedPage } from './helpers';
 
 /**
  * L5 — mining + reviewing journey.
@@ -9,29 +10,20 @@ import { expectNoSeriousA11y } from './a11y';
  * (Space) → rate (3) → next card. Asserts the server received the
  * review event by polling the due-count.
  */
-test('user can review a card with keyboard shortcuts', async ({ page, request, baseURL }) => {
-  const apiBase = process.env.API_BASE ?? 'http://localhost:8080';
-  const email = `kbd+${Date.now()}@example.com`;
-
+test('user can review a card with keyboard shortcuts', async ({ page, request }) => {
   // Register via API so we don't depend on the UI register flow here.
-  const reg = await request.post(`${apiBase}/v1/auth/register`, {
-    data: { email, password: 'super-secret-123', display_name: 'KBD' },
-  });
-  expect(reg.ok()).toBe(true);
-  const { access_token } = await reg.json();
+  const { apiBase, access_token } = await registerTestUser(request, 'kbd', 'KBD');
 
   // Seed three cards through the API.
-  for (const word of ['cat', 'dog', 'bird']) {
-    const r = await request.post(`${apiBase}/v1/cards`, {
-      headers: { Authorization: `Bearer ${access_token}` },
-      data: { front_text: word, back_text: word.toUpperCase(), language_code: 'en' },
+  for (const word of ['猫', '犬', '鳥']) {
+    await createTestCard(request, apiBase, access_token, {
+      lemma: word,
+      backText: `${word} definition`,
     });
-    expect(r.ok()).toBe(true);
   }
 
   // Persist the token the same way the SvelteKit shell does, then load /review.
-  await page.goto('/');
-  await page.evaluate((t) => localStorage.setItem('carve_access_token', t), access_token);
+  await seedAuthenticatedPage(page, access_token);
   await page.goto('/review');
   await expectNoSeriousA11y(page, { label: 'review' });
 

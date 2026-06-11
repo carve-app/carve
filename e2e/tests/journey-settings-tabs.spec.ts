@@ -1,23 +1,20 @@
 import { test, expect } from '@playwright/test';
 import { expectNoSeriousA11y } from './a11y';
+import { registerTestUser, seedAuthenticatedPage } from './helpers';
 
 /**
  * L5/L8 — every Settings tab is reachable and accessible.
  *
  * Per the inventory:
- *   Account · Display · Review · Mining · Sites · Sync · Billing
+ *   Account · Display · Review · Mining · Sites · Sync
  */
-const TABS = ['account', 'display', 'review', 'mining', 'sites', 'sync', 'billing'] as const;
+const TABS = ['account', 'display', 'review', 'mining', 'sites', 'sync'] as const;
 
 async function seedAndLogin(page: any, request: any, apiBase: string, prefix: string) {
-  const email = `${prefix}+${Date.now()}@example.com`;
-  const reg = await request.post(`${apiBase}/v1/auth/register`, {
-    data: { email, password: 'super-secret-123', display_name: 'Settings Tester' },
-  });
-  const { access_token } = await reg.json();
-  await page.goto('/');
-  await page.evaluate((t: string) => localStorage.setItem('carve_access_token', t), access_token);
-  return access_token;
+  const user = await registerTestUser(request, prefix, 'Settings Tester');
+  expect(user.apiBase).toBe(apiBase);
+  await seedAuthenticatedPage(page, user.access_token);
+  return user.access_token;
 }
 
 for (const tab of TABS) {

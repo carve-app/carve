@@ -15,6 +15,8 @@
   import { toasts } from '$lib/stores/toast';
   import { queueEvent, flushQueue } from '$lib/offline';
 
+  const REVIEW_SESSION_LIMIT = 50;
+
   type Phase = 'loading' | 'front' | 'back' | 'done' | 'error';
 
   let phase: Phase = 'loading';
@@ -165,7 +167,7 @@
     queue = [];
     lastCard = null;
     try {
-      const res = await fetchReviewSession(language, 20);
+      const res = await fetchReviewSession(language, REVIEW_SESSION_LIMIT);
       queue = res.cards;
       sessionStartTime = Date.now();
       advance();

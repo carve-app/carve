@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { expectNoSeriousA11y } from './a11y';
+import { TEST_PASSWORD, uniqueEmail } from './helpers';
 
 /**
  * L5 — full journey: landing → register → onboarding → cards page.
@@ -18,9 +19,9 @@ test('user can register and reach the cards page', async ({ page }) => {
   await page.goto('/register');
   await expectNoSeriousA11y(page, { label: 'register', exclude: ['#carve-popup'] });
 
-  const email = `tester+${Date.now()}@example.com`;
+  const email = uniqueEmail('tester');
   await page.fill('input[type="email"]', email);
-  await page.fill('input[type="password"]', 'super-secret-123');
+  await page.fill('input[type="password"]', TEST_PASSWORD);
   // The register form has a display-name field in some variants.
   const nameInput = page.locator('input[name="display_name"], input[name="name"]').first();
   if (await nameInput.count()) await nameInput.fill('Beta Tester');
