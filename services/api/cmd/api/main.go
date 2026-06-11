@@ -18,6 +18,7 @@ import (
 	"github.com/carve-app/carve/services/api/internal/decks"
 	"github.com/carve-app/carve/services/api/internal/discover"
 	"github.com/carve-app/carve/services/api/internal/export"
+	"github.com/carve-app/carve/services/api/internal/grammar"
 	"github.com/carve-app/carve/services/api/internal/immersion"
 	"github.com/carve-app/carve/services/api/internal/importer"
 	"github.com/carve-app/carve/services/api/internal/library"
@@ -110,6 +111,7 @@ func main() {
 	discoverHandler := discover.NewHandler(pool)
 	discoverIngester := discover.NewIngester(pool)
 	reportsHandler := reports.NewHandler(pool)
+	grammarHandler := grammar.NewHandler(pool)
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(auth.Middleware)
@@ -206,6 +208,11 @@ func main() {
 
 		// Learning reports
 		r.Get("/reports/weekly", reportsHandler.Weekly)
+
+		// Grammar — user's known JLPT patterns (catalog lives behind /v1/nlp/grammar/patterns)
+		r.Get("/grammar/known", grammarHandler.ListKnown)
+		r.Post("/grammar/known", grammarHandler.MarkKnown)
+		r.Delete("/grammar/known", grammarHandler.UnmarkKnown)
 
 	})
 
