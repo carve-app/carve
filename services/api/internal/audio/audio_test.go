@@ -2,6 +2,9 @@ package audio
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,41 +16,144 @@ import (
 // TestProvidersFor verifies provider selection per language: JA leads with the
 // native JapanesePod101 provider then TTS fallback; every other supported
 // language gets the TTS provider only.
+func providerNames(language string) []string {
+	var got []string
+	for _, p := range providersFor(language) {
+		got = append(got, p.Name())
+	}
+	return got
+}
+
+func eqNames(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestProvidersFor verifies the chain composition under each TTS mode. The
+// generic TTS provider is env-gated (ttsMode): gtts (key-less), google_cloud
+// (production), or off (default).
 func TestProvidersFor(t *testing.T) {
-	tests := []struct {
-		language  string
-		wantNames []string
-	}{
-		{"ja", []string{"jpod101", "tts"}},
-		{"zh-cn", []string{"tts"}},
-		{"zh-tw", []string{"tts"}},
-		{"ko", []string{"tts"}},
-		{"en", []string{"tts"}},
-		{"es", []string{"tts"}},
-		{"de", []string{"tts"}},
-		{"fr", []string{"tts"}},
-		{"pt", []string{"tts"}},
-		{"it", []string{"tts"}},
-		{"vi", []string{"tts"}},
-		{"unknown", []string{"tts"}}, // chain still has TTS; it no-ops on unknown lang.
+	// gtts mode: the key-less provider is the cross-language fallback.
+	t.Setenv("TTS_PROVIDER", "gtts")
+	gtts := map[string][]string{
+		"ja": {"jpod101", "tts"}, "zh-cn": {"tts"}, "es": {"tts"}, "unknown": {"tts"},
+	}
+	for lang, want := range gtts {
+		if got := providerNames(lang); !eqNames(got, want) {
+			t.Errorf("gtts providersFor(%q) = %v, want %v", lang, got, want)
+		}
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.language, func(t *testing.T) {
-			chain := providersFor(tt.language)
-			var got []string
-			for _, p := range chain {
-				got = append(got, p.Name())
-			}
-			if len(got) != len(tt.wantNames) {
-				t.Fatalf("providersFor(%q) = %v, want %v", tt.language, got, tt.wantNames)
-			}
-			for i := range got {
-				if got[i] != tt.wantNames[i] {
-					t.Fatalf("providersFor(%q)[%d] = %q, want %q", tt.language, i, got[i], tt.wantNames[i])
-				}
-			}
-		})
+	// google_cloud mode: the production provider replaces gtts.
+	t.Setenv("TTS_PROVIDER", "google_cloud")
+	if got := providerNames("ja"); !eqNames(got, []string{"jpod101", "google_cloud_tts"}) {
+		t.Errorf("google_cloud providersFor(ja) = %v", got)
+	}
+	if got := providerNames("es"); !eqNames(got, []string{"google_cloud_tts"}) {
+		t.Errorf("google_cloud providersFor(es) = %v", got)
+	}
+
+	// off (default): only native dictionary providers remain.
+	t.Setenv("TTS_PROVIDER", "off")
+	if got := providerNames("ja"); !eqNames(got, []string{"jpod101"}) {
+		t.Errorf("off providersFor(ja) = %v, want [jpod101]", got)
+	}
+	if got := providerNames("es"); len(got) != 0 {
+		t.Errorf("off providersFor(es) = %v, want []", got)
+	}
+}
+
+// TestTTSMode covers the env-driven selection matrix.
+func TestTTSMode(t *testing.T) {
+	cases := []struct {
+		provider, key, enabled, want string
+	}{
+		{"google_cloud", "", "", "google_cloud"}, // explicit override wins
+		{"gtts", "k", "", "gtts"},
+		{"off", "k", "1", "off"},
+		{"", "k", "", "google_cloud"}, // inferred from key
+		{"", "", "true", "gtts"},      // inferred from TTS_ENABLED
+		{"", "", "", "off"},           // default
+	}
+	for _, c := range cases {
+		t.Setenv("TTS_PROVIDER", c.provider)
+		t.Setenv("GOOGLE_TTS_API_KEY", c.key)
+		t.Setenv("TTS_ENABLED", c.enabled)
+		if got := ttsMode(); got != c.want {
+			t.Errorf("ttsMode(provider=%q key=%q enabled=%q) = %q, want %q", c.provider, c.key, c.enabled, got, c.want)
+		}
+	}
+}
+
+// TestCloudTTSLangCode covers the Carve→BCP-47 mapping for Cloud TTS.
+func TestCloudTTSLangCode(t *testing.T) {
+	cases := map[string]string{"ja": "ja-JP", "zh-cn": "cmn-CN", "ko": "ko-KR", "es": "es-ES", "pt": "pt-PT"}
+	for in, want := range cases {
+		if got, ok := cloudTTSLangCode(in); !ok || got != want {
+			t.Errorf("cloudTTSLangCode(%q) = (%q,%v), want %q", in, got, ok, want)
+		}
+	}
+	if _, ok := cloudTTSLangCode("xx"); ok {
+		t.Error("cloudTTSLangCode(xx) should be unsupported")
+	}
+}
+
+// TestCloudTTSSynthesizeAndUpload drives the production provider end-to-end with
+// httptest doubles for both the Cloud TTS API and the media service, asserting
+// the request shapes and that base64 audioContent is decoded + uploaded.
+func TestCloudTTSSynthesizeAndUpload(t *testing.T) {
+	const fakeMP3 = "ID3-fake-mp3-bytes"
+	// Media service double: expects the decoded MP3 as the raw body.
+	media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != fakeMP3 {
+			t.Errorf("media got body %q, want %q", body, fakeMP3)
+		}
+		if ct := r.Header.Get("Content-Type"); ct != "audio/mpeg" {
+			t.Errorf("media Content-Type = %q, want audio/mpeg", ct)
+		}
+		w.WriteHeader(http.StatusCreated)
+		w.Write([]byte(`{"url":"/audio/abc.mp3"}`))
+	}))
+	defer media.Close()
+
+	// Cloud TTS double: returns base64(fakeMP3) in audioContent.
+	tts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req ttsSynthesizeRequest
+		json.NewDecoder(r.Body).Decode(&req)
+		if req.Voice.LanguageCode != "es-ES" || req.AudioConfig.AudioEncoding != "MP3" {
+			t.Errorf("unexpected synth request: %+v", req)
+		}
+		enc := base64.StdEncoding.EncodeToString([]byte(fakeMP3))
+		w.Write([]byte(`{"audioContent":"` + enc + `"}`))
+	}))
+	defer tts.Close()
+
+	old := cloudTTSBaseURL
+	cloudTTSBaseURL = tts.URL
+	defer func() { cloudTTSBaseURL = old }()
+
+	t.Setenv("GOOGLE_TTS_API_KEY", "test-key")
+	t.Setenv("MEDIA_SERVICE_URL", media.URL)
+	p := newGoogleCloudTTSProvider()
+
+	got := p.WordAudio(context.Background(), "es", "gato", "")
+	want := media.URL + "/audio/abc.mp3"
+	if got != want {
+		t.Errorf("WordAudio = %q, want %q", got, want)
+	}
+
+	// No media service → cannot persist → "".
+	t.Setenv("MEDIA_SERVICE_URL", "")
+	if url := newGoogleCloudTTSProvider().WordAudio(context.Background(), "es", "gato", ""); url != "" {
+		t.Errorf("WordAudio without media = %q, want empty", url)
 	}
 }
 

@@ -1,9 +1,13 @@
 package audio
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -22,23 +26,49 @@ type Provider interface {
 }
 
 // providersFor returns the ordered provider chain for a language. Dictionary
-// providers (exact, native recordings) are tried first; the TTS provider is
-// the universal fallback so any supported language still gets word audio.
+// providers (exact, native recordings) are tried first; a TTS provider is the
+// universal fallback so any supported language still gets word audio.
+//
+// The generic TTS provider is selected by env (see ttsMode):
+//   - "google_cloud": production Cloud TTS (needs GOOGLE_TTS_API_KEY +
+//     MEDIA_SERVICE_URL to persist the synthesized bytes as a URL),
+//   - "gtts": the key-less Google Translate endpoint (dev/best-effort),
+//   - "off": no TTS (default).
 func providersFor(language string) []Provider {
 	var chain []Provider
 
-	// Japanese keeps its native JapanesePod101 recordings as the primary source
-	// — unchanged from before this refactor.
+	// Japanese keeps its native JapanesePod101 recordings as the primary source.
 	if language == "ja" {
 		chain = append(chain, jpod101Provider{})
 	}
 
-	// TTS is the cross-language fallback. It only acts when enabled and the
-	// language is mappable (see WordAudio), so adding it here is harmless when
-	// TTS is off.
-	chain = append(chain, newTTSProvider())
-
+	switch ttsMode() {
+	case "google_cloud":
+		chain = append(chain, newGoogleCloudTTSProvider())
+	case "gtts":
+		chain = append(chain, newTTSProvider())
+	}
 	return chain
+}
+
+// ttsMode reports which generic TTS provider to use, driven by env:
+//
+//	TTS_PROVIDER = google_cloud | gtts | off   (explicit override)
+//
+// When TTS_PROVIDER is unset/blank the mode is inferred: GOOGLE_TTS_API_KEY set
+// → google_cloud; else TTS_ENABLED truthy → gtts; else off.
+func ttsMode() string {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("TTS_PROVIDER"))) {
+	case "google_cloud", "gtts", "off":
+		return strings.ToLower(strings.TrimSpace(os.Getenv("TTS_PROVIDER")))
+	}
+	if os.Getenv("GOOGLE_TTS_API_KEY") != "" {
+		return "google_cloud"
+	}
+	if ttsEnabled() {
+		return "gtts"
+	}
+	return "off"
 }
 
 // ── JapanesePod101 (Japanese only) ────────────────────────────────────────────
@@ -228,4 +258,160 @@ func (p ttsProvider) synthesize(ctx context.Context, language, text string) stri
 	}
 
 	return audioURL
+}
+
+// ── Google Cloud Text-to-Speech (production) ──────────────────────────────────
+//
+// Unlike the key-less gtts endpoint, Cloud TTS is a supported API. It returns
+// base64 MP3 bytes (not a URL), so this provider persists the audio through the
+// media service and returns that URL. Requires GOOGLE_TTS_API_KEY and
+// MEDIA_SERVICE_URL; without both it returns "" (no place to store the bytes).
+
+const googleCloudTTSURL = "https://texttospeech.googleapis.com/v1/text:synthesize"
+
+// cloudTTSBaseURL is overridable in tests to point at an httptest server.
+var cloudTTSBaseURL = googleCloudTTSURL
+
+type googleCloudTTSProvider struct {
+	apiKey    string
+	mediaBase string // e.g. http://media:8002; empty disables persistence.
+	mediaTok  string // optional MEDIA_INTERNAL_TOKEN; sent as Bearer when set.
+	client    *http.Client
+}
+
+func newGoogleCloudTTSProvider() googleCloudTTSProvider {
+	return googleCloudTTSProvider{
+		apiKey:    os.Getenv("GOOGLE_TTS_API_KEY"),
+		mediaBase: strings.TrimRight(os.Getenv("MEDIA_SERVICE_URL"), "/"),
+		mediaTok:  os.Getenv("MEDIA_INTERNAL_TOKEN"),
+		client:    &http.Client{Timeout: ttsTimeout},
+	}
+}
+
+func (p googleCloudTTSProvider) Name() string { return "google_cloud_tts" }
+
+// cloudTTSLangCodes maps Carve language codes to BCP-47 codes for Cloud TTS.
+var cloudTTSLangCodes = map[string]string{
+	"ja": "ja-JP", "zh-cn": "cmn-CN", "zh-tw": "cmn-TW", "ko": "ko-KR",
+	"en": "en-US", "es": "es-ES", "de": "de-DE", "fr": "fr-FR",
+	"it": "it-IT", "pt": "pt-PT", "vi": "vi-VN",
+}
+
+func cloudTTSLangCode(language string) (string, bool) {
+	c, ok := cloudTTSLangCodes[strings.ToLower(language)]
+	return c, ok
+}
+
+type ttsSynthesizeRequest struct {
+	Input struct {
+		Text string `json:"text"`
+	} `json:"input"`
+	Voice struct {
+		LanguageCode string `json:"languageCode"`
+		SSMLGender   string `json:"ssmlGender"`
+	} `json:"voice"`
+	AudioConfig struct {
+		AudioEncoding string `json:"audioEncoding"`
+	} `json:"audioConfig"`
+}
+
+func (p googleCloudTTSProvider) WordAudio(ctx context.Context, language, lemma, _ string) string {
+	if p.apiKey == "" || lemma == "" {
+		return ""
+	}
+	langCode, ok := cloudTTSLangCode(language)
+	if !ok {
+		return ""
+	}
+	mp3, err := p.synthesize(ctx, langCode, lemma)
+	if err != nil || len(mp3) == 0 {
+		if err != nil {
+			slog.Warn("google cloud tts synthesize failed", "language", language, "error", err)
+		}
+		return ""
+	}
+	if p.mediaBase == "" {
+		slog.Warn("google cloud tts: MEDIA_SERVICE_URL unset; cannot persist audio")
+		return ""
+	}
+	storedURL, err := p.uploadToMedia(ctx, mp3)
+	if err != nil {
+		slog.Warn("google cloud tts: media upload failed", "error", err)
+		return ""
+	}
+	return storedURL
+}
+
+// synthesize POSTs to the Cloud TTS REST API and returns decoded MP3 bytes.
+func (p googleCloudTTSProvider) synthesize(ctx context.Context, languageCode, text string) ([]byte, error) {
+	var body ttsSynthesizeRequest
+	body.Input.Text = text
+	body.Voice.LanguageCode = languageCode
+	body.Voice.SSMLGender = "NEUTRAL"
+	body.AudioConfig.AudioEncoding = "MP3"
+
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	endpoint := cloudTTSBaseURL + "?key=" + url.QueryEscape(p.apiKey)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		// Don't log the body; it can echo the request text.
+		return nil, fmt.Errorf("tts api returned %d", resp.StatusCode)
+	}
+
+	var out struct {
+		AudioContent string `json:"audioContent"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	if out.AudioContent == "" {
+		return nil, fmt.Errorf("tts api returned empty audioContent")
+	}
+	return base64.StdEncoding.DecodeString(out.AudioContent)
+}
+
+// uploadToMedia POSTs MP3 bytes to ${MEDIA_SERVICE_URL}/audio and returns the
+// absolute media URL. Mirrors cards.uploadToMediaService (replicated here to
+// avoid importing the cards package).
+func (p googleCloudTTSProvider) uploadToMedia(ctx context.Context, mp3 []byte) (string, error) {
+	endpoint := p.mediaBase + "/audio"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(mp3))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "audio/mpeg")
+	if p.mediaTok != "" {
+		req.Header.Set("Authorization", "Bearer "+p.mediaTok)
+	}
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("media service %s returned %d", endpoint, resp.StatusCode)
+	}
+	var result struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<16)).Decode(&result); err != nil {
+		return "", err
+	}
+	if result.URL == "" {
+		return "", fmt.Errorf("media service returned empty url")
+	}
+	return p.mediaBase + result.URL, nil
 }
