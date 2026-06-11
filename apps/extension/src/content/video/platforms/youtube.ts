@@ -1,12 +1,14 @@
 import type { SubtitleOverlay } from '../SubtitleOverlay';
+import { extractNativeCueText } from './nativeText';
 
 const NATIVE_SELECTOR = '.ytp-caption-window-container';
+const VIDEO_SELECTOR = 'video.html5-main-video, video.video-stream';
 
 export class YouTubeHook {
   private observer: MutationObserver | null = null;
   private lastText = '';
 
-  constructor(private overlay: SubtitleOverlay) {}
+  constructor(private overlay: SubtitleOverlay, private lang: string = '') {}
 
   mount(): void {
     this.overlay.hideNativeContainer(NATIVE_SELECTOR);
@@ -29,12 +31,13 @@ export class YouTubeHook {
     if (!text || text === this.lastText) return;
     this.lastText = text;
 
-    const { startMs, endMs } = this.getActiveCueTiming();
-    this.overlay.onCue({ text, startMs, endMs });
+    const video = document.querySelector<HTMLVideoElement>(VIDEO_SELECTOR);
+    const { startMs, endMs } = this.getActiveCueTiming(video);
+    const nativeText = extractNativeCueText(video, this.lang);
+    this.overlay.onCue({ text, startMs, endMs, nativeText });
   }
 
-  private getActiveCueTiming(): { startMs: number; endMs: number } {
-    const video = document.querySelector<HTMLVideoElement>('video.html5-main-video, video.video-stream');
+  private getActiveCueTiming(video: HTMLVideoElement | null): { startMs: number; endMs: number } {
     if (!video) return defaultTiming();
 
     for (let i = 0; i < video.textTracks.length; i++) {
