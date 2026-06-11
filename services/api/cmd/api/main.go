@@ -158,6 +158,8 @@ func main() {
 
 		// Export
 		r.Get("/export", exportHandler.Export)
+		r.Get("/export/csv", exportHandler.ExportCSV)
+		r.Get("/export/apkg", exportHandler.ExportAPKG)
 
 		// Settings
 		r.Get("/settings/fsrs", settingsHandler.GetFSRS)
