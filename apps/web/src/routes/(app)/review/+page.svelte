@@ -38,6 +38,11 @@
     el?.play();
   }
 
+  function playSentenceAudio() {
+    const el = document.getElementById('card-sentence-audio') as HTMLAudioElement | null;
+    el?.play();
+  }
+
   function formatInterval(isoOrDuration: string): string {
     const now = Date.now();
     const due = new Date(isoOrDuration).getTime();
@@ -381,6 +386,13 @@
             {#if current.sentence}
               <p class="sentence">{current.sentence}</p>
             {/if}
+            {#if current.subtitle_translation}
+              <p class="translation">{current.subtitle_translation}</p>
+            {/if}
+            {#if current.sentence_audio_url}
+              <audio src={current.sentence_audio_url} preload="auto" id="card-sentence-audio"></audio>
+              <button class="audio-btn" on:click={playSentenceAudio} title="Play sentence audio (S)">▶ sentence</button>
+            {/if}
             {#if current.image_url}
               <img class="card-image" src={current.image_url} alt="context screenshot" />
             {/if}
@@ -563,6 +575,12 @@
     font-style: italic;
     margin: 0.5rem 0 0;
     line-height: 1.6;
+  }
+  .translation {
+    font-size: 0.9rem;
+    color: #7a8aa6;
+    margin: 0.35rem 0 0;
+    line-height: 1.5;
   }
   .card-image {
     max-width: 100%;

@@ -30,8 +30,10 @@ export interface Card {
   front_text: string;
   back_text: string | null;
   sentence: string | null;
+  subtitle_translation: string | null;
   source_url: string | null;
   audio_url: string | null;
+  sentence_audio_url: string | null;
   image_url: string | null;
   fsrs_state: FsrsState;
   stability: number | null;

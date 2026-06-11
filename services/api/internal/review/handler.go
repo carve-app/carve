@@ -107,19 +107,21 @@ func (h *Handler) DueCount(w http.ResponseWriter, r *http.Request) {
 // ── GET /v1/review/session ────────────────────────────────────────────────────
 
 type sessionCard struct {
-	ID         string     `json:"id"`
-	FrontText  string     `json:"front_text"`
-	BackText   *string    `json:"back_text"`
-	Sentence   *string    `json:"sentence"`
-	SourceURL  *string    `json:"source_url"`
-	AudioURL   *string    `json:"audio_url"`
-	ImageURL   *string    `json:"image_url"`
-	FsrsState  string     `json:"fsrs_state"`
-	Stability  *float64   `json:"stability"`
-	Difficulty *float64   `json:"difficulty"`
-	Due        *time.Time `json:"due"`
-	Reps       int        `json:"reps"`
-	Lapses     int        `json:"lapses"`
+	ID            string     `json:"id"`
+	FrontText     string     `json:"front_text"`
+	BackText      *string    `json:"back_text"`
+	Sentence      *string    `json:"sentence"`
+	Translation   *string    `json:"subtitle_translation"`
+	SourceURL     *string    `json:"source_url"`
+	AudioURL      *string    `json:"audio_url"`
+	SentenceAudio *string    `json:"sentence_audio_url"`
+	ImageURL      *string    `json:"image_url"`
+	FsrsState     string     `json:"fsrs_state"`
+	Stability     *float64   `json:"stability"`
+	Difficulty    *float64   `json:"difficulty"`
+	Due           *time.Time `json:"due"`
+	Reps          int        `json:"reps"`
+	Lapses        int        `json:"lapses"`
 }
 
 func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
@@ -143,8 +145,8 @@ func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch all due cards, learning-priority first (smallest due time first)
 	rows, err := h.db.Query(r.Context(),
-		`SELECT id, front_text, back_text, sentence, source_url,
-		        front_audio_url, front_image_url,
+		`SELECT id, front_text, back_text, sentence, subtitle_translation, source_url,
+		        front_audio_url, sentence_audio_url, front_image_url,
 		        fsrs_state, fsrs_stability, fsrs_difficulty, fsrs_due,
 		        fsrs_reps, fsrs_lapses
 		 FROM cards
@@ -181,8 +183,8 @@ func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c rawCard
 		if err := rows.Scan(
-			&c.ID, &c.FrontText, &c.BackText, &c.Sentence, &c.SourceURL,
-			&c.AudioURL, &c.ImageURL,
+			&c.ID, &c.FrontText, &c.BackText, &c.Sentence, &c.Translation, &c.SourceURL,
+			&c.AudioURL, &c.SentenceAudio, &c.ImageURL,
 			&c.FsrsState, &c.Stability, &c.Difficulty, &c.Due,
 			&c.Reps, &c.Lapses,
 		); err != nil {

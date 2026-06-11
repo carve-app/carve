@@ -15,7 +15,7 @@
     { code: 'ja',    flag: '🇯🇵', name: 'Japanese',              native: '日本語' },
     { code: 'zh-cn', flag: '🇨🇳', name: 'Chinese (Simplified)', native: '中文'   },
     { code: 'ko',    flag: '🇰🇷', name: 'Korean',               native: '한국어' },
-    { code: 'en',    flag: '🇬🇧', name: 'English',              native: 'English' },
+    { code: 'en',    flag: '🇬🇧', name: 'English (intermediate+)', native: 'English' },
   ];
 
   const WORD_GROUPS: Record<string, { label: string; words: string[] }[]> = {

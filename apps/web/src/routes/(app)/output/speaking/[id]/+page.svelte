@@ -20,6 +20,16 @@
 
   interface Exercise { id: string; prompt: string; target_word: string }
   interface TranscribeResp { transcript: string; diff: unknown[]; wer: number }
+  interface FeedbackDetail { grammar: string; vocabulary: string; naturalness: string; }
+  interface Feedback { score: number; feedback: string; feedback_detail: FeedbackDetail; }
+
+  let feedback: Feedback | null = null;
+
+  function scoreColor(score: number): string {
+    if (score >= 80) return '#4caf50';
+    if (score >= 50) return '#ffa726';
+    return '#ef5350';
+  }
 
   onMount(async () => {
     try {
@@ -89,11 +99,15 @@
       transcript = data.transcript ?? '';
       usedTarget = transcript.toLowerCase().includes(targetWord.toLowerCase());
 
-      await apiFetch('/v1/output/submit', {
+      // Submit the transcript for AI evaluation. The backend field is
+      // `answer_text` (not `response_text`) — sending the wrong key produced an
+      // empty answer and discarded feedback. Capture + render the result so the
+      // user actually gets pronunciation/usage feedback on what they said.
+      feedback = await apiFetch<Feedback>('/v1/output/submit', {
         method: 'POST',
         body: JSON.stringify({
           exercise_id: id,
-          response_text: transcript,
+          answer_text: transcript,
         }),
       });
     } catch (e) {
@@ -106,6 +120,7 @@
     transcript = '';
     userAudioUrl = '';
     usedTarget = false;
+    feedback = null;
   }
 </script>
 
@@ -149,6 +164,22 @@
     </div>
   {/if}
 
+  {#if feedback}
+    <div class="feedback-card">
+      <div class="score-circle" style="color:{scoreColor(feedback.score)}">{Math.round(feedback.score)}</div>
+      <p class="feedback-text">{feedback.feedback}</p>
+      {#if feedback.feedback_detail?.grammar}
+        <div class="detail-row"><span class="detail-label">Grammar</span><span>{feedback.feedback_detail.grammar}</span></div>
+      {/if}
+      {#if feedback.feedback_detail?.vocabulary}
+        <div class="detail-row"><span class="detail-label">Vocabulary</span><span>{feedback.feedback_detail.vocabulary}</span></div>
+      {/if}
+      {#if feedback.feedback_detail?.naturalness}
+        <div class="detail-row"><span class="detail-label">Naturalness</span><span>{feedback.feedback_detail.naturalness}</span></div>
+      {/if}
+    </div>
+  {/if}
+
   {#if userAudioUrl}
     <div class="playback"><audio controls src={userAudioUrl}></audio></div>
   {/if}
@@ -167,6 +198,11 @@
     padding: 1.25rem;
     margin-bottom: 1rem;
   }
+  .feedback-card { background: #13151a; border: 1px solid #2a2d36; border-radius: 10px; padding: 1.25rem; margin-bottom: 1rem; }
+  .score-circle { font-size: 2.5rem; font-weight: 700; text-align: center; margin-bottom: 0.5rem; }
+  .feedback-text { color: #e8eaf0; font-size: 0.95rem; margin: 0 0 0.75rem; }
+  .detail-row { display: flex; gap: 0.75rem; font-size: 0.85rem; color: #b0bec5; padding: 0.3rem 0; border-top: 1px solid #2a2d36; }
+  .detail-label { color: #8a96b3; min-width: 90px; text-transform: uppercase; font-size: 0.7rem; letter-spacing: 0.05em; padding-top: 0.15rem; }
   .label { font-size: 0.75rem; color: #8a96b3; text-transform: uppercase; letter-spacing: 0.05em; }
   .prompt-text { color: #e8eaf0; font-size: 1.05rem; line-height: 1.5; margin: 0.5rem 0 0.75rem; }
   .target { color: #9ba8c0; font-size: 0.85rem; }

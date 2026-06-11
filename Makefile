@@ -5,7 +5,7 @@
         test-property test-integration test-contract test-e2e \
         test-mutation test-mutation-api test-mutation-nlp test-mutation-ts \
         test-perf test-polish test-canary test-synthetic \
-        import-jmdict import-tatoeba migrate \
+        import-jmdict import-tatoeba import-wordnet migrate \
         lint build clean record-promo \
         docker-up docker-down docker-logs
 
@@ -148,6 +148,10 @@ import-jmdict:
 import-tatoeba: $(NLP_DIR)/data/dictionary.db
 	cd $(NLP_DIR) && $(PYTHON) scripts/import_tatoeba.py --limit 50000
 	@echo "✓ Tatoeba sentences imported"
+
+import-wordnet: $(NLP_DIR)/data/dictionary.db
+	cd $(NLP_DIR) && $(PYTHON) scripts/import_wordnet.py
+	@echo "✓ WordNet English dictionary imported"
 
 $(NLP_DIR)/data/dictionary.db:
 	@$(MAKE) import-jmdict

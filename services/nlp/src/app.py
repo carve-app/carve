@@ -221,7 +221,7 @@ def tokenize(
         )
         defs = None
         if req.include_definitions and status == "unknown" and is_content:
-            entry = _dict_service.lookup(lemma, target_lang="en")
+            entry = _dict_service.lookup(lemma, language=req.language, target_lang="en")
             if entry:
                 defs = [
                     {
@@ -326,7 +326,7 @@ def lookup(
     else:
         raise HTTPException(status_code=422, detail=f"Language '{req.language}' not yet supported")
 
-    entry = _dict_service.lookup(lemma, target_lang=req.target_lang)
+    entry = _dict_service.lookup(lemma, language=req.language, target_lang=req.target_lang)
 
     if not entry:
         return LookupResponse(
@@ -371,10 +371,7 @@ def batch_lookup(
 ) -> dict:
     _check_auth(x_internal_secret)
 
-    if req.language != "ja":
-        raise HTTPException(status_code=422, detail=f"Language '{req.language}' not yet supported")
-
-    results = _dict_service.batch_lookup(req.lemmas, target_lang=req.target_lang)
+    results = _dict_service.batch_lookup(req.lemmas, language=req.language, target_lang=req.target_lang)
     return {
         "results": {
             lemma: (
