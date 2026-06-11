@@ -1,6 +1,6 @@
 .PHONY: help setup docker-check \
         infra-up infra-down infra-logs \
-        dev dev-api dev-nlp dev-web \
+        dev dev-full dev-seed seed dev-api dev-nlp dev-web \
         test-nlp test-api test-extension test-video-mining test-promo test-all \
         test-property test-integration test-contract test-e2e \
         test-mutation test-mutation-api test-mutation-nlp test-mutation-ts \
@@ -28,7 +28,10 @@ help:
 	@echo "  make setup"
 	@echo ""
 	@echo "Daily workflow:"
-	@echo "  make dev            — start everything (infra + api + nlp + web), Ctrl+C stops all"
+	@echo "  make dev-full       — launch ALL features for manual testing (infra+media+nlp+api+web)"
+	@echo "  make dev-seed       — dev-full + a seeded test user & sample cards"
+	@echo "  make seed           — seed a running stack (dev@carve.app / devpassword123)"
+	@echo "  make dev            — legacy: api+nlp+web only (no media service)"
 	@echo ""
 	@echo "Infrastructure:"
 	@echo "  make infra-up       — start postgres + redis + minio"
@@ -115,6 +118,21 @@ infra-logs:
 
 # ── Development servers ───────────────────────────────────────────────────────
 
+# Full dev environment for manual testing of ALL features: infra + media + nlp
+# + api + web, correctly wired (local-disk media, Google creds if present),
+# with streaming logs and clean shutdown. This is the recommended entrypoint.
+dev-full: docker-check
+	@bash scripts/dev.sh
+
+# Same, plus a seeded test user + sample cards (dev@carve.app / devpassword123).
+dev-seed: docker-check
+	@bash scripts/dev.sh --seed
+
+# Seed an already-running stack with test data.
+seed:
+	@API_BASE="http://localhost:8080" bash scripts/seed-dev.sh
+
+# Legacy: api+nlp+web only (no media service). Prefer `make dev-full`.
 dev: infra-up
 	@echo "→ Starting api, nlp, web (Ctrl+C stops all)..."
 	@trap 'kill 0' SIGINT; \
