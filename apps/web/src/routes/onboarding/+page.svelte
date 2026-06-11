@@ -15,6 +15,11 @@
     { code: 'ja',    flag: '🇯🇵', name: 'Japanese',              native: '日本語' },
     { code: 'zh-cn', flag: '🇨🇳', name: 'Chinese (Simplified)', native: '中文'   },
     { code: 'ko',    flag: '🇰🇷', name: 'Korean',               native: '한국어' },
+    { code: 'es',    flag: '🇪🇸', name: 'Spanish',              native: 'Español'   },
+    { code: 'de',    flag: '🇩🇪', name: 'German',               native: 'Deutsch'   },
+    { code: 'fr',    flag: '🇫🇷', name: 'French',               native: 'Français'  },
+    { code: 'it',    flag: '🇮🇹', name: 'Italian',              native: 'Italiano'  },
+    { code: 'pt',    flag: '🇵🇹', name: 'Portuguese',           native: 'Português' },
     { code: 'en',    flag: '🇬🇧', name: 'English (intermediate+)', native: 'English' },
   ];
 
@@ -87,6 +92,81 @@
                 'exacerbate', 'mitigate', 'obfuscate', 'reconcile', 'underscore',
                 'aberration', 'caveat', 'discrepancy', 'hegemony', 'paradigm',
                 'predicament', 'quintessential', 'salient', 'tantamount', 'ubiquitous'],
+      },
+    ],
+    es: [
+      {
+        label: 'Beginner — A1/A2',
+        words: ['hola', 'gracias', 'casa', 'agua', 'comer', 'beber', 'ir', 'tener',
+                'hacer', 'querer', 'grande', 'pequeño', 'bueno', 'hoy', 'mañana',
+                'amigo', 'trabajo', 'tiempo', 'hablar', 'vivir'],
+      },
+      {
+        label: 'Intermediate — B1/B2',
+        words: ['conseguir', 'aunque', 'desarrollo', 'sociedad', 'aumentar', 'sin embargo',
+                'experiencia', 'mejorar', 'reconocer', 'cultura', 'medio ambiente',
+                'situación', 'necesario', 'difícil', 'realizar', 'suponer', 'establecer',
+                'demostrar', 'consecuencia', 'tendencia'],
+      },
+    ],
+    de: [
+      {
+        label: 'Beginner — A1/A2',
+        words: ['hallo', 'danke', 'Haus', 'Wasser', 'essen', 'trinken', 'gehen', 'haben',
+                'machen', 'wollen', 'groß', 'klein', 'gut', 'heute', 'morgen',
+                'Freund', 'Arbeit', 'Zeit', 'sprechen', 'leben'],
+      },
+      {
+        label: 'Intermediate — B1/B2',
+        words: ['erreichen', 'obwohl', 'Entwicklung', 'Gesellschaft', 'erhöhen', 'jedoch',
+                'Erfahrung', 'verbessern', 'erkennen', 'Kultur', 'Umwelt', 'Situation',
+                'notwendig', 'schwierig', 'verwirklichen', 'annehmen', 'feststellen',
+                'beweisen', 'Folge', 'Tendenz'],
+      },
+    ],
+    fr: [
+      {
+        label: 'Beginner — A1/A2',
+        words: ['bonjour', 'merci', 'maison', 'eau', 'manger', 'boire', 'aller', 'avoir',
+                'faire', 'vouloir', 'grand', 'petit', 'bon', "aujourd'hui", 'demain',
+                'ami', 'travail', 'temps', 'parler', 'vivre'],
+      },
+      {
+        label: 'Intermediate — B1/B2',
+        words: ['atteindre', 'bien que', 'développement', 'société', 'augmenter', 'cependant',
+                'expérience', 'améliorer', 'reconnaître', 'culture', 'environnement',
+                'situation', 'nécessaire', 'difficile', 'réaliser', 'supposer', 'établir',
+                'démontrer', 'conséquence', 'tendance'],
+      },
+    ],
+    it: [
+      {
+        label: 'Beginner — A1/A2',
+        words: ['ciao', 'grazie', 'casa', 'acqua', 'mangiare', 'bere', 'andare', 'avere',
+                'fare', 'volere', 'grande', 'piccolo', 'buono', 'oggi', 'domani',
+                'amico', 'lavoro', 'tempo', 'parlare', 'vivere'],
+      },
+      {
+        label: 'Intermediate — B1/B2',
+        words: ['raggiungere', 'sebbene', 'sviluppo', 'società', 'aumentare', 'tuttavia',
+                'esperienza', 'migliorare', 'riconoscere', 'cultura', 'ambiente', 'situazione',
+                'necessario', 'difficile', 'realizzare', 'supporre', 'stabilire',
+                'dimostrare', 'conseguenza', 'tendenza'],
+      },
+    ],
+    pt: [
+      {
+        label: 'Beginner — A1/A2',
+        words: ['olá', 'obrigado', 'casa', 'água', 'comer', 'beber', 'ir', 'ter',
+                'fazer', 'querer', 'grande', 'pequeno', 'bom', 'hoje', 'amanhã',
+                'amigo', 'trabalho', 'tempo', 'falar', 'viver'],
+      },
+      {
+        label: 'Intermediate — B1/B2',
+        words: ['alcançar', 'embora', 'desenvolvimento', 'sociedade', 'aumentar', 'no entanto',
+                'experiência', 'melhorar', 'reconhecer', 'cultura', 'meio ambiente',
+                'situação', 'necessário', 'difícil', 'realizar', 'supor', 'estabelecer',
+                'demonstrar', 'consequência', 'tendência'],
       },
     ],
   };
