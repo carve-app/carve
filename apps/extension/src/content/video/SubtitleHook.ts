@@ -8,7 +8,7 @@ import { AmazonPrimeHook } from './platforms/amazonprime';
 import { CrunchyrollHook } from './platforms/crunchyroll';
 import { VikiHook } from './platforms/viki';
 
-type HookCtor = new (overlay: SubtitleOverlay) => { mount: () => void; unmount?: () => void };
+type HookCtor = new (overlay: SubtitleOverlay, lang: string) => { mount: () => void; unmount?: () => void };
 
 const PLATFORM_HOOKS: { match: RegExp; ctor: HookCtor }[] = [
   { match: /netflix\.com\/watch/,           ctor: NetflixHook },
@@ -34,7 +34,7 @@ export class SubtitleHook {
     if (!platform) return;
 
     this.overlay = new SubtitleOverlay(this.lang, this.vocabCache, this.popupManager);
-    new platform.ctor(this.overlay).mount();
+    new platform.ctor(this.overlay, this.lang).mount();
   }
 
   destroy(): void {

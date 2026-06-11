@@ -7,6 +7,7 @@
     fetchWorkloadPreview,
     deleteAccount,
     apiFetch,
+    triggerExport,
     type FsrsSettings,
     type WorkloadPreview,
   } from '$lib/api';
@@ -17,7 +18,7 @@
   import Card from '$lib/design/Card.svelte';
   import EmptyState from '$lib/design/EmptyState.svelte';
 
-  type TabId = 'account' | 'display' | 'review' | 'mining' | 'sites' | 'sync' | 'billing';
+  type TabId = 'account' | 'display' | 'review' | 'mining' | 'sites' | 'sync';
 
   const TABS: { id: TabId; label: string; icon: string }[] = [
     { id: 'account', label: 'Account',  icon: '👤' },
@@ -26,7 +27,6 @@
     { id: 'mining',  label: 'Mining',   icon: '⛏️' },
     { id: 'sites',   label: 'Sites',    icon: '🌐' },
     { id: 'sync',    label: 'Sync',     icon: '🔄' },
-    { id: 'billing', label: 'Billing',  icon: '💳' },
   ];
 
   function initialTab(): TabId {
@@ -59,9 +59,8 @@
   }
   async function downloadData() {
     try {
-      const r = await apiFetch<{ url?: string }>('/v1/users/export', { method: 'POST' });
-      if (r?.url) window.open(r.url, '_blank');
-      else toasts.add('Export queued — you\'ll get an email when it\'s ready.');
+      await triggerExport();
+      toasts.add('Export downloaded.');
     } catch (e) {
       toasts.add(e instanceof Error ? e.message : 'Could not start export');
     }
@@ -226,21 +225,6 @@
     syncing = false;
   }
 
-  // ── Billing ───────────────────────────────────────────────────────────────
-  type Plan = { tier: 'free' | 'pro' | 'team'; renews_at?: string | null };
-  let plan: Plan = { tier: 'free' };
-  async function loadPlan() {
-    try { plan = await apiFetch<Plan>('/v1/billing/plan'); } catch { /* free */ }
-  }
-  async function openPortal() {
-    try {
-      const r = await apiFetch<{ url: string }>('/v1/billing/portal', { method: 'POST' });
-      window.location.href = r.url;
-    } catch (e) {
-      toasts.add(e instanceof Error ? e.message : 'Could not open billing portal');
-    }
-  }
-  onMount(loadPlan);
 </script>
 
 <main>
@@ -534,22 +518,6 @@
     </div>
   {/if}
 
-  <!-- Billing ────────────────────────────────────────────────────────────-->
-  {#if activeTab === 'billing'}
-    <div role="tabpanel" id="panel-billing" aria-labelledby="tab-billing">
-      <Card padding="md">
-        <h2>Plan</h2>
-        <div class="kv"><span class="k">Current plan</span><span class="v plan-{plan.tier}">{plan.tier.toUpperCase()}</span></div>
-        {#if plan.renews_at}
-          <div class="kv"><span class="k">Renews</span> <span class="v">{new Date(plan.renews_at).toLocaleDateString()}</span></div>
-        {/if}
-        <div class="actions">
-          <Button on:click={openPortal}>Manage subscription</Button>
-          <Button variant="ghost" href="/pricing">View plans</Button>
-        </div>
-      </Card>
-    </div>
-  {/if}
 </main>
 
 <style>
@@ -627,7 +595,10 @@
   .footer-row { margin-top: var(--s-5); }
 
   .mt-3 { margin-top: var(--s-3); }
-  .mt-4 { margin-top: var(--s-4); }
+  /* Applied via the <Card> component's class prop. Svelte's scoped-CSS
+     analyzer can't see usage through a child component and would prune the
+     rule, so scope it globally to keep it in the build. */
+  :global(.mt-4) { margin-top: var(--s-4); }
 
   .weights-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: var(--s-2); }
   .weight-cell { background: var(--c-bg); border: 1px solid var(--c-border); border-radius: var(--r-sm); padding: var(--s-2) var(--s-3); text-align: center; }
@@ -641,7 +612,8 @@
   .status-line.ok  { color: var(--c-green); }
   .status-line.err { color: var(--c-danger); }
 
-  .danger-zone { border-color: color-mix(in srgb, var(--c-danger) 35%, var(--c-border)); }
+  /* Applied via the <Card> component's class prop — see note on .mt-4. */
+  :global(.danger-zone) { border-color: color-mix(in srgb, var(--c-danger) 35%, var(--c-border)); }
   .danger-title { color: var(--c-danger); }
 
   .add-domain { display: flex; gap: var(--s-2); margin-bottom: var(--s-4); }
@@ -649,8 +621,4 @@
   .domain-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: var(--s-1); }
   .domain-list li { display: flex; justify-content: space-between; align-items: center; padding: var(--s-2) var(--s-3); background: var(--c-bg); border: 1px solid var(--c-border); border-radius: var(--r-sm); }
   .domain { font-family: ui-monospace, monospace; font-size: 0.88rem; color: var(--c-text); }
-
-  .plan-free { color: var(--c-textMuted); }
-  .plan-pro  { color: var(--c-green); }
-  .plan-team { color: var(--c-info); }
 </style>

@@ -1,19 +1,23 @@
 package cards
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/carve-app/carve/services/api/internal/audio"
 	"github.com/carve-app/carve/services/api/internal/auth"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -73,22 +77,34 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	id := auth.NewID()
 	ctx := r.Context()
 
-	// Check for an existing non-deleted card with the same lemma+language.
-	var exists bool
-	if err := h.db.QueryRow(ctx,
-		`SELECT EXISTS(
-		     SELECT 1 FROM cards
-		     WHERE user_id = $1 AND language_code = $2 AND front_text = $3
-		       AND deleted_at IS NULL
-		 )`,
+	// Mining is idempotent on (user, language, lemma): if a non-deleted card
+	// for this word already exists, return it (200) instead of rejecting (409).
+	// This lets the extension attach a screenshot/audio to the existing card
+	// when a user re-mines the same word — previously the media was orphaned
+	// because the client treated the 409 as a terminal "already mined".
+	var existingID string
+	var existingCreatedAt time.Time
+	switch err := h.db.QueryRow(ctx,
+		`SELECT id, created_at FROM cards
+		   WHERE user_id = $1 AND language_code = $2 AND front_text = $3
+		     AND deleted_at IS NULL
+		   LIMIT 1`,
 		claims.UserID, req.LanguageCode, req.Lemma,
-	).Scan(&exists); err != nil {
+	).Scan(&existingID, &existingCreatedAt); {
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]any{
+			"id":            existingID,
+			"lemma":         req.Lemma,
+			"language_code": req.LanguageCode,
+			"created_at":    existingCreatedAt,
+			"existing":      true,
+		})
+		return
+	case errors.Is(err, pgx.ErrNoRows):
+		// fall through to INSERT
+	default:
 		slog.Error("check duplicate card", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	if exists {
-		writeError(w, http.StatusConflict, "card for this lemma and language already exists")
 		return
 	}
 
@@ -107,7 +123,27 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		req.BackText, req.SubtitleTranslation, req.Sentence, req.SourceURL, req.SourceTimestamp,
 	).Scan(&createdAt)
 	if err != nil {
+		// Lost a race with a concurrent insert of the same word — resolve it to
+		// the existing card so the caller can still attach media.
 		if isUniqueViolation(err) {
+			var raceID string
+			var raceCreatedAt time.Time
+			if qErr := h.db.QueryRow(ctx,
+				`SELECT id, created_at FROM cards
+				   WHERE user_id = $1 AND language_code = $2 AND front_text = $3
+				     AND deleted_at IS NULL
+				   LIMIT 1`,
+				claims.UserID, req.LanguageCode, req.Lemma,
+			).Scan(&raceID, &raceCreatedAt); qErr == nil {
+				writeJSON(w, http.StatusOK, map[string]any{
+					"id":            raceID,
+					"lemma":         req.Lemma,
+					"language_code": req.LanguageCode,
+					"created_at":    raceCreatedAt,
+					"existing":      true,
+				})
+				return
+			}
 			writeError(w, http.StatusConflict, "card for this lemma and language already exists")
 			return
 		}
@@ -116,10 +152,15 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Populate audio asynchronously — non-blocking, best-effort.
-	if req.Reading != "" {
-		go audio.PopulateCard(h.db, id, req.LanguageCode, req.Lemma, req.Reading)
+	// Populate word + sentence audio asynchronously — non-blocking, best-effort.
+	// Runs for every card: word audio resolves per-language (JapanesePod101 for
+	// JA, TTS fallback elsewhere when enabled), and sentence audio is synthesized
+	// via TTS. Reading may be empty for non-Japanese languages.
+	var sentence string
+	if req.Sentence != nil {
+		sentence = *req.Sentence
 	}
+	go audio.PopulateCard(h.db, id, req.LanguageCode, req.Lemma, req.Reading, sentence)
 
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"id":            id,
@@ -380,22 +421,33 @@ func (h *Handler) AttachMedia(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var imageURL, audioURL *string
+	// Track parts that were SENT but failed to store, so we can report an honest
+	// error instead of a 200 with null URLs (which the client would read as
+	// success while the card silently has no media).
+	var uploadFailures []string
+	uploadsAttempted := 0
 
-	if f, _, err := r.FormFile("image"); err == nil {
+	if f, hdr, err := r.FormFile("image"); err == nil {
 		defer f.Close()
-		if url, err := uploadToMediaService(mediaBase+"/screenshots", f, "image/jpeg"); err == nil {
+		uploadsAttempted++
+		ct := contentTypeOf(hdr, "image/jpeg")
+		if url, err := uploadToMediaService(r.Context(), mediaBase+"/screenshots", f, ct); err == nil {
 			imageURL = &url
 		} else {
 			slog.Warn("card media: upload image", "error", err)
+			uploadFailures = append(uploadFailures, "image")
 		}
 	}
 
-	if f, _, err := r.FormFile("audio"); err == nil {
+	if f, hdr, err := r.FormFile("audio"); err == nil {
 		defer f.Close()
-		if url, err := uploadToMediaService(mediaBase+"/audio", f, "audio/webm"); err == nil {
+		uploadsAttempted++
+		ct := contentTypeOf(hdr, "audio/webm")
+		if url, err := uploadToMediaService(r.Context(), mediaBase+"/audio", f, ct); err == nil {
 			audioURL = &url
 		} else {
 			slog.Warn("card media: upload audio", "error", err)
+			uploadFailures = append(uploadFailures, "audio")
 		}
 	}
 
@@ -421,18 +473,57 @@ func (h *Handler) AttachMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Decide the response from what actually persisted:
+	//   - every supplied part failed  → 502 (nothing landed; honest failure).
+	//   - some succeeded, some failed → 200 with partial_failure listed, so the
+	//     client keeps the URLs that DID persist and can still report honestly.
+	//   - all succeeded (or none sent) → 200.
+	if len(uploadFailures) > 0 {
+		if uploadsAttempted > 0 && len(uploadFailures) == uploadsAttempted {
+			writeJSON(w, http.StatusBadGateway, map[string]any{
+				"error":     "media upload failed: " + strings.Join(uploadFailures, ", "),
+				"image_url": imageURL,
+				"audio_url": audioURL,
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"image_url":       imageURL,
+			"audio_url":       audioURL,
+			"partial_failure": uploadFailures,
+		})
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"image_url": imageURL,
 		"audio_url": audioURL,
 	})
 }
 
-func uploadToMediaService(url string, body io.Reader, contentType string) (string, error) {
-	req, err := http.NewRequest(http.MethodPost, url, body)
+// contentTypeOf returns the multipart part's declared Content-Type, falling
+// back to def when absent. This preserves the real recorded codec (e.g.
+// audio/webm;codecs=opus) end-to-end instead of flattening it.
+func contentTypeOf(hdr *multipart.FileHeader, def string) string {
+	if hdr != nil {
+		if ct := hdr.Header.Get("Content-Type"); ct != "" {
+			return ct
+		}
+	}
+	return def
+}
+
+func uploadToMediaService(ctx context.Context, url string, body io.Reader, contentType string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", contentType)
+	// Authenticate to the media service when an internal token is configured
+	// (production). Empty in dev/e2e, where media writes are open.
+	if tok := os.Getenv("MEDIA_INTERNAL_TOKEN"); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -452,6 +543,11 @@ func uploadToMediaService(url string, body io.Reader, contentType string) (strin
 		return "", err
 	}
 
+	// The R2 backend returns an absolute (Cloudflare) URL; the local backend
+	// returns a path that we must qualify with the media service's base.
+	if strings.HasPrefix(result.URL, "http://") || strings.HasPrefix(result.URL, "https://") {
+		return result.URL, nil
+	}
 	mediaBase := os.Getenv("MEDIA_SERVICE_URL")
 	if mediaBase == "" {
 		mediaBase = "http://localhost:8002"

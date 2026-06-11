@@ -2,7 +2,7 @@ import { browser } from '../../shared/browser';
 import type { VocabCache } from '../../nlp/VocabCache';
 import type { PopupManager } from '../popup/PopupManager';
 import type { Token } from '../../shared/types';
-import { getVideoElement, captureVideoMedia, uploadCardMedia } from './VideoCapture';
+import { getVideoElement, attachVideoMedia } from './VideoCapture';
 
 export interface ActiveCue {
   text: string;
@@ -105,11 +105,24 @@ export class SubtitleOverlay {
       learningLemmas: this.vocabCache.getLearningLemmas(),
     });
 
-    if (!response?.tokens) {
+    if (!response?.tokens?.length) {
       targetEl.textContent = cue.text;
     } else {
+      // Reconstruct the line by walking the ORIGINAL cue text and emitting the
+      // characters between tokens (spaces, punctuation) as plain text nodes.
+      // Concatenating token surfaces alone drops inter-word spacing — fine for
+      // Japanese/Chinese, but it mashes English/Latin words together
+      // ("It's harder working" → "It'sharderworking"). Mirrors PageAnnotator.
       targetEl.innerHTML = '';
+      const text = cue.text;
+      let pos = 0;
       for (const tok of response.tokens as Token[]) {
+        const idx = text.indexOf(tok.surface, pos);
+        if (idx === -1) continue;
+        if (idx > pos) {
+          targetEl.appendChild(document.createTextNode(text.slice(pos, idx)));
+        }
+
         const span = document.createElement('span');
         span.setAttribute('data-carve', 'token');
         span.setAttribute('data-lemma', tok.lemma);
@@ -129,6 +142,10 @@ export class SubtitleOverlay {
           });
         }
         targetEl.appendChild(span);
+        pos = idx + tok.surface.length;
+      }
+      if (pos < text.length) {
+        targetEl.appendChild(document.createTextNode(text.slice(pos)));
       }
     }
 
@@ -177,46 +194,76 @@ export class SubtitleOverlay {
       if (!targetToken) targetToken = targetEl.querySelector<HTMLElement>('[data-carve="token"][data-content="1"]');
     }
 
-    const lemma = targetToken?.getAttribute('data-lemma') ?? cue.text.slice(0, 10);
-    const reading = targetToken?.getAttribute('data-reading') ?? '';
+    // Front of the card. When tokenization is unavailable (NLP down → no token
+    // spans) we fall back to the whole cue text rather than an arbitrary
+    // mid-grapheme 10-char slice — a coherent, editable front beats a truncated
+    // fragment. The user can trim it in the card editor.
+    const targetLemma = targetToken?.getAttribute('data-lemma')?.trim();
+    const lemma = targetLemma && targetLemma.length > 0 ? targetLemma : cue.text.trim().slice(0, 80);
+    const reading = targetToken?.getAttribute('data-reading')?.trim() ?? '';
 
     this.setMineStatus('Mining…');
     this.miningInProgress = true;
 
-    // i+1 sentence selection: prev + current + next cues are candidates.
-    let pickedSentence = cue.text;
     try {
-      const prev = this.cueHistory[this.historyIndex - 1]?.text;
-      const next = this.cueHistory[this.historyIndex + 1]?.text;
-      const candidates = [prev, cue.text, next].filter((t): t is string => !!t);
-      if (candidates.length > 1) {
-        const sel = await browser.runtime.sendMessage({
-          type: 'SELECT_SENTENCE',
-          candidates,
-          targetLemma: lemma,
-          language: this.lang,
-          knownLemmas: this.vocabCache.getKnownLemmas(),
-          learningLemmas: this.vocabCache.getLearningLemmas(),
-        });
-        if (sel?.bestText && sel.bestContainsTarget) {
-          pickedSentence = sel.bestText;
+      // i+1 sentence selection: prev + current + next cues are candidates.
+      let pickedSentence = cue.text;
+      try {
+        const prev = this.cueHistory[this.historyIndex - 1]?.text;
+        const next = this.cueHistory[this.historyIndex + 1]?.text;
+        const candidates = [prev, cue.text, next].filter((t): t is string => !!t);
+        if (candidates.length > 1) {
+          const sel = await browser.runtime.sendMessage({
+            type: 'SELECT_SENTENCE',
+            candidates,
+            targetLemma: lemma,
+            language: this.lang,
+            knownLemmas: this.vocabCache.getKnownLemmas(),
+            learningLemmas: this.vocabCache.getLearningLemmas(),
+          });
+          if (sel?.bestText && sel.bestContainsTarget) {
+            pickedSentence = sel.bestText;
+          }
         }
-      }
-    } catch {/* selector is best-effort; fall back to current cue */}
+      } catch {/* selector is best-effort; fall back to current cue */}
 
-    try {
-      // Create card via background (to reuse existing API path)
+      // Real translation of the mined sentence. Prefer the on-screen native
+      // subtitle (a genuine human translation, when the user runs dual subs);
+      // otherwise ask the NLP service. The popup mining path already does this —
+      // video mining used to skip it entirely, so video cards had no
+      // translation at all. Best-effort: a missing translation never blocks the
+      // card.
+      let translation = this.getNativeCueText(cue);
+      if (!translation) {
+        try {
+          const tr = await browser.runtime.sendMessage({
+            type: 'TRANSLATE',
+            text: pickedSentence,
+            sourceLanguage: this.lang,
+          });
+          translation = (tr?.translation as string | null) ?? undefined;
+        } catch {/* translation is optional */}
+      }
+
+      // Link the card back to the exact moment in the video (seconds).
+      const sourceTimestamp = cue.startMs > 0 ? cue.startMs / 1000 : undefined;
+
+      // Create card via background (to reuse existing API path). The backend is
+      // idempotent on (lemma, language): re-mining the same word returns the
+      // existing card id, so media still attaches instead of orphaning.
       const result = await browser.runtime.sendMessage({
         type: 'MINE_CARD',
         lemma,
         reading,
+        translation,
         sentence: pickedSentence,
         sourceUrl: window.location.href,
+        sourceTimestamp,
         languageCode: this.lang,
       });
 
       if (!result?.cardId) {
-        this.setMineStatus(result?.error ?? 'Already mined', true);
+        this.setMineStatus(result?.error ?? 'Mine failed', true);
         return;
       }
 
@@ -226,18 +273,34 @@ export class SubtitleOverlay {
       await this.vocabCache.markLearning(lemma);
       if (targetToken) targetToken.setAttribute('data-status', 'learning');
 
-      this.setMineStatus('Mined! Capturing…');
-
-      // Capture + upload media asynchronously
+      // Capture screenshot + EXACT-sentence audio and attach to the card.
+      // attachVideoMedia seeks to the cue's true source timing, grabs the frame
+      // there (DRM-safe, via the worker) and records the audio over the cue
+      // window — so the card's audio matches the sentence even if the user
+      // paused or scrolled back through history. hasImage/hasAudio reflect what
+      // the SERVER persisted, so DRM/upload failures get an honest message.
       const video = getVideoElement();
       if (video) {
-        const cueDurationMs = cue.endMs - cue.startMs || 4000;
-        captureVideoMedia(video, Math.min(cueDurationMs, 8000)).then(capture =>
-          uploadCardMedia(cardId, capture, {
-            sourceUrl: window.location.href,
-            subtitleTranslation: cue.nativeText,
-          }),
+        this.setMineStatus('Mined! Capturing media…');
+        const media = await attachVideoMedia(
+          video,
+          cardId,
+          { startMs: cue.startMs, endMs: cue.endMs },
+          { sourceUrl: window.location.href, subtitleTranslation: translation },
         );
+        if (media.hasImage || media.hasAudio) {
+          const parts = [media.hasImage ? 'image' : null, media.hasAudio ? 'audio' : null].filter(Boolean);
+          this.setMineStatus(`Mined! (+${parts.join(' & ')})`);
+        } else if (media.error) {
+          // Card saved (with sentence + translation) but media failed. Tell the
+          // user honestly rather than implying success.
+          this.setMineStatus(`Mined! (media failed: ${media.error})`, true);
+        } else {
+          // This player blocks frame/audio capture (e.g. HDCP-protected DRM).
+          this.setMineStatus('Mined! (media unavailable on this site)');
+        }
+      } else {
+        this.setMineStatus('Mined!');
       }
 
       setTimeout(() => this.setMineStatus(''), 2500);
@@ -246,6 +309,34 @@ export class SubtitleOverlay {
     } finally {
       this.miningInProgress = false;
     }
+  }
+
+  /**
+   * Returns the text of a second "showing" subtitle track whose language
+   * differs from the learning target — i.e. the user's native-language
+   * subtitle, a real human translation of the current line. Returns undefined
+   * when no such track is active (the common single-subtitle case), in which
+   * case the caller falls back to the NLP translation.
+   */
+  private getNativeCueText(cue: ActiveCue): string | undefined {
+    if (cue.nativeText && cue.nativeText.trim()) return cue.nativeText.trim();
+    const video = getVideoElement();
+    if (!video || !video.textTracks) return undefined;
+    for (let i = 0; i < video.textTracks.length; i++) {
+      const track = video.textTracks[i];
+      if (track.mode !== 'showing') continue;
+      const lang = (track.language || '').slice(0, 2).toLowerCase();
+      if (lang && lang === this.lang.slice(0, 2).toLowerCase()) continue; // same as target — skip
+      const active = track.activeCues;
+      if (!active || active.length === 0) continue;
+      const text = Array.from(active)
+        .map(c => (c as VTTCue).text ?? '')
+        .join(' ')
+        .replace(/<[^>]+>/g, '')
+        .trim();
+      if (text) return text;
+    }
+    return undefined;
   }
 
   private setMineStatus(msg: string, error = false): void {
@@ -289,83 +380,107 @@ export class SubtitleOverlay {
 const OVERLAY_STYLES = `
 #carve-sub-overlay {
   position: fixed;
-  bottom: 130px;
+  bottom: 120px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 2147483647;
-  background: rgba(15, 17, 22, 0.88);
-  border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 10px;
-  padding: 0.5rem 0.75rem 0.6rem;
-  max-width: 720px;
-  min-width: 280px;
+  background: linear-gradient(180deg, rgba(20,22,28,0.94), rgba(13,15,20,0.94));
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 14px;
+  padding: 10px 18px 14px;
+  max-width: min(900px, 80vw);
+  min-width: 360px;
   width: max-content;
-  font-family: 'Noto Sans JP', 'Hiragino Sans', system-ui, sans-serif;
-  backdrop-filter: blur(6px);
+  box-sizing: border-box;
+  font-family: 'Noto Sans JP', 'Hiragino Sans', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   pointer-events: auto;
   user-select: none;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04);
 }
 
 .cso-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.4rem;
+  gap: 0.75rem;
+  margin-bottom: 8px;
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
 }
+#carve-sub-overlay:hover .cso-bar { opacity: 1; }
 
 .cso-toggles {
   display: flex;
-  gap: 0.35rem;
+  gap: 0.4rem;
 }
 
 .cso-btn {
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.12);
-  color: #9ba8c0;
-  border-radius: 5px;
-  padding: 0.15rem 0.5rem;
-  font-size: 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  color: #aeb9cf;
+  border-radius: 7px;
+  padding: 0 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.1s, color 0.1s;
-  line-height: 1.5;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  line-height: 1;
 }
-.cso-btn:hover { background: rgba(255,255,255,0.14); color: #e8eaf0; }
-.cso-btn:disabled { opacity: 0.3; cursor: default; }
-.cso-btn.cso-active { background: rgba(76,175,80,0.25); border-color: #4caf50; color: #4caf50; }
+.cso-btn:hover { background: rgba(255,255,255,0.14); color: #fff; }
+.cso-btn:disabled { opacity: 0.25; cursor: default; }
+.cso-btn.cso-active { background: rgba(76,175,80,0.22); border-color: rgba(76,175,80,0.7); color: #6ddf72; }
 
 .cso-target {
-  font-size: 1.25rem;
-  line-height: 1.6;
-  color: #e8eaf0;
+  font-size: 1.7rem;
+  line-height: 1.5;
+  color: #f1f3f8;
   text-align: center;
-  min-height: 1.8rem;
-  letter-spacing: 0.02em;
-  word-break: break-all;
+  min-height: 2rem;
+  letter-spacing: 0.01em;
+  font-weight: 500;
+  overflow-wrap: break-word;
+  word-break: normal;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.4);
 }
 
-.cso-hint { color: #4a5568; font-size: 0.85rem; }
+.cso-hint { color: #5a6478; font-size: 0.95rem; font-weight: 400; }
 
-.cso-token { cursor: default; }
-.cso-token.cso-unknown { color: #ef9a9a; cursor: pointer; }
-.cso-token.cso-learning { color: #ffa726; cursor: pointer; }
-.cso-token.cso-known { color: #e8eaf0; cursor: pointer; }
+.cso-token {
+  cursor: default;
+  border-radius: 3px;
+  transition: background 0.1s;
+}
+.cso-token.cso-unknown { color: #ff9b9b; cursor: pointer; }
+.cso-token.cso-learning { color: #ffc266; cursor: pointer; }
+.cso-token.cso-known { color: #f1f3f8; cursor: pointer; }
+.cso-token.cso-unknown:hover,
+.cso-token.cso-learning:hover,
+.cso-token.cso-known:hover { background: rgba(255,255,255,0.12); }
 
 .cso-native {
-  font-size: 0.82rem;
-  color: #7a8aa6;
+  font-size: 1rem;
+  color: #93a0bb;
   text-align: center;
-  margin-top: 0.25rem;
+  margin-top: 6px;
+  line-height: 1.4;
 }
 
 .cso-mine-status {
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   text-align: center;
   min-height: 1rem;
-  margin-top: 0.15rem;
+  margin-top: 6px;
   transition: color 0.2s;
+  font-weight: 500;
 }
-.cso-mine-ok { color: #4caf50; }
-.cso-mine-error { color: #ef5350; }
+.cso-mine-ok { color: #6ddf72; }
+.cso-mine-error { color: #ff6b6b; }
 `;

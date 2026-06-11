@@ -1,17 +1,18 @@
-.PHONY: help setup \
-        colima-start infra-up infra-down infra-logs \
-        dev dev-api dev-nlp dev-web \
-        test-nlp test-api test-extension test-promo test-all \
+.PHONY: help setup docker-check \
+        infra-up infra-down infra-logs \
+        dev dev-full dev-seed seed dev-api dev-nlp dev-web \
+        test-nlp test-api test-extension test-video-mining test-promo test-all \
         test-property test-integration test-contract test-e2e \
         test-mutation test-mutation-api test-mutation-nlp test-mutation-ts \
         test-perf test-polish test-canary test-synthetic \
-        import-jmdict import-tatoeba migrate \
+        import-jmdict import-tatoeba import-wordnet import-cedict import-kde4 import-freedict import-all migrate \
         lint build clean record-promo \
         docker-up docker-down docker-logs
 
 PYTHON  := services/nlp/.venv/bin/python3.13
 NLP_DIR := services/nlp
 API_DIR := services/api
+MEDIA_DIR := services/media
 
 # Local dev database URL (matches docker-compose postgres service)
 DATABASE_URL ?= postgres://carve:carve@localhost:5432/carve?sslmode=disable
@@ -20,17 +21,20 @@ JWT_SECRET ?= dev-secret-change-in-production-at-least-32-chars
 
 help:
 	@echo ""
-	@echo "Carve development — no Docker Desktop required"
+	@echo "Carve development"
 	@echo ""
 	@echo "First-time setup:"
-	@echo "  brew install colima docker docker-compose"
+	@echo "  Install Docker (Docker Desktop, Colima, OrbStack, ...) + docker-compose"
 	@echo "  make setup"
 	@echo ""
 	@echo "Daily workflow:"
-	@echo "  make dev            — start everything (infra + api + nlp + web), Ctrl+C stops all"
+	@echo "  make dev-full       — launch ALL features for manual testing (infra+media+nlp+api+web)"
+	@echo "  make dev-seed       — dev-full + a seeded test user & sample cards"
+	@echo "  make seed           — seed a running stack (dev@carve.app / devpassword123)"
+	@echo "  make dev            — legacy: api+nlp+web only (no media service)"
 	@echo ""
 	@echo "Infrastructure:"
-	@echo "  make infra-up       — start postgres + redis + minio (via Colima)"
+	@echo "  make infra-up       — start postgres + redis + minio"
 	@echo "  make infra-down     — stop infrastructure containers"
 	@echo "  make infra-logs     — tail infrastructure logs"
 	@echo "  make migrate        — apply DB migrations against local postgres"
@@ -38,6 +42,10 @@ help:
 	@echo "Data:"
 	@echo "  make import-jmdict  — download and import JMdict (already done if db exists)"
 	@echo "  make import-tatoeba — import Tatoeba sentence pairs"
+	@echo "  make import-cedict  — import CC-CEDICT (Chinese, zh)"
+	@echo "  make import-kde4    — import Korean curated dictionary (ko)"
+	@echo "  make import-freedict— import FreeDict bilingual dicts (es/de/fr/it/pt)"
+	@echo "  make import-all     — import every dictionary into one SQLite db"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test-nlp       — NLP correctness + API tests"
@@ -56,9 +64,9 @@ help:
 # ── Setup ─────────────────────────────────────────────────────────────────────
 
 setup:
-	@echo "→ Checking Colima + Docker CLI..."
-	@command -v colima >/dev/null 2>&1 || { echo "✗ colima not found. Run: brew install colima docker docker-compose"; exit 1; }
-	@command -v docker  >/dev/null 2>&1 || { echo "✗ docker CLI not found. Run: brew install docker"; exit 1; }
+	@echo "→ Checking Docker CLI..."
+	@command -v docker  >/dev/null 2>&1 || { echo "✗ docker CLI not found. Install Docker Desktop, Colima, or OrbStack."; exit 1; }
+	@docker info >/dev/null 2>&1 || { echo "✗ Docker daemon not reachable. Start your Docker runtime first."; exit 1; }
 	@echo "→ Setting up Python venv (requires python3.13)..."
 	cd $(NLP_DIR) && python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt
 	@echo "→ Downloading Go modules..."
@@ -70,22 +78,19 @@ setup:
 	@echo "  Next: make infra-up   (starts postgres/redis/minio)"
 	@echo "  Then: make dev-api    make dev-nlp    make dev-web"
 
-# ── Colima (Docker Desktop replacement) ───────────────────────────────────────
+# ── Docker ─────────────────────────────────────────────────────────────────────
 
-colima-start:
-	@command -v colima >/dev/null 2>&1 || { \
-		echo "✗ colima not found. Run: brew install colima docker docker-compose"; exit 1; }
-	@if colima status 2>/dev/null | grep -q "Running"; then \
-		echo "✓ Colima already running"; \
-	else \
-		echo "→ Starting Colima..."; \
-		colima start --cpu 2 --memory 4; \
-		echo "✓ Colima started"; \
-	fi
+# Verify a Docker daemon is reachable, whatever the runtime (Docker Desktop,
+# Colima, OrbStack, ...). Targets that need containers depend on this.
+docker-check:
+	@command -v docker >/dev/null 2>&1 || { \
+		echo "✗ docker CLI not found. Install Docker Desktop, Colima, or OrbStack."; exit 1; }
+	@docker info >/dev/null 2>&1 || { \
+		echo "✗ Docker daemon not reachable. Start your Docker runtime first."; exit 1; }
 
 # ── Infrastructure ────────────────────────────────────────────────────────────
 
-infra-up: colima-start
+infra-up: docker-check
 	@echo "→ Starting postgres, redis, minio..."
 	docker-compose up -d postgres redis minio
 	@echo "→ Waiting for postgres to be ready..."
@@ -113,6 +118,21 @@ infra-logs:
 
 # ── Development servers ───────────────────────────────────────────────────────
 
+# Full dev environment for manual testing of ALL features: infra + media + nlp
+# + api + web, correctly wired (local-disk media, Google creds if present),
+# with streaming logs and clean shutdown. This is the recommended entrypoint.
+dev-full: docker-check
+	@bash scripts/dev.sh
+
+# Same, plus a seeded test user + sample cards (dev@carve.app / devpassword123).
+dev-seed: docker-check
+	@bash scripts/dev.sh --seed
+
+# Seed an already-running stack with test data.
+seed:
+	@API_BASE="http://localhost:8080" bash scripts/seed-dev.sh
+
+# Legacy: api+nlp+web only (no media service). Prefer `make dev-full`.
 dev: infra-up
 	@echo "→ Starting api, nlp, web (Ctrl+C stops all)..."
 	@trap 'kill 0' SIGINT; \
@@ -151,6 +171,26 @@ import-tatoeba: $(NLP_DIR)/data/dictionary.db
 	cd $(NLP_DIR) && $(PYTHON) scripts/import_tatoeba.py --limit 50000
 	@echo "✓ Tatoeba sentences imported"
 
+import-wordnet: $(NLP_DIR)/data/dictionary.db
+	cd $(NLP_DIR) && $(PYTHON) scripts/import_wordnet.py
+	@echo "✓ WordNet English dictionary imported"
+
+import-cedict: $(NLP_DIR)/data/dictionary.db
+	cd $(NLP_DIR) && $(PYTHON) scripts/import_cedict_sqlite.py
+	@echo "✓ CC-CEDICT (zh) imported"
+
+import-kde4: $(NLP_DIR)/data/dictionary.db
+	cd $(NLP_DIR) && $(PYTHON) scripts/import_kde4_sqlite.py
+	@echo "✓ Korean dictionary (ko) imported"
+
+import-freedict: $(NLP_DIR)/data/dictionary.db
+	cd $(NLP_DIR) && $(PYTHON) scripts/import_freedict.py
+	@echo "✓ FreeDict (es/de/fr/it/pt) imported"
+
+# Build the full multilingual dictionary in one shot.
+import-all: import-jmdict import-wordnet import-cedict import-kde4 import-freedict
+	@echo "✓ All dictionaries imported"
+
 $(NLP_DIR)/data/dictionary.db:
 	@$(MAKE) import-jmdict
 
@@ -169,6 +209,26 @@ test-extension:
 	@echo "→ Running extension e2e test..."
 	cd e2e && node extension.test.js
 	@echo "✓ Extension e2e test passed"
+
+# Real end-to-end video sentence-mining test: drives the actual extension in a
+# real Chromium against the real Go api + media binaries and a real Postgres,
+# then asserts the mined card carries a real screenshot, exact-sentence audio,
+# sentence, translation, and cue timing. Self-contained (boots its own pg
+# container + services). Skips gracefully if docker/artifacts are unavailable.
+test-video-mining: build
+	@echo "→ Building media binary + chrome extension..."
+	cd $(MEDIA_DIR) && go build -o ../../bin/media ./cmd/media
+	cd apps/extension && npm run build:chrome
+	@echo "→ Generating the audio/video fixture (vp8 + opus)..."
+	@mkdir -p e2e/fixtures/media
+	@test -f e2e/fixtures/media/sample.webm || ffmpeg -hide_banner -loglevel error -y \
+		-f lavfi -i "color=c=0x1e88e5:s=480x270:d=6,format=yuv420p" \
+		-f lavfi -i "sine=frequency=440:duration=6" \
+		-c:v libvpx -b:v 400k -c:a libopus -b:a 96k -shortest \
+		e2e/fixtures/media/sample.webm
+	@echo "→ Running real video-mining e2e..."
+	cd e2e && node video-mining.test.js
+	@echo "✓ Video sentence-mining e2e passed"
 
 test-promo:
 	@echo "→ Running promo demo flow (CI mode — no video saved)..."
@@ -194,10 +254,9 @@ test-property:
 	cd apps/extension && npx vitest run src/content/popup/__tests__/property.test.ts
 
 # L3 — testcontainers integration
-test-integration:
+test-integration: docker-check
 	@echo "→ L3 testcontainers integration tests..."
-	cd $(API_DIR) && DOCKER_HOST=$$(colima ssh -- echo unix:///Users/$$USER/.colima/default/docker.sock 2>/dev/null) \
-		TESTCONTAINERS_RYUK_DISABLED=true \
+	cd $(API_DIR) && TESTCONTAINERS_RYUK_DISABLED=true \
 		go test ./internal/importer/... -run TestImportAnki_ -count=1 -timeout 10m
 
 # L4 — OpenAPI contract + schemathesis fuzz
@@ -273,7 +332,7 @@ build:
 
 # ── Docker (full stack, for CI parity) ───────────────────────────────────────
 
-docker-up: colima-start
+docker-up: docker-check
 	docker-compose up -d --build
 
 docker-down:

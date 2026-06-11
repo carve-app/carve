@@ -21,7 +21,8 @@ export interface CachedReviewCard {
 }
 
 export interface StorageData {
-  accessToken?: string;        // in session storage
+  accessToken?: string;        // short-lived bearer JWT
+  refreshToken?: string;       // long-lived; exchanged for a new access token on 401
   userId?: string;
   apiBaseUrl?: string;         // defaults to 'http://localhost:8080'
   nlpBaseUrl?: string;         // not used directly - goes through API
@@ -60,8 +61,17 @@ export async function setAccessToken(token: string): Promise<void> {
   await browser.storage.local.set({ accessToken: token });
 }
 
+export async function getRefreshToken(): Promise<string | null> {
+  const result = await browser.storage.local.get('refreshToken');
+  return (result['refreshToken'] as string | undefined) ?? null;
+}
+
+export async function setRefreshToken(token: string): Promise<void> {
+  await browser.storage.local.set({ refreshToken: token });
+}
+
 export async function clearSession(): Promise<void> {
-  await browser.storage.local.remove('accessToken');
+  await browser.storage.local.remove(['accessToken', 'refreshToken']);
 }
 
 export async function getApiBaseUrl(): Promise<string> {

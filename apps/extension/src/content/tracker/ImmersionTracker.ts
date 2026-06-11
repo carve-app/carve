@@ -10,11 +10,34 @@ export class ImmersionTracker {
   private tickInterval: ReturnType<typeof setInterval> | null = null;
   private isVisible: boolean;
   private isActive: boolean;
+  // Bound handlers kept so destroy() can remove them (anonymous listeners
+  // would otherwise leak and keep tracking after "disable on this site").
+  private onVisibility: () => void;
+  private onActivity: () => void;
+  private onPageHide: () => void;
+  private static readonly ACTIVITY_EVENTS = ['mousemove', 'keydown', 'scroll', 'click'] as const;
 
   constructor(private lang: string) {
     this.startedAt = new Date();
     this.isVisible = !document.hidden;
     this.isActive = true;
+
+    this.onVisibility = () => {
+      if (document.hidden) {
+        this.flush();
+        this.pauseTick();
+        this.isVisible = false;
+      } else {
+        this.isVisible = true;
+        this.startTick();
+      }
+    };
+    this.onActivity = () => {
+      this.isActive = true;
+      if (!this.isVisible) return;
+      if (this.lastTickAt === null) this.startTick();
+    };
+    this.onPageHide = () => this.flush();
 
     this.bindEvents();
     this.startTick();
@@ -26,36 +49,20 @@ export class ImmersionTracker {
   }
 
   private bindEvents(): void {
-    // Page visibility
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        this.pauseTick();
-        this.isVisible = false;
-      } else {
-        this.isVisible = true;
-        this.startTick();
-      }
-    });
-
-    // Activity signals — reset idle timer
-    const activityEvents = ['mousemove', 'keydown', 'scroll', 'click'];
-    for (const ev of activityEvents) {
-      document.addEventListener(ev, () => {
-        this.isActive = true;
-        if (!this.isVisible) return;
-        if (this.lastTickAt === null) {
-          this.startTick();
-        }
-      }, { passive: true });
+    // Page visibility. Flush BEFORE marking hidden: visibilitychange→hidden
+    // fires while the page is still alive (tab switch / close / mobile
+    // backgrounding), so the runtime message to the service worker reliably
+    // lands — unlike the pagehide/beforeunload path, where the content-script
+    // context is torn down before an async message is delivered. This is the
+    // primary flush for navigation losses.
+    document.addEventListener('visibilitychange', this.onVisibility);
+    for (const ev of ImmersionTracker.ACTIVITY_EVENTS) {
+      document.addEventListener(ev, this.onActivity, { passive: true });
     }
-
-    // Flush on page unload
-    window.addEventListener('pagehide', () => {
-      this.flush(true);
-    });
-    window.addEventListener('beforeunload', () => {
-      this.flush(true);
-    });
+    // Last-ditch flush on unload. The reliable flush is visibilitychange above
+    // (which fires first); this is best-effort for the rare case the page goes
+    // straight to unload without a prior hidden transition.
+    window.addEventListener('pagehide', this.onPageHide);
   }
 
   private startTick(): void {
@@ -71,7 +78,7 @@ export class ImmersionTracker {
     }
   }
 
-  private flush(synchronous = false): void {
+  private flush(): void {
     // Accumulate since last tick
     if (this.lastTickAt !== null && this.isVisible) {
       const elapsed = (Date.now() - this.lastTickAt) / 1000;
@@ -96,12 +103,7 @@ export class ImmersionTracker {
       url: window.location.href,
     };
 
-    if (synchronous && typeof navigator.sendBeacon === 'function') {
-      // Best-effort sync send — fall back to async message on failure
-      browser.runtime.sendMessage(payload).catch(() => {});
-    } else {
-      browser.runtime.sendMessage(payload).catch(() => {});
-    }
+    browser.runtime.sendMessage(payload).catch(() => {});
   }
 
   destroy(): void {
@@ -109,6 +111,12 @@ export class ImmersionTracker {
       clearInterval(this.tickInterval);
       this.tickInterval = null;
     }
-    this.flush(true);
+    this.flush();
+    document.removeEventListener('visibilitychange', this.onVisibility);
+    for (const ev of ImmersionTracker.ACTIVITY_EVENTS) {
+      document.removeEventListener(ev, this.onActivity);
+    }
+    window.removeEventListener('pagehide', this.onPageHide);
+    this.lastTickAt = null;
   }
 }

@@ -28,10 +28,13 @@ export type FsrsState = 'new' | 'learning' | 'review' | 'relearning';
 export interface Card {
   id: string;
   front_text: string;
+  card_type: string;
   back_text: string | null;
   sentence: string | null;
+  subtitle_translation: string | null;
   source_url: string | null;
   audio_url: string | null;
+  sentence_audio_url: string | null;
   image_url: string | null;
   fsrs_state: FsrsState;
   stability: number | null;
@@ -134,9 +137,52 @@ export interface Notification {
   created_at: string;
 }
 
+// ── Token refresh ─────────────────────────────────────────────────────────────
+// The access token is short-lived; the API also sets a long-lived HttpOnly
+// refresh cookie at login. On a 401 we transparently exchange that cookie for a
+// fresh access token and retry the request, so a study session never gets
+// kicked to the login screen mid-use. Single-flight: concurrent 401s share one
+// refresh call rather than stampeding the endpoint.
+
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function tryRefresh(): Promise<boolean> {
+  // Coalesce concurrent refreshes; clear once settled so a later expiry retries.
+  if (refreshInFlight) return refreshInFlight;
+  const run = (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/v1/auth/refresh`, {
+        method: 'POST',
+        credentials: 'include', // send the HttpOnly refresh cookie
+      });
+      if (!res.ok) return false;
+      const data = (await res.json()) as { access_token?: string };
+      if (!data.access_token) return false;
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('carve_access_token', data.access_token);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  refreshInFlight = run;
+  try {
+    return await run;
+  } finally {
+    refreshInFlight = null;
+  }
+}
+
+function expireSession(): never {
+  if (typeof localStorage !== 'undefined') localStorage.removeItem('carve_access_token');
+  if (typeof window !== 'undefined') window.location.href = '/login';
+  throw new ApiError(401, 'Session expired');
+}
+
 // ── Fetch helper ─────────────────────────────────────────────────────────────
 
-export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function apiFetch<T>(path: string, options: RequestInit = {}, _retried = false): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -146,14 +192,16 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers, credentials: 'include' });
 
   if (!res.ok) {
-    // Expired/invalid session: clear token and redirect
-    if (res.status === 401 && typeof window !== 'undefined' && localStorage.getItem('carve_access_token')) {
-      localStorage.removeItem('carve_access_token');
-      window.location.href = '/login';
-      throw new ApiError(401, 'Session expired');
+    // Access token expired/invalid: try a silent refresh once, then retry.
+    if (res.status === 401 && !_retried && typeof localStorage !== 'undefined' && localStorage.getItem('carve_access_token')) {
+      if (await tryRefresh()) {
+        return apiFetch<T>(path, options, true);
+      }
+      // Refresh failed → the session is truly over.
+      expireSession();
     }
 
     let message = `HTTP ${res.status}`;
@@ -173,7 +221,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
  * Upload a multipart form. The browser sets the Content-Type with the boundary,
  * so we omit it here and only pass the Authorization header.
  */
-export async function postMultipart<T>(path: string, form: FormData): Promise<T> {
+export async function postMultipart<T>(path: string, form: FormData, _retried = false): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -182,9 +230,14 @@ export async function postMultipart<T>(path: string, form: FormData): Promise<T>
     method: 'POST',
     body: form,
     headers,
+    credentials: 'include',
   });
 
   if (!res.ok) {
+    if (res.status === 401 && !_retried && typeof localStorage !== 'undefined' && localStorage.getItem('carve_access_token')) {
+      if (await tryRefresh()) return postMultipart<T>(path, form, true);
+      expireSession();
+    }
     let message = `HTTP ${res.status}`;
     try {
       const body = await res.json();
@@ -207,6 +260,8 @@ export async function fetchDueCount(language = 'ja'): Promise<{ due_count: numbe
 }
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
+  // apiFetch already sends credentials:'include', so the refresh cookie set by
+  // this response is stored by the browser for later silent refresh.
   return apiFetch<LoginResponse>('/v1/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
@@ -244,6 +299,7 @@ export interface CardDetail {
   id: string;
   language_code: string;
   front_text: string;
+  card_type: string;
   back_text: string | null;
   sentence: string | null;
   subtitle_translation: string | null;
@@ -535,7 +591,7 @@ async function _importFile(path: string, file: File, language: string): Promise<
   const headers: Record<string, string> = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, { method: 'POST', headers, body: form });
+  const res = await fetch(`${API_BASE}${path}`, { method: 'POST', headers, body: form, credentials: 'include' });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new ApiError(res.status, body.error ?? `HTTP ${res.status}`);
@@ -545,24 +601,74 @@ async function _importFile(path: string, file: File, language: string): Promise<
 
 // ── Export ────────────────────────────────────────────────────────────────────
 
-export function getExportUrl(): string {
-  const token = getToken();
-  return `${API_BASE}/v1/export${token ? `?token=${encodeURIComponent(token)}` : ''}`;
-}
-
-export async function triggerExport(): Promise<void> {
+export async function triggerExport(_retried = false): Promise<void> {
   const token = getToken();
   const headers: Record<string, string> = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}/v1/export`, { headers });
-  if (!res.ok) throw new ApiError(res.status, 'Export failed');
+  const res = await fetch(`${API_BASE}/v1/export`, { headers, credentials: 'include' });
+  if (!res.ok) {
+    // Mirror apiFetch: silently refresh + retry once before giving up.
+    if (res.status === 401 && !_retried && typeof localStorage !== 'undefined' && localStorage.getItem('carve_access_token')) {
+      if (await tryRefresh()) return triggerExport(true);
+      expireSession();
+    }
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, body.error ?? body.detail ?? body.message ?? `HTTP ${res.status}`);
+  }
 
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = `carve-export-${new Date().toISOString().slice(0, 10)}.json`;
+  // Append to the DOM (Firefox requires it), click, then defer revocation so
+  // the browser has begun reading the blob before the object URL is released.
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ── Grammar ─────────────────────────────────────────────────────────────────
+
+export interface GrammarPattern {
+  id: string;
+  name: string;
+  jlpt: string;
+  description: string;
+}
+
+export interface GrammarCatalogResponse {
+  patterns: GrammarPattern[];
+}
+
+export interface KnownPatternsResponse {
+  pattern_ids: string[];
+}
+
+/** Catalog of detectable grammar patterns (proxied from the NLP service). JA-only today. */
+export async function getGrammarCatalog(lang = 'ja'): Promise<GrammarCatalogResponse> {
+  return apiFetch<GrammarCatalogResponse>(`/v1/nlp/grammar/patterns?language=${encodeURIComponent(lang)}`);
+}
+
+/** Ids of grammar patterns the current user has marked known for `lang`. */
+export async function getKnownPatterns(lang = 'ja'): Promise<KnownPatternsResponse> {
+  return apiFetch<KnownPatternsResponse>(`/v1/grammar/known?language=${encodeURIComponent(lang)}`);
+}
+
+/** Mark a grammar pattern as known (idempotent). */
+export async function markPattern(lang: string, id: string): Promise<void> {
+  await apiFetch('/v1/grammar/known', {
+    method: 'POST',
+    body: JSON.stringify({ language_code: lang, pattern_id: id }),
+  });
+}
+
+/** Unmark a grammar pattern (idempotent). */
+export async function unmarkPattern(lang: string, id: string): Promise<void> {
+  await apiFetch('/v1/grammar/known', {
+    method: 'DELETE',
+    body: JSON.stringify({ language_code: lang, pattern_id: id }),
+  });
 }

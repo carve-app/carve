@@ -122,6 +122,17 @@ func Retrievability(elapsed time.Duration, stability float64) float64 {
 	return math.Pow(1+Factor*t/stability, Decay)
 }
 
+// MaxIntervalDays caps a scheduled interval at ~100 years. This matches the
+// FSRS reference stability cap and, critically, keeps the
+// `time.Duration(days) * 24 * time.Hour` nanosecond math far below the int64
+// overflow point (~106752 days), which would otherwise wrap a Due timestamp
+// into the past for mature cards or crafted Anki imports.
+const MaxIntervalDays = 36500
+
+// MaxStability caps stored stability at the same horizon so the retrievability
+// math never operates on an unbounded S.
+const MaxStability = 36500.0
+
 // intervalDays returns the number of days that achieves targetRetention.
 // Minimum 1 day.
 func intervalDays(stability, targetRetention float64) int {
@@ -132,6 +143,19 @@ func intervalDays(stability, targetRetention float64) int {
 		d = 1
 	}
 	return d
+}
+
+// clampIntervalDays bounds a final interval to [1, MaxIntervalDays]. Applied at
+// each Schedule call site (after any per-rating multiplier) so the resulting
+// time.Duration can never overflow.
+func clampIntervalDays(days int) int {
+	if days < 1 {
+		return 1
+	}
+	if days > MaxIntervalDays {
+		return MaxIntervalDays
+	}
+	return days
 }
 
 // initialStability returns S_0 for the first review of a new card.
@@ -167,6 +191,9 @@ func stabilityAfterRecall(p Params, d, s, r float64, g Rating) float64 {
 	if sr < 0.1 {
 		sr = 0.1
 	}
+	if sr > MaxStability {
+		sr = MaxStability
+	}
 	return sr
 }
 
@@ -175,6 +202,9 @@ func stabilityAfterForgetting(p Params, d, s, r float64) float64 {
 	sf := p.W[11] * math.Pow(d, -p.W[12]) * (math.Pow(s+1, p.W[13]) - 1) * math.Exp(p.W[14]*(1-r))
 	if sf < 0.1 {
 		sf = 0.1
+	}
+	if sf > MaxStability {
+		sf = MaxStability
 	}
 	return sf
 }
@@ -220,13 +250,7 @@ func Schedule(p Params, card CardState, g Rating, now time.Time) ReviewResult {
 		case Good, Easy:
 			res.State = StateReview
 			days := intervalDays(res.Stability, p.TargetRetention)
-			if g == Easy {
-				days = int(math.Round(float64(days) * p.W[16]))
-				if days < 1 {
-					days = 1
-				}
-			}
-			res.Due = now.Add(time.Duration(days) * 24 * time.Hour)
+			res.Due = now.Add(time.Duration(clampIntervalDays(days)) * 24 * time.Hour)
 		}
 
 	case StateLearning:
@@ -244,13 +268,7 @@ func Schedule(p Params, card CardState, g Rating, now time.Time) ReviewResult {
 		case Good, Easy:
 			res.State = StateReview
 			days := intervalDays(newS, p.TargetRetention)
-			if g == Easy {
-				days = int(math.Round(float64(days) * p.W[16]))
-				if days < 1 {
-					days = 1
-				}
-			}
-			res.Due = now.Add(time.Duration(days) * 24 * time.Hour)
+			res.Due = now.Add(time.Duration(clampIntervalDays(days)) * 24 * time.Hour)
 		}
 
 	case StateReview:
@@ -270,7 +288,7 @@ func Schedule(p Params, card CardState, g Rating, now time.Time) ReviewResult {
 			res.Difficulty = nextDifficulty(p, card.Difficulty, g)
 			res.State = StateReview
 			days := intervalDays(newS, p.TargetRetention)
-			res.Due = now.Add(time.Duration(days) * 24 * time.Hour)
+			res.Due = now.Add(time.Duration(clampIntervalDays(days)) * 24 * time.Hour)
 		}
 
 	case StateRelearning:
@@ -288,13 +306,7 @@ func Schedule(p Params, card CardState, g Rating, now time.Time) ReviewResult {
 		case Good, Easy:
 			res.State = StateReview
 			days := intervalDays(newS, p.TargetRetention)
-			if g == Easy {
-				days = int(math.Round(float64(days) * p.W[16]))
-				if days < 1 {
-					days = 1
-				}
-			}
-			res.Due = now.Add(time.Duration(days) * 24 * time.Hour)
+			res.Due = now.Add(time.Duration(clampIntervalDays(days)) * 24 * time.Hour)
 		}
 	}
 

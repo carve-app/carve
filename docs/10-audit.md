@@ -1,5 +1,8 @@
 # State-of-Project Audit (2026-05-30)
 
+> **Point-in-time snapshot — superseded.** For the current verified state see
+> [STATUS.md](STATUS.md). Kept as a historical audit record.
+
 > Snapshot of the codebase against the "better Migaku" promise: feature
 > completeness, UX, design, polished workflows. Captured after Phase 4 work
 > landed (Chinese/Korean tokenizer scaffolds, output practice, billing).

@@ -5,8 +5,12 @@ uvicorn[standard]==0.48.0
 pydantic==2.13.4
 httpx==0.28.1
 pytest==9.0.3
-httpx2>=0.28.1
 jieba==0.42.1
 pypinyin==0.55.0
 wordfreq==3.1.1
+simplemma==1.1.2
 hypothesis==6.155.1
+# Google Cloud Translation v3 (Translation LLM) auth — service-account OAuth2.
+# `requests` is google-auth's HTTP transport for token refresh.
+google-auth==2.53.0
+requests==2.34.2

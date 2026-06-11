@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"strings"
 	"testing"
 
@@ -227,6 +229,26 @@ func TestAttachMediaHandler_Unauthorized(t *testing.T) {
 	h.AttachMedia(w, r)
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+// contentTypeOf must preserve the real recorded codec end-to-end (e.g.
+// audio/webm;codecs=opus) rather than flattening it to a generic type, and fall
+// back to the default when the multipart part declares none.
+func TestContentTypeOf(t *testing.T) {
+	hdr := &multipart.FileHeader{Header: textproto.MIMEHeader{}}
+	hdr.Header.Set("Content-Type", "audio/webm;codecs=opus")
+	if got := contentTypeOf(hdr, "audio/webm"); got != "audio/webm;codecs=opus" {
+		t.Errorf("contentTypeOf with codec = %q, want audio/webm;codecs=opus", got)
+	}
+
+	empty := &multipart.FileHeader{Header: textproto.MIMEHeader{}}
+	if got := contentTypeOf(empty, "image/jpeg"); got != "image/jpeg" {
+		t.Errorf("contentTypeOf empty = %q, want image/jpeg (default)", got)
+	}
+
+	if got := contentTypeOf(nil, "audio/webm"); got != "audio/webm" {
+		t.Errorf("contentTypeOf(nil) = %q, want audio/webm (default)", got)
 	}
 }
 

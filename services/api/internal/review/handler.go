@@ -107,19 +107,22 @@ func (h *Handler) DueCount(w http.ResponseWriter, r *http.Request) {
 // ── GET /v1/review/session ────────────────────────────────────────────────────
 
 type sessionCard struct {
-	ID         string     `json:"id"`
-	FrontText  string     `json:"front_text"`
-	BackText   *string    `json:"back_text"`
-	Sentence   *string    `json:"sentence"`
-	SourceURL  *string    `json:"source_url"`
-	AudioURL   *string    `json:"audio_url"`
-	ImageURL   *string    `json:"image_url"`
-	FsrsState  string     `json:"fsrs_state"`
-	Stability  *float64   `json:"stability"`
-	Difficulty *float64   `json:"difficulty"`
-	Due        *time.Time `json:"due"`
-	Reps       int        `json:"reps"`
-	Lapses     int        `json:"lapses"`
+	ID            string     `json:"id"`
+	FrontText     string     `json:"front_text"`
+	CardType      string     `json:"card_type"`
+	BackText      *string    `json:"back_text"`
+	Sentence      *string    `json:"sentence"`
+	Translation   *string    `json:"subtitle_translation"`
+	SourceURL     *string    `json:"source_url"`
+	AudioURL      *string    `json:"audio_url"`
+	SentenceAudio *string    `json:"sentence_audio_url"`
+	ImageURL      *string    `json:"image_url"`
+	FsrsState     string     `json:"fsrs_state"`
+	Stability     *float64   `json:"stability"`
+	Difficulty    *float64   `json:"difficulty"`
+	Due           *time.Time `json:"due"`
+	Reps          int        `json:"reps"`
+	Lapses        int        `json:"lapses"`
 }
 
 func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
@@ -143,8 +146,8 @@ func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch all due cards, learning-priority first (smallest due time first)
 	rows, err := h.db.Query(r.Context(),
-		`SELECT id, front_text, back_text, sentence, source_url,
-		        front_audio_url, front_image_url,
+		`SELECT id, front_text, card_type, back_text, sentence, subtitle_translation, source_url,
+		        front_audio_url, sentence_audio_url, front_image_url,
 		        fsrs_state, fsrs_stability, fsrs_difficulty, fsrs_due,
 		        fsrs_reps, fsrs_lapses
 		 FROM cards
@@ -181,8 +184,8 @@ func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c rawCard
 		if err := rows.Scan(
-			&c.ID, &c.FrontText, &c.BackText, &c.Sentence, &c.SourceURL,
-			&c.AudioURL, &c.ImageURL,
+			&c.ID, &c.FrontText, &c.CardType, &c.BackText, &c.Sentence, &c.Translation, &c.SourceURL,
+			&c.AudioURL, &c.SentenceAudio, &c.ImageURL,
 			&c.FsrsState, &c.Stability, &c.Difficulty, &c.Due,
 			&c.Reps, &c.Lapses,
 		); err != nil {
@@ -201,18 +204,35 @@ func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Desimilarizer: pick at most 2 cards per first-rune bucket to avoid
-	// confusingly similar cards (e.g., 食べる / 食べない) in the same session.
+	// Desimilarizer: prefer at most 2 cards per first-rune bucket to avoid
+	// confusingly similar cards (e.g., 食べる / 食べない) clustering in the same
+	// session. The bucket cap only spreads cards out — it must never discard
+	// due work, so if the first pass falls short of `limit` we backfill with
+	// the remaining (priority-ordered) cards, ignoring the cap.
+	const maxPerBucket = 2
 	seen := make(map[string]int)
+	selected := make([]bool, len(all))
 	var session []sessionCard
-	for _, c := range all {
+	for i, c := range all {
 		if len(session) >= limit {
 			break
 		}
-		const maxPerBucket = 2
 		if seen[c.sortKey] < maxPerBucket {
 			session = append(session, c.sessionCard)
 			seen[c.sortKey]++
+			selected[i] = true
+		}
+	}
+	// Backfill: append not-yet-selected cards (in DB priority order) until we
+	// reach the limit, so a deck whose due cards share leading characters still
+	// serves a full session.
+	for i, c := range all {
+		if len(session) >= limit {
+			break
+		}
+		if !selected[i] {
+			session = append(session, c.sessionCard)
+			selected[i] = true
 		}
 	}
 
@@ -260,7 +280,19 @@ func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	// Fetch current card state (verify ownership).
+	// The card read, FSRS recompute, card update, and review-event insert must
+	// be atomic: two concurrent submissions for the same card (extension + web
+	// tab, double-tap, retry) would otherwise both read the same prior state
+	// and the later write would clobber the earlier — losing a rep/lapse and
+	// storing a duplicate prior_* snapshot that corrupts Undo. SELECT ... FOR
+	// UPDATE serializes them on the card row.
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	defer tx.Rollback(ctx)
+
 	var card struct {
 		Stability  *float64
 		Difficulty *float64
@@ -270,11 +302,12 @@ func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 		Lapses     int
 		Language   string
 	}
-	err := h.db.QueryRow(ctx,
+	err = tx.QueryRow(ctx,
 		`SELECT fsrs_stability, fsrs_difficulty, fsrs_last_review,
 		        fsrs_state, fsrs_reps, fsrs_lapses, language_code
 		 FROM cards
-		 WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL AND suspended = FALSE`,
+		 WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL AND suspended = FALSE
+		 FOR UPDATE`,
 		req.CardID, claims.UserID,
 	).Scan(
 		&card.Stability, &card.Difficulty, &card.LastReview,
@@ -302,7 +335,7 @@ func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 	metrics.IncCounter("fsrs_event_total")
 
 	// Persist updated card state
-	_, err = h.db.Exec(ctx,
+	_, err = tx.Exec(ctx,
 		`UPDATE cards SET
 		   fsrs_state      = $1,
 		   fsrs_stability  = $2,
@@ -329,9 +362,11 @@ func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Store review event with prior state snapshot (needed for undo).
+	// Store review event with prior state snapshot (needed for undo). Inside the
+	// same tx so its failure rolls back the card update — state and history stay
+	// consistent.
 	eventID := auth.NewID()
-	_, err = h.db.Exec(ctx,
+	_, err = tx.Exec(ctx,
 		`INSERT INTO review_events
 		   (id, card_id, user_id, reviewed_at, rating, time_taken_ms,
 		    stability_after, difficulty_after, due_after, retrievability_at_review,
@@ -344,7 +379,14 @@ func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		slog.Error("insert review event", "error", err)
-		// Non-fatal: card state is already updated
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		slog.Error("commit review event", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
 	}
 
 	// Create leech notification

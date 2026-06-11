@@ -18,6 +18,7 @@ import (
 	"github.com/carve-app/carve/services/api/internal/decks"
 	"github.com/carve-app/carve/services/api/internal/discover"
 	"github.com/carve-app/carve/services/api/internal/export"
+	"github.com/carve-app/carve/services/api/internal/grammar"
 	"github.com/carve-app/carve/services/api/internal/immersion"
 	"github.com/carve-app/carve/services/api/internal/importer"
 	"github.com/carve-app/carve/services/api/internal/library"
@@ -41,6 +42,13 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 	slog.SetDefault(log)
+
+	// Fail fast on a missing/weak signing secret rather than silently falling
+	// back to the published dev default (which would allow token forgery).
+	if err := auth.RequireJWTSecret(); err != nil {
+		slog.Error("refusing to start", "error", err)
+		os.Exit(1)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -97,10 +105,10 @@ func main() {
 	reviewHandler := review.NewHandler(pool)
 	immersionHandler := immersion.NewHandler(pool)
 	nlpProxy := nlp.NewProxy()
+	nlpExplain := nlp.NewExplainHandler(pool)
 	decksHandler := decks.NewHandler(pool)
 	exportHandler := export.NewHandler(pool)
 	settingsHandler := settings.NewHandler(pool)
-	billingHandler := billing.NewHandler(pool)
 	statsHandler := stats.NewHandler(pool)
 	libraryHandler := library.NewHandler(pool)
 	importerHandler := importer.NewHandler(pool)
@@ -110,6 +118,7 @@ func main() {
 	discoverHandler := discover.NewHandler(pool)
 	discoverIngester := discover.NewIngester(pool)
 	reportsHandler := reports.NewHandler(pool)
+	grammarHandler := grammar.NewHandler(pool)
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(auth.Middleware)
@@ -158,6 +167,8 @@ func main() {
 
 		// Export
 		r.Get("/export", exportHandler.Export)
+		r.Get("/export/csv", exportHandler.ExportCSV)
+		r.Get("/export/apkg", exportHandler.ExportAPKG)
 
 		// Settings
 		r.Get("/settings/fsrs", settingsHandler.GetFSRS)
@@ -166,10 +177,6 @@ func main() {
 
 		// Immersion
 		r.Post("/immersion", immersionHandler.Create)
-
-		// Billing
-		r.Get("/billing/subscription", billingHandler.Subscription)
-		r.Post("/billing/checkout", billingHandler.Checkout)
 
 		// Stats dashboard
 		r.Get("/stats", statsHandler.Dashboard)
@@ -207,10 +214,28 @@ func main() {
 		// Learning reports
 		r.Get("/reports/weekly", reportsHandler.Weekly)
 
+		// Grammar — user's known JLPT patterns (catalog lives behind /v1/nlp/grammar/patterns)
+		r.Get("/grammar/known", grammarHandler.ListKnown)
+		r.Post("/grammar/known", grammarHandler.MarkKnown)
+		r.Delete("/grammar/known", grammarHandler.UnmarkKnown)
+
 	})
 
-	// Stripe webhook — no auth middleware; signature verified inside handler.
-	r.Post("/v1/billing/webhook", billingHandler.Webhook)
+	// Billing is disabled during the free-alpha milestone: the web UI has no
+	// checkout/portal and no endpoint enforces subscription tiers. Registering
+	// the routes only when Stripe is configured keeps the unfinished payment
+	// surface (incl. the webhook) off the public API by default. Set
+	// STRIPE_SECRET_KEY to re-enable post-alpha.
+	if os.Getenv("STRIPE_SECRET_KEY") != "" {
+		billingHandler := billing.NewHandler(pool)
+		r.Group(func(r chi.Router) {
+			r.Use(auth.Middleware)
+			r.Get("/v1/billing/subscription", billingHandler.Subscription)
+			r.Post("/v1/billing/checkout", billingHandler.Checkout)
+		})
+		// Stripe webhook — no auth middleware; signature verified inside handler.
+		r.Post("/v1/billing/webhook", billingHandler.Webhook)
+	}
 
 	// NLP proxy routes get their own subrouter without the global 30s timeout
 	// middleware, since SudachiPy can take up to 2 minutes on first request.
@@ -222,6 +247,9 @@ func main() {
 		r.Post("/translate", nlpProxy.Translate)
 		r.Post("/select-sentence", nlpProxy.SelectSentence)
 		r.Get("/grammar/patterns", nlpProxy.GrammarPatterns)
+		r.Post("/explain", nlpExplain.Explain)
+		r.Get("/word-audio", nlpExplain.WordAudio)
+		r.Get("/word-image", nlpProxy.WordImage)
 	})
 
 	port := os.Getenv("PORT")

@@ -12,6 +12,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -27,6 +28,8 @@ from .tokenizer import JapaneseTokenizer
 from .tokenizer_zh import ChineseTokenizer
 from .tokenizer_ko import KoreanTokenizer
 from .tokenizer_en import EnglishTokenizer
+from .tokenizer_latin import LatinTokenizer, SUPPORTED_LANGUAGES as LATIN_LANGUAGES
+from . import translator
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +38,9 @@ _ja_tokenizer = JapaneseTokenizer()
 _zh_tokenizer = ChineseTokenizer()
 _ko_tokenizer = KoreanTokenizer()
 _en_tokenizer = EnglishTokenizer()
+# One LatinTokenizer per supported Latin-script / Vietnamese language. Each is
+# cheap (a regex + simplemma cache), so we eagerly construct them at import.
+_latin_tokenizers = {lang: LatinTokenizer(lang) for lang in LATIN_LANGUAGES}
 
 
 @asynccontextmanager
@@ -57,7 +63,11 @@ _INTERNAL_SECRET = os.environ.get("NLP_INTERNAL_SECRET", "")
 
 
 def _check_auth(x_internal_secret: str | None) -> None:
-    if _INTERNAL_SECRET and x_internal_secret != _INTERNAL_SECRET:
+    # Constant-time compare so the shared secret can't be recovered byte-by-byte
+    # via response-timing. hmac.compare_digest raises on None, hence the guard.
+    if _INTERNAL_SECRET and not (
+        x_internal_secret and hmac.compare_digest(x_internal_secret, _INTERNAL_SECRET)
+    ):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
@@ -180,6 +190,9 @@ def tokenize(
     elif req.language == "en":
         en_result = _en_tokenizer.tokenize(req.text)
         raw_tokens = en_result.tokens
+    elif req.language in _latin_tokenizers:
+        latin_result = _latin_tokenizers[req.language].tokenize(req.text)
+        raw_tokens = latin_result.tokens
     else:
         raise HTTPException(status_code=422, detail=f"Language '{req.language}' not yet supported")
 
@@ -205,6 +218,10 @@ def tokenize(
             # English: 'reading' is the lowercased orthographic form
             reading = t.reading
             reading_hira = t.reading
+        elif req.language in _latin_tokenizers:
+            # Latin-script / Vietnamese: 'reading' is the lowercased surface form
+            reading = t.reading
+            reading_hira = t.reading
         else:
             reading = surface
             reading_hira = surface
@@ -216,7 +233,7 @@ def tokenize(
         )
         defs = None
         if req.include_definitions and status == "unknown" and is_content:
-            entry = _dict_service.lookup(lemma, target_lang="en")
+            entry = _dict_service.lookup(lemma, language=req.language, target_lang="en")
             if entry:
                 defs = [
                     {
@@ -318,10 +335,29 @@ def lookup(
             reading = t.reading
             reading_hira = t.reading
         furigana = [{"text": req.surface, "reading": ""}]
+    elif req.language in _latin_tokenizers:
+        latin_result = _latin_tokenizers[req.language].tokenize(req.surface)
+        # Prefer the first content word, else the first token.
+        content = [t for t in latin_result.tokens if t.is_content_word]
+        chosen = (content[0] if content else latin_result.tokens[0]) if latin_result.tokens else None
+        if chosen:
+            lemma = chosen.lemma
+            reading = chosen.reading
+            reading_hira = chosen.reading
+        furigana = [{"text": req.surface, "reading": ""}]
     else:
         raise HTTPException(status_code=422, detail=f"Language '{req.language}' not yet supported")
 
-    entry = _dict_service.lookup(lemma, target_lang=req.target_lang)
+    entry = _dict_service.lookup(lemma, language=req.language, target_lang=req.target_lang)
+
+    # Fallback: the lemmatizer can over-stem (e.g. German "Haus" -> "hausen"),
+    # so if the lemma misses, retry on the raw surface form. Skip for Japanese,
+    # which has its own reading-based normalization in the dict service.
+    if not entry and req.language != "ja" and req.surface != lemma:
+        fallback = _dict_service.lookup(req.surface, language=req.language, target_lang=req.target_lang)
+        if fallback:
+            entry = fallback
+            lemma = fallback.lemma
 
     if not entry:
         return LookupResponse(
@@ -366,10 +402,7 @@ def batch_lookup(
 ) -> dict:
     _check_auth(x_internal_secret)
 
-    if req.language != "ja":
-        raise HTTPException(status_code=422, detail=f"Language '{req.language}' not yet supported")
-
-    results = _dict_service.batch_lookup(req.lemmas, target_lang=req.target_lang)
+    results = _dict_service.batch_lookup(req.lemmas, language=req.language, target_lang=req.target_lang)
     return {
         "results": {
             lemma: (
@@ -450,6 +483,22 @@ def score_text(
             recommended_mode="mining_read" if pct >= 90 else "study_read" if pct >= 80 else "too_hard",
             top_unknown_lemmas=[t.lemma for t in content if t.lemma not in known and t.lemma not in learning][:10],
         )
+    elif req.language in _latin_tokenizers:
+        latin_result = _latin_tokenizers[req.language].tokenize(req.text)
+        content = [t for t in latin_result.tokens if t.is_content_word]
+        known_ct = sum(1 for t in content if t.lemma in known or t.lemma in learning)
+        total = len(content) or 1
+        pct = round(known_ct / total * 100, 1)
+        from .scorer import ContentScore
+        s = ContentScore(
+            comprehension_pct=pct,
+            difficulty_score=round(1.0 - pct / 100, 2),
+            total_content_words=total,
+            unknown_count=total - known_ct,
+            learning_count=0,
+            recommended_mode="mining_read" if pct >= 90 else "study_read" if pct >= 80 else "too_hard",
+            top_unknown_lemmas=[t.lemma for t in content if t.lemma not in known and t.lemma not in learning][:10],
+        )
     else:
         raise HTTPException(status_code=422, detail=f"Language '{req.language}' not yet supported")
 
@@ -474,6 +523,8 @@ def _tokenize_for_language(text: str, language: str):
         return _ko_tokenizer.tokenize(text).tokens
     if language == "en":
         return _en_tokenizer.tokenize(text).tokens
+    if language in _latin_tokenizers:
+        return _latin_tokenizers[language].tokenize(text).tokens
     raise HTTPException(status_code=422, detail=f"Language '{language}' not yet supported")
 
 
@@ -549,7 +600,9 @@ def select_sentence(
 
 
 class TranslateRequest(BaseModel):
-    text: str
+    # Bound the input like TokenizeRequest/ScoreRequest — a sentence translation
+    # is never this long; the cap keeps gloss-building from unbounded work.
+    text: str = Field(..., max_length=50_000)
     source_language: str = "ja"
     target_language: str = "en"
 
@@ -566,34 +619,19 @@ def translate(
     x_internal_secret: Annotated[str | None, Header()] = None,
 ) -> TranslateResponse:
     """
-    Translate a sentence.  Currently returns the top-3 definitions of each
-    content word as a gloss — a lightweight placeholder until a proper MT
-    service (DeepL / Google / Claude) is wired up.
+    Translate a sentence to the target language using Google Cloud Translation
+    v3 — the Translation LLM (best-on-market for Carve's languages).
+
+    This is the single engine: there is deliberately NO word-gloss / corpus /
+    keyless fallback. A word-for-word gloss is worse than nothing, so when
+    translation is unavailable (engine not configured, unsupported language, or
+    API error) we return null and the card simply has no translation.
     """
     _check_auth(x_internal_secret)
 
-    if not req.text.strip():
-        return TranslateResponse(
-            translation=None,
-            source_language=req.source_language,
-            target_language=req.target_language,
-        )
-
-    # Build a word-gloss from the dictionary for Japanese text
-    gloss_parts: list[str] = []
-    if req.source_language == "ja":
-        result = _ja_tokenizer.tokenize(req.text)
-        for tok in result.tokens:
-            if not tok.is_content_word:
-                continue
-            entry = _dict_service.lookup(tok.lemma, req.source_language)
-            if entry and entry.definitions:
-                top_def = entry.definitions[0].definition
-                gloss_parts.append(f"{tok.surface}[{top_def}]")
-        translation = " ".join(gloss_parts) if gloss_parts else None
-    else:
-        # Other languages: no MT yet
-        translation = None
+    translation = translator.translate_sentence(
+        req.text, req.source_language, req.target_language
+    )
 
     return TranslateResponse(
         translation=translation,

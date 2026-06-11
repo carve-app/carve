@@ -1,4 +1,5 @@
 import type { SubtitleOverlay } from '../SubtitleOverlay';
+import { extractNativeCueText } from './nativeText';
 
 // Viki's player wraps subtitles inside `.subtitle-container` with each cue
 // in `.subtitle-content`.
@@ -9,7 +10,7 @@ export class VikiHook {
   private observer: MutationObserver | null = null;
   private lastText = '';
 
-  constructor(private overlay: SubtitleOverlay) {}
+  constructor(private overlay: SubtitleOverlay, private lang: string = '') {}
 
   mount(): void {
     this.overlay.hideNativeContainer(NATIVE_SELECTOR);
@@ -27,12 +28,13 @@ export class VikiHook {
       .join(' ');
     if (!text || text === this.lastText) return;
     this.lastText = text;
-    const { startMs, endMs } = this.getActiveCueTiming();
-    this.overlay.onCue({ text, startMs, endMs });
+    const video = document.querySelector<HTMLVideoElement>('video');
+    const { startMs, endMs } = this.getActiveCueTiming(video);
+    const nativeText = extractNativeCueText(video, this.lang);
+    this.overlay.onCue({ text, startMs, endMs, nativeText });
   }
 
-  private getActiveCueTiming(): { startMs: number; endMs: number } {
-    const video = document.querySelector<HTMLVideoElement>('video');
+  private getActiveCueTiming(video: HTMLVideoElement | null): { startMs: number; endMs: number } {
     if (!video) return defaultTiming();
     for (let i = 0; i < video.textTracks.length; i++) {
       const track = video.textTracks[i];

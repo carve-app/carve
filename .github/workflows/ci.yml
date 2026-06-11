@@ -10,6 +10,11 @@ on:
     - cron: "0 * * * *"
   workflow_dispatch: {}
 
+# Least privilege: these are build/test-only jobs (no GitHub API writes), and
+# this workflow runs untrusted PR code. Restrict the default GITHUB_TOKEN.
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -42,6 +47,20 @@ jobs:
           curl -sL "http://ftp.edrdg.org/pub/Nihongo/JMdict_e.gz" -o data/JMdict_e.gz
           gzip -d data/JMdict_e.gz
           python scripts/import_jmdict.py
+
+      - name: Import WordNet (English monolingual dictionary)
+        working-directory: services/nlp
+        run: python scripts/import_wordnet.py
+
+      - name: Import multilingual dictionaries (zh, ko, es/de/fr/it/pt)
+        working-directory: services/nlp
+        run: |
+          # CC-CEDICT (zh, ~4 MB download), curated Korean list (no download),
+          # and FreeDict bilingual dicts (es/de/fr/it/pt, ~40 MB total download).
+          # All write into the same data/dictionary.db the JMdict step created.
+          python scripts/import_cedict_sqlite.py
+          python scripts/import_kde4_sqlite.py
+          python scripts/import_freedict.py
 
       - name: Run correctness test suite (Phase 0 gate)
         working-directory: services/nlp
@@ -272,6 +291,55 @@ jobs:
           name: extension-e2e-screenshot
           path: e2e/extension-e2e.png
 
+  # ── Real video sentence-mining e2e (full stack) ───────────────────────────
+  video-mining:
+    name: Video mining (real stack)
+    runs-on: ubuntu-latest
+    needs: [api, media]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache-dependency-path: services/api/go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Install ffmpeg (for the audio/video fixture)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Build Go binaries (api, migrate, media)
+        run: |
+          mkdir -p bin
+          (cd services/api && go build -o ../../bin/api ./cmd/api && go build -o ../../bin/migrate ./cmd/migrate)
+          (cd services/media && go build -o ../../bin/media ./cmd/media)
+
+      - name: Build chrome extension
+        working-directory: apps/extension
+        run: npm ci && npm run build:chrome
+
+      - name: Generate the fixture video (vp8 + opus, with audio tone)
+        run: |
+          mkdir -p e2e/fixtures/media
+          ffmpeg -hide_banner -loglevel error -y \
+            -f lavfi -i "color=c=0x1e88e5:s=480x270:d=6,format=yuv420p" \
+            -f lavfi -i "sine=frequency=440:duration=6" \
+            -c:v libvpx -b:v 400k -c:a libopus -b:a 96k -shortest \
+            e2e/fixtures/media/sample.webm
+
+      - name: Install e2e deps + Playwright Chromium
+        working-directory: e2e
+        run: npm ci && npx playwright install --with-deps chromium
+
+      - name: Run real video-mining e2e
+        working-directory: e2e
+        run: node video-mining.test.js
+
   # ── Integration: Docker Compose ───────────────────────────────────────────
   integration:
     name: Docker Compose Integration
@@ -287,8 +355,17 @@ jobs:
           mkdir -p data
           curl -sL "http://ftp.edrdg.org/pub/Nihongo/JMdict_e.gz" -o data/JMdict_e.gz
           gzip -d data/JMdict_e.gz
-          pip install sudachipy sudachidict-core
+          pip install sudachipy sudachidict-core wordfreq
           python scripts/import_jmdict.py
+          python scripts/import_wordnet.py
+
+      - name: Import multilingual dictionaries for NLP image
+        working-directory: services/nlp
+        run: |
+          # Bake zh/ko/es/de/fr/it/pt dictionaries into the same SQLite db.
+          python scripts/import_cedict_sqlite.py
+          python scripts/import_kde4_sqlite.py
+          python scripts/import_freedict.py
 
       - name: Build and start services
         run: docker compose up -d --build postgres redis api nlp

@@ -4,63 +4,32 @@
 
 <main>
   <div class="container">
-    <h1>Simple, honest pricing</h1>
-    <p class="subtitle">Start free. Upgrade when you're ready.</p>
+    <h1>Free while we're in alpha</h1>
+    <p class="subtitle">Carve is in open alpha. Every feature is free — no card limits, no trials, no card on file.</p>
 
     <div class="plans">
-      <!-- Free -->
-      <div class="plan">
-        <h2 class="plan-name">Free</h2>
-        <div class="plan-price"><span class="amount">$0</span><span class="period">/month</span></div>
-        <p class="plan-desc">Everything you need to get started with immersion learning.</p>
-        <ul class="features">
-          <li>Up to 200 cards</li>
-          <li>Japanese, Chinese, Korean</li>
-          <li>Full FSRS-6 scheduling</li>
-          <li>Chrome, Firefox &amp; Safari extension</li>
-          <li>Furigana &amp; pitch accent</li>
-          <li>Web reader</li>
-        </ul>
-        <a href="/register" class="btn btn-outline">Get started free</a>
-      </div>
-
-      <!-- Learner -->
+      <!-- Free alpha -->
       <div class="plan plan-featured">
-        <div class="plan-badge">Most popular</div>
-        <h2 class="plan-name">Learner</h2>
-        <div class="plan-price"><span class="amount">$9</span><span class="period">/month</span></div>
-        <p class="plan-desc">For serious learners who want unlimited cards and rich media.</p>
+        <div class="plan-badge">Open alpha</div>
+        <h2 class="plan-name">Free</h2>
+        <div class="plan-price"><span class="amount">$0</span></div>
+        <p class="plan-desc">Everything Carve does, free for everyone during the alpha.</p>
         <ul class="features">
           <li><strong>Unlimited cards</strong></li>
-          <li>Everything in Free</li>
+          <li>Mine words from any page or video subtitle</li>
           <li>Audio + frame capture from video</li>
-          <li>Anki / Migaku import</li>
-          <li>EPUB &amp; SRT reader</li>
-          <li>Comprehension stats</li>
-          <li>Priority support</li>
+          <li>Full FSRS-6 scheduling</li>
+          <li>Furigana &amp; pitch accent (Japanese)</li>
+          <li>Web reader + comprehension stats</li>
+          <li>Anki / Migaku / Yomitan / jpdb import</li>
         </ul>
-        <a href="/register" class="btn btn-primary">Start 7-day trial</a>
-      </div>
-
-      <!-- Pro -->
-      <div class="plan">
-        <h2 class="plan-name">Pro</h2>
-        <div class="plan-price"><span class="amount">$19</span><span class="period">/month</span></div>
-        <p class="plan-desc">For advanced learners and power users who want every feature.</p>
-        <ul class="features">
-          <li>Everything in Learner</li>
-          <li>Output practice suite</li>
-          <li>Shadowing &amp; speaking exercises</li>
-          <li>AnkiConnect sync</li>
-          <li>API access</li>
-          <li>Early access to new features</li>
-        </ul>
-        <a href="/register" class="btn btn-outline">Start 7-day trial</a>
+        <a href="/register" class="btn btn-primary">Get started free</a>
       </div>
     </div>
 
     <p class="faq-note">
-      Have questions? See the <a href="/privacy">privacy policy</a> or email
+      Carve is early software under active development — expect rough edges, and please send feedback.
+      See the <a href="/privacy">privacy policy</a> or email
       <a href="mailto:support@carve-app.com">support@carve-app.com</a>.
     </p>
   </div>
@@ -97,6 +66,9 @@
     grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
     gap: 1.5rem;
     margin-bottom: 2.5rem;
+    max-width: 380px;
+    margin-left: auto;
+    margin-right: auto;
   }
 
   .plan {
@@ -145,11 +117,6 @@
   .amount {
     font-size: 2rem;
     font-weight: 700;
-  }
-
-  .period {
-    color: #9ba8c0;
-    font-size: 0.875rem;
   }
 
   .plan-desc {
@@ -201,12 +168,6 @@
     background: #3949ab;
     color: #fff;
     border: none;
-  }
-
-  .btn-outline {
-    background: transparent;
-    color: #c5cae9;
-    border: 1px solid rgba(255,255,255,0.18);
   }
 
   .faq-note {

@@ -60,10 +60,11 @@ resource "aws_service_discovery_service" "nlp" {
 locals {
   ssm_secret = { for name in [
     "DATABASE_URL", "REDIS_URL", "JWT_SECRET", "NLP_INTERNAL_SECRET",
+    "MEDIA_INTERNAL_TOKEN",
     "FORVO_API_KEY", "DEEPL_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY",
     "GOOGLE_AI_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET",
     "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
-    "SENTRY_DSN", "POSTHOG_API_KEY", "SMTP_PASSWORD",
+    "SENTRY_DSN", "POSTHOG_API_KEY", "SMTP_USER", "SMTP_PASSWORD_REAL",
     ] : name => "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${local.ssm_prefix}/${name}"
   }
 }
@@ -107,6 +108,12 @@ resource "aws_ecs_task_definition" "api" {
       { name = "OPENAI_API_KEY", valueFrom = local.ssm_secret["OPENAI_API_KEY"] },
       { name = "ANTHROPIC_API_KEY", valueFrom = local.ssm_secret["ANTHROPIC_API_KEY"] },
       { name = "GOOGLE_AI_API_KEY", valueFrom = local.ssm_secret["GOOGLE_AI_API_KEY"] },
+      # Shared bearer the API presents when uploading to the media service.
+      { name = "MEDIA_INTERNAL_TOKEN", valueFrom = local.ssm_secret["MEDIA_INTERNAL_TOKEN"] },
+      # SES SMTP auth. Env var names must match what the API reads:
+      # SMTP_USER and SMTP_PASS (reports/weekly.go).
+      { name = "SMTP_USER", valueFrom = local.ssm_secret["SMTP_USER"] },
+      { name = "SMTP_PASS", valueFrom = local.ssm_secret["SMTP_PASSWORD_REAL"] },
     ]
 
     logConfiguration = {
@@ -184,6 +191,8 @@ resource "aws_ecs_task_definition" "media" {
     secrets = [
       { name = "R2_ACCESS_KEY_ID", valueFrom = local.ssm_secret["R2_ACCESS_KEY_ID"] },
       { name = "R2_SECRET_ACCESS_KEY", valueFrom = local.ssm_secret["R2_SECRET_ACCESS_KEY"] },
+      # Shared bearer required on write endpoints — must match the API's value.
+      { name = "MEDIA_INTERNAL_TOKEN", valueFrom = local.ssm_secret["MEDIA_INTERNAL_TOKEN"] },
     ]
 
     logConfiguration = {
