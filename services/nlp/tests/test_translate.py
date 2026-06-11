@@ -27,10 +27,15 @@ class TestTranslate:
         assert r.status_code == 200
         assert r.json()["translation"] is None
 
-    def test_non_japanese_language_returns_null(self):
+    def test_non_japanese_language_produces_gloss_or_null(self):
+        # Non-JA languages now get a best-effort word gloss when the dictionary
+        # has the words (was previously hard-None). Either a gloss string or
+        # None is acceptable depending on whether the test env has the dict;
+        # the endpoint must not 422 and must stay 200.
         r = client.post("/translate", json={"text": "Hello world", "source_language": "en"})
         assert r.status_code == 200
-        assert r.json()["translation"] is None
+        t = r.json()["translation"]
+        assert t is None or isinstance(t, str)
 
     def test_japanese_text_returns_gloss(self):
         r = client.post("/translate", json={"text": "食べる", "source_language": "ja"})
@@ -82,15 +87,40 @@ class TestTranslate:
         data = r.json()
         assert "translation" in data
 
-    def test_chinese_language_returns_null(self):
+    def test_chinese_language_produces_gloss_or_null(self):
+        # Chinese now gets a best-effort gloss when CC-CEDICT is loaded; 200 +
+        # (string or None), never 422.
         r = client.post("/translate", json={"text": "你好", "source_language": "zh"})
         assert r.status_code == 200
-        assert r.json()["translation"] is None
+        t = r.json()["translation"]
+        assert t is None or isinstance(t, str)
 
-    def test_korean_language_returns_null(self):
+    def test_korean_language_produces_gloss_or_null(self):
         r = client.post("/translate", json={"text": "안녕하세요", "source_language": "ko"})
         assert r.status_code == 200
-        assert r.json()["translation"] is None
+        t = r.json()["translation"]
+        assert t is None or isinstance(t, str)
+
+    def test_multilingual_gloss_with_canned_dict(self, monkeypatch):
+        # Prove the gloss generalizes beyond JA without needing a real dict or
+        # tokenizer: stub the tokenizer + lookup so any content word resolves.
+        import src.app as app_module
+        from types import SimpleNamespace
+
+        class _Def:
+            definition = "cat"
+
+        monkeypatch.setattr(
+            app_module, "_tokenize_for_language",
+            lambda text, lang: [SimpleNamespace(surface="gatos", lemma="gato", is_content_word=True)],
+        )
+        monkeypatch.setattr(
+            app_module._dict_service, "lookup",
+            lambda lemma, language=None, target_lang=None: SimpleNamespace(definitions=[_Def()]),
+        )
+        r = client.post("/translate", json={"text": "los gatos", "source_language": "es"})
+        assert r.status_code == 200
+        assert r.json()["translation"] == "gatos[cat]"
 
     def test_missing_text_field_is_422(self):
         r = client.post("/translate", json={"source_language": "ja"})

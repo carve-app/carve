@@ -640,27 +640,31 @@ def translate(
 
     translation: str | None = None
 
+    # 1) Real corpus translation (Japanese only, from the Tatoeba JA→EN pairs).
     if req.source_language == "ja":
-        # 1) Real corpus translation, if we have one.
         translation = _dict_service.translate_sentence(req.text, req.target_language)
 
-        # 2) Fall back to a word gloss built from the dictionary.
-        if not translation:
-            gloss_parts: list[str] = []
-            result = _ja_tokenizer.tokenize(req.text)
-            for tok in result.tokens:
-                if not tok.is_content_word:
-                    continue
-                entry = _dict_service.lookup(
-                    tok.lemma,
-                    language=req.source_language,
-                    target_lang=req.target_language,
-                )
-                if entry and entry.definitions:
-                    top_def = entry.definitions[0].definition
-                    gloss_parts.append(f"{tok.surface}[{top_def}]")
-            translation = " ".join(gloss_parts) if gloss_parts else None
-    # Other source languages: no MT corpus yet → None.
+    # 2) Word-gloss fallback for ANY tokenizable language (ja/zh/ko/en/es/de/
+    #    fr/it/pt). Best-effort: a language with no tokenizer, or a dictionary
+    #    miss, simply yields no gloss (None) — translate never 422s.
+    if not translation:
+        try:
+            tokens = _tokenize_for_language(req.text, req.source_language)
+        except HTTPException:
+            tokens = []
+        gloss_parts: list[str] = []
+        for tok in tokens:
+            if not getattr(tok, "is_content_word", False):
+                continue
+            entry = _dict_service.lookup(
+                tok.lemma,
+                language=req.source_language,
+                target_lang=req.target_language,
+            )
+            if entry and entry.definitions:
+                top_def = entry.definitions[0].definition
+                gloss_parts.append(f"{tok.surface}[{top_def}]")
+        translation = " ".join(gloss_parts) if gloss_parts else None
 
     return TranslateResponse(
         translation=translation,
