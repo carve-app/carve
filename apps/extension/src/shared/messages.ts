@@ -45,7 +45,9 @@ export type Message =
     }
   | { type: 'TRANSLATE'; text: string; sourceLanguage: string }
   | { type: 'SELECT_SENTENCE'; candidates: string[]; targetLemma: string; language: string; knownLemmas: string[]; learningLemmas: string[] }
-  | { type: 'FIND_SIMILAR_CARDS'; languageCode: string; sentence: string };
+  | { type: 'FIND_SIMILAR_CARDS'; languageCode: string; sentence: string }
+  | { type: 'EXPLAIN_WORD'; word: string; sentence: string; language: string }
+  | { type: 'WORD_AUDIO'; language: string; lemma: string; reading: string };
 
 export type MessageResponse =
   | { type: 'TOKENIZE_RESULT'; tokens: Token[]; comprehension_pct: number | null }
@@ -62,4 +64,6 @@ export type MessageResponse =
   | { type: 'ATTACH_VIDEO_MEDIA_RESULT'; success: boolean; hasImage: boolean; hasAudio: boolean; error?: string }
   | { type: 'TRANSLATE_RESULT'; translation: string | null }
   | { type: 'SELECT_SENTENCE_RESULT'; bestText: string | null; bestComprehensionPct: number | null; bestContainsTarget: boolean }
-  | { type: 'FIND_SIMILAR_CARDS_RESULT'; matches: { id: string; front_text: string; sentence: string; similarity: number }[] };
+  | { type: 'FIND_SIMILAR_CARDS_RESULT'; matches: { id: string; front_text: string; sentence: string; similarity: number }[] }
+  | { type: 'EXPLAIN_WORD_RESULT'; explanation: string | null }
+  | { type: 'WORD_AUDIO_RESULT'; audioUrl: string | null };

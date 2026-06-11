@@ -1,5 +1,5 @@
 import { browser } from '../shared/browser';
-import { nlpTokenize, nlpLookup, createCard, logImmersion, getDueCount, getReviewSession, submitReviewEvent, translateText, selectMiningSentence, findSimilarCards } from '../shared/api';
+import { nlpTokenize, nlpLookup, createCard, logImmersion, getDueCount, getReviewSession, submitReviewEvent, translateText, selectMiningSentence, findSimilarCards, explainWord, getWordAudio } from '../shared/api';
 import { getAccessToken, getApiBaseUrl, storageGet, storageSet, type OfflineReviewEvent, type CachedReviewCard } from '../shared/storage';
 import type { Message, MessageResponse } from '../shared/messages';
 
@@ -178,6 +178,32 @@ async function handleMessage(msg: Message): Promise<MessageResponse> {
           bestComprehensionPct: null,
           bestContainsTarget: false,
         };
+      }
+    }
+
+    case 'EXPLAIN_WORD': {
+      try {
+        const result = await explainWord({
+          word: msg.word,
+          sentence: msg.sentence,
+          language: msg.language,
+        });
+        return { type: 'EXPLAIN_WORD_RESULT', explanation: result.explanation ?? null };
+      } catch {
+        return { type: 'EXPLAIN_WORD_RESULT', explanation: null };
+      }
+    }
+
+    case 'WORD_AUDIO': {
+      try {
+        const result = await getWordAudio({
+          language: msg.language,
+          lemma: msg.lemma,
+          reading: msg.reading,
+        });
+        return { type: 'WORD_AUDIO_RESULT', audioUrl: result.audio_url ?? null };
+      } catch {
+        return { type: 'WORD_AUDIO_RESULT', audioUrl: null };
       }
     }
 
