@@ -147,6 +147,35 @@ describe('SubtitleOverlay — onCue sends TOKENIZE message', () => {
     expect(target?.textContent).toContain('テスト');
     overlay.destroy();
   });
+
+  it('preserves spaces + punctuation between English tokens (no word-mashing)', async () => {
+    // Regression: tokens were concatenated surface-only, mashing Latin words
+    // ("It's harder working" -> "It'sharderworking"). The renderer must
+    // reconstruct the original text, emitting inter-token chars as text nodes.
+    const line = "Cheat. It's harder working. It is smarter.";
+    mockSendMessage.mockResolvedValue({
+      tokens: [
+        { surface: 'Cheat', lemma: 'cheat', reading_hira: '', is_content_word: true },
+        { surface: 'It', lemma: 'it', reading_hira: '', is_content_word: false },
+        { surface: 'harder', lemma: 'hard', reading_hira: '', is_content_word: true },
+        { surface: 'working', lemma: 'work', reading_hira: '', is_content_word: true },
+        { surface: 'It', lemma: 'it', reading_hira: '', is_content_word: false },
+        { surface: 'is', lemma: 'be', reading_hira: '', is_content_word: false },
+        { surface: 'smarter', lemma: 'smart', reading_hira: '', is_content_word: true },
+      ],
+    });
+    const overlay = new SubtitleOverlay('en', mockVocabCache as any, mockPopupManager as any);
+    overlay.onCue(cue(line));
+    await new Promise(r => setTimeout(r, 0));
+
+    // The rendered text must equal the original line exactly — spaces,
+    // apostrophe, and periods all preserved.
+    const target = document.getElementById('cso-target');
+    expect(target?.textContent).toBe(line);
+    // And content words are still individual clickable token spans.
+    expect(target?.querySelectorAll('[data-carve="token"]').length).toBe(7);
+    overlay.destroy();
+  });
 });
 
 // ── Native subtitle display ───────────────────────────────────────────────────

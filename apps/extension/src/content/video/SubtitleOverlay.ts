@@ -105,11 +105,24 @@ export class SubtitleOverlay {
       learningLemmas: this.vocabCache.getLearningLemmas(),
     });
 
-    if (!response?.tokens) {
+    if (!response?.tokens?.length) {
       targetEl.textContent = cue.text;
     } else {
+      // Reconstruct the line by walking the ORIGINAL cue text and emitting the
+      // characters between tokens (spaces, punctuation) as plain text nodes.
+      // Concatenating token surfaces alone drops inter-word spacing — fine for
+      // Japanese/Chinese, but it mashes English/Latin words together
+      // ("It's harder working" → "It'sharderworking"). Mirrors PageAnnotator.
       targetEl.innerHTML = '';
+      const text = cue.text;
+      let pos = 0;
       for (const tok of response.tokens as Token[]) {
+        const idx = text.indexOf(tok.surface, pos);
+        if (idx === -1) continue;
+        if (idx > pos) {
+          targetEl.appendChild(document.createTextNode(text.slice(pos, idx)));
+        }
+
         const span = document.createElement('span');
         span.setAttribute('data-carve', 'token');
         span.setAttribute('data-lemma', tok.lemma);
@@ -129,6 +142,10 @@ export class SubtitleOverlay {
           });
         }
         targetEl.appendChild(span);
+        pos = idx + tok.surface.length;
+      }
+      if (pos < text.length) {
+        targetEl.appendChild(document.createTextNode(text.slice(pos)));
       }
     }
 
@@ -363,83 +380,107 @@ export class SubtitleOverlay {
 const OVERLAY_STYLES = `
 #carve-sub-overlay {
   position: fixed;
-  bottom: 130px;
+  bottom: 120px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 2147483647;
-  background: rgba(15, 17, 22, 0.88);
-  border: 1px solid rgba(255,255,255,0.10);
-  border-radius: 10px;
-  padding: 0.5rem 0.75rem 0.6rem;
-  max-width: 720px;
-  min-width: 280px;
+  background: linear-gradient(180deg, rgba(20,22,28,0.94), rgba(13,15,20,0.94));
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 14px;
+  padding: 10px 18px 14px;
+  max-width: min(900px, 80vw);
+  min-width: 360px;
   width: max-content;
-  font-family: 'Noto Sans JP', 'Hiragino Sans', system-ui, sans-serif;
-  backdrop-filter: blur(6px);
+  box-sizing: border-box;
+  font-family: 'Noto Sans JP', 'Hiragino Sans', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   pointer-events: auto;
   user-select: none;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04);
 }
 
 .cso-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.4rem;
+  gap: 0.75rem;
+  margin-bottom: 8px;
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
 }
+#carve-sub-overlay:hover .cso-bar { opacity: 1; }
 
 .cso-toggles {
   display: flex;
-  gap: 0.35rem;
+  gap: 0.4rem;
 }
 
 .cso-btn {
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.12);
-  color: #9ba8c0;
-  border-radius: 5px;
-  padding: 0.15rem 0.5rem;
-  font-size: 0.7rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  color: #aeb9cf;
+  border-radius: 7px;
+  padding: 0 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.1s, color 0.1s;
-  line-height: 1.5;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  line-height: 1;
 }
-.cso-btn:hover { background: rgba(255,255,255,0.14); color: #e8eaf0; }
-.cso-btn:disabled { opacity: 0.3; cursor: default; }
-.cso-btn.cso-active { background: rgba(76,175,80,0.25); border-color: #4caf50; color: #4caf50; }
+.cso-btn:hover { background: rgba(255,255,255,0.14); color: #fff; }
+.cso-btn:disabled { opacity: 0.25; cursor: default; }
+.cso-btn.cso-active { background: rgba(76,175,80,0.22); border-color: rgba(76,175,80,0.7); color: #6ddf72; }
 
 .cso-target {
-  font-size: 1.25rem;
-  line-height: 1.6;
-  color: #e8eaf0;
+  font-size: 1.7rem;
+  line-height: 1.5;
+  color: #f1f3f8;
   text-align: center;
-  min-height: 1.8rem;
-  letter-spacing: 0.02em;
-  word-break: break-all;
+  min-height: 2rem;
+  letter-spacing: 0.01em;
+  font-weight: 500;
+  overflow-wrap: break-word;
+  word-break: normal;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.4);
 }
 
-.cso-hint { color: #4a5568; font-size: 0.85rem; }
+.cso-hint { color: #5a6478; font-size: 0.95rem; font-weight: 400; }
 
-.cso-token { cursor: default; }
-.cso-token.cso-unknown { color: #ef9a9a; cursor: pointer; }
-.cso-token.cso-learning { color: #ffa726; cursor: pointer; }
-.cso-token.cso-known { color: #e8eaf0; cursor: pointer; }
+.cso-token {
+  cursor: default;
+  border-radius: 3px;
+  transition: background 0.1s;
+}
+.cso-token.cso-unknown { color: #ff9b9b; cursor: pointer; }
+.cso-token.cso-learning { color: #ffc266; cursor: pointer; }
+.cso-token.cso-known { color: #f1f3f8; cursor: pointer; }
+.cso-token.cso-unknown:hover,
+.cso-token.cso-learning:hover,
+.cso-token.cso-known:hover { background: rgba(255,255,255,0.12); }
 
 .cso-native {
-  font-size: 0.82rem;
-  color: #7a8aa6;
+  font-size: 1rem;
+  color: #93a0bb;
   text-align: center;
-  margin-top: 0.25rem;
+  margin-top: 6px;
+  line-height: 1.4;
 }
 
 .cso-mine-status {
-  font-size: 0.72rem;
+  font-size: 0.78rem;
   text-align: center;
   min-height: 1rem;
-  margin-top: 0.15rem;
+  margin-top: 6px;
   transition: color 0.2s;
+  font-weight: 500;
 }
-.cso-mine-ok { color: #4caf50; }
-.cso-mine-error { color: #ef5350; }
+.cso-mine-ok { color: #6ddf72; }
+.cso-mine-error { color: #ff6b6b; }
 `;
