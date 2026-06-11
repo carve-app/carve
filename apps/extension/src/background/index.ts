@@ -1,5 +1,5 @@
 import { browser } from '../shared/browser';
-import { nlpTokenize, nlpLookup, createCard, logImmersion, getDueCount, getReviewSession, submitReviewEvent, translateText, selectMiningSentence, findSimilarCards, explainWord, getWordAudio } from '../shared/api';
+import { nlpTokenize, nlpLookup, createCard, logImmersion, getDueCount, getReviewSession, submitReviewEvent, translateText, selectMiningSentence, findSimilarCards, explainWord, getWordAudio, getWordImage } from '../shared/api';
 import { getAccessToken, getApiBaseUrl, storageGet, storageSet, type OfflineReviewEvent, type CachedReviewCard } from '../shared/storage';
 import type { Message, MessageResponse } from '../shared/messages';
 
@@ -204,6 +204,17 @@ async function handleMessage(msg: Message): Promise<MessageResponse> {
         return { type: 'WORD_AUDIO_RESULT', audioUrl: result.audio_url ?? null };
       } catch {
         return { type: 'WORD_AUDIO_RESULT', audioUrl: null };
+      }
+    }
+
+    case 'WORD_IMAGE': {
+      // Best-effort dictionary image. Any failure → null so the popup just
+      // hides its image slot.
+      try {
+        const result = await getWordImage({ word: msg.word, language: msg.language });
+        return { type: 'WORD_IMAGE_RESULT', imageUrl: result.image_url ?? null };
+      } catch {
+        return { type: 'WORD_IMAGE_RESULT', imageUrl: null };
       }
     }
 

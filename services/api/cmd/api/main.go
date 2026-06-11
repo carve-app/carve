@@ -249,6 +249,7 @@ func main() {
 		r.Get("/grammar/patterns", nlpProxy.GrammarPatterns)
 		r.Post("/explain", nlpExplain.Explain)
 		r.Get("/word-audio", nlpExplain.WordAudio)
+		r.Get("/word-image", nlpProxy.WordImage)
 	})
 
 	port := os.Getenv("PORT")

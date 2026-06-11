@@ -99,9 +99,7 @@ export class PopupManager {
     const jlptHtml = entry?.jlpt_level
       ? `<span class="carve-jlpt">${escapeHtml(entry.jlpt_level)}</span>`
       : '';
-    const freqHtml = entry?.frequency_rank
-      ? `<span style="font-size:11px;color:#6b7a99"> #${entry.frequency_rank}</span>`
-      : '';
+    const freqHtml = frequencyBandHtml(entry?.frequency_rank ?? null);
     const morae = (entry?.reading ?? reading).length || 1;
     const pitchHtml = entry?.pitch_accent != null
       ? pitchSvg(entry.pitch_accent, morae)
@@ -115,6 +113,7 @@ export class PopupManager {
         <div class="carve-furigana">${furiganaHtml}</div>
         <div class="carve-reading">${escapeHtml(audioReading)}${jlptHtml}${freqHtml}${pitchHtml}<button class="carve-audio-btn" title="Play audio" aria-label="Play word audio" style="display:none;flex:0 0 auto;width:22px;height:22px;padding:0;margin-left:6px;border:none;border-radius:50%;background:#37404e;color:#cdd6e8;font-size:11px;line-height:22px;cursor:pointer;vertical-align:middle">▶</button></div>
         <span class="carve-status ${escapeHtml(status)}">${escapeHtml(status)}</span>
+        <img class="carve-word-image" alt="" style="display:none;max-width:120px;max-height:120px;border-radius:8px;margin-top:8px" />
         <div class="carve-defs">${defsHtml}</div>
         <div class="carve-ai" style="display:none;margin-top:8px;padding-top:6px;border-top:1px solid #2d3344">
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.04em;color:#6b7a99;margin-bottom:3px">AI explanation</div>
@@ -136,6 +135,12 @@ export class PopupManager {
     // "explaining…" placeholder, then the text; the whole section stays hidden
     // when the server returns null (e.g. no API key configured).
     this.loadExplanation(popup, tokenEl, lemma, sentence);
+
+    // Lazily fetch a best-effort dictionary image. Only show the slot if a URL
+    // comes back AND this popup is still showing the same token. The src is
+    // assigned via the element property (never via innerHTML interpolation) so
+    // a hostile URL can't break out of an attribute.
+    void this.loadWordImage(tokenEl, lemma, popup);
 
     popup.querySelector('.btn-mine')?.addEventListener('click', (e) => {
       // The button is removed from the DOM when innerHTML is replaced below.
@@ -238,6 +243,36 @@ export class PopupManager {
       .catch(() => {
         section.style.display = 'none';
       });
+  }
+
+  /**
+   * Fetch a best-effort dictionary image for `lemma` and, if one comes back,
+   * reveal the popup's image slot. No-op (slot stays hidden) on null/error or
+   * if the user has since moved to a different token.
+   */
+  private async loadWordImage(tokenEl: HTMLElement, lemma: string, popup: HTMLElement): Promise<void> {
+    try {
+      const result = await browser.runtime.sendMessage({
+        type: 'WORD_IMAGE',
+        word: lemma,
+        language: 'ja',
+      });
+      const url: string | null = result?.imageUrl ?? null;
+      // Bail if the popup moved on to another token while we were fetching.
+      if (this.currentToken !== tokenEl) return;
+      if (!url) return;
+      const img = popup.querySelector<HTMLImageElement>('.carve-word-image');
+      if (!img) return;
+      // Assign the URL via the property — not string-interpolated into HTML.
+      img.src = url;
+      img.style.display = 'block';
+      // The image changes the popup height; re-anchor so it stays in view.
+      img.addEventListener('load', () => {
+        if (this.currentToken === tokenEl) this.positionPopup(tokenEl);
+      }, { once: true });
+    } catch {
+      // Image is purely optional — ignore failures.
+    }
   }
 
   private getOrCreatePopup(): HTMLElement {
@@ -473,6 +508,46 @@ export function escapeHtml(s: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+/**
+ * Migaku-style frequency band. Maps a frequency rank (lower = more common)
+ * to a colored pill so learners can gauge a word's usefulness at a glance.
+ *
+ * Thresholds (rank is "Nth most frequent word"):
+ *   ≤ 1500  → common (green)  — high-value, learn early
+ *   ≤ 6000  → mid    (yellow) — worth knowing
+ *   > 6000  → rare   (red)    — niche / advanced
+ *   null    → unknown (gray)  — not in the frequency list
+ *
+ * The raw rank is kept inside the pill for users who want the exact number.
+ */
+const FREQ_COMMON_MAX = 1500;
+const FREQ_MID_MAX = 6000;
+
+export function frequencyBandHtml(rank: number | null): string {
+  let label: string;
+  let color: string;
+  let text: string;
+
+  if (rank == null) {
+    return '';
+  } else if (rank <= FREQ_COMMON_MAX) {
+    label = 'common';
+    color = '#4caf50';
+    text = `common #${rank}`;
+  } else if (rank <= FREQ_MID_MAX) {
+    label = 'mid';
+    color = '#ffa726';
+    text = `mid #${rank}`;
+  } else {
+    label = 'rare';
+    color = '#ef5350';
+    text = `rare #${rank}`;
+  }
+
+  return `<span class="carve-freq-band carve-freq-${label}" title="Frequency rank ${rank}"
+    style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:8px;font-size:11px;font-weight:600;color:#fff;background:${color}">${escapeHtml(text)}</span>`;
 }
 
 export function buildFurigana(spans: FuriganaSpan[]): string {

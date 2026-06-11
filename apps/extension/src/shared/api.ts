@@ -244,6 +244,19 @@ export async function getWordAudio(params: {
 }
 
 /**
+ * Fetch a best-effort dictionary image for a word (keyless Wikipedia source).
+ * Returns { image_url: null } when no relevant image is found.
+ */
+export async function getWordImage(params: {
+  word: string;
+  language: string;
+}): Promise<{ image_url: string | null }> {
+  const search = new URLSearchParams({ word: params.word, language: params.language });
+  const response = await apiFetch(`/v1/nlp/word-image?${search.toString()}`);
+  return response.json();
+}
+
+/**
  * Get the number of cards due for review.
  */
 export async function getDueCount(language?: string): Promise<number> {
