@@ -1,5 +1,9 @@
 # Implementation Roadmap
 
+> **Historical planning doc — superseded.** For what is actually built and
+> verified, see [STATUS.md](STATUS.md). This file is kept as the original phased
+> plan and is no longer maintained against the codebase.
+
 ---
 
 ## Guiding Principles
