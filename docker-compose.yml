@@ -104,6 +104,14 @@ services:
       DICT_DB_PATH: /app/data/dictionary.db
       NLP_INTERNAL_SECRET: ""   # empty = no auth check in dev
       PORT: "8001"
+      # Fluent sentence translation (Google Translate). Off by default; the
+      # /translate endpoint falls back to the Tatoeba corpus (JA) + word gloss.
+      #   MT_PROVIDER: google_cloud | google | off
+      #   GOOGLE_TRANSLATE_API_KEY: <key>   # enables google_cloud automatically
+      #   MT_ENABLED: "1"                    # enables the key-less google endpoint
+      MT_PROVIDER: ${MT_PROVIDER:-off}
+      MT_ENABLED: ${MT_ENABLED:-}
+      GOOGLE_TRANSLATE_API_KEY: ${GOOGLE_TRANSLATE_API_KEY:-}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8001/health || exit 1"]
       interval: 10s

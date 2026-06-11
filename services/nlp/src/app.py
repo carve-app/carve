@@ -29,6 +29,7 @@ from .tokenizer_zh import ChineseTokenizer
 from .tokenizer_ko import KoreanTokenizer
 from .tokenizer_en import EnglishTokenizer
 from .tokenizer_latin import LatinTokenizer, SUPPORTED_LANGUAGES as LATIN_LANGUAGES
+from . import translator
 
 logger = logging.getLogger(__name__)
 
@@ -620,14 +621,16 @@ def translate(
     """
     Translate a sentence to the target language.
 
-    Strategy (best available, no external network call):
-      1. Tatoeba corpus — a real human translation when the sentence (or a
+    Strategy (best available first):
+      1. Tatoeba corpus — a real human translation when the JA sentence (or a
          punctuation-normalized form) is in the imported JA→EN pairs.
-      2. Word-gloss fallback — the top definition of each content word, clearly
-         bracketed so it reads as a gloss, not a fluent translation.
+      2. Fluent MT — Google Translate, when configured (MT_PROVIDER / API key).
+         Produces an actual target-language sentence for any supported pair.
+      3. Word-gloss fallback — the top definition of each content word, bracketed
+         so it reads as a gloss, not a fluent translation.
 
-    Returns None (never a fabricated sentence) when neither is available, so the
-    client can leave the field blank rather than show a wrong translation.
+    Returns None (never a fabricated sentence) when none apply, so the client can
+    leave the field blank rather than show a wrong translation.
     """
     _check_auth(x_internal_secret)
 
@@ -644,7 +647,15 @@ def translate(
     if req.source_language == "ja":
         translation = _dict_service.translate_sentence(req.text, req.target_language)
 
-    # 2) Word-gloss fallback for ANY tokenizable language (ja/zh/ko/en/es/de/
+    # 2) Fluent machine translation (Google Translate) when configured. This is
+    #    a real sentence translation for any supported language pair; it returns
+    #    None when MT is disabled/unsupported/unreachable so we fall through.
+    if not translation:
+        translation = translator.translate_sentence(
+            req.text, req.source_language, req.target_language
+        )
+
+    # 3) Word-gloss fallback for ANY tokenizable language (ja/zh/ko/en/es/de/
     #    fr/it/pt). Best-effort: a language with no tokenizer, or a dictionary
     #    miss, simply yields no gloss (None) — translate never 422s.
     if not translation:

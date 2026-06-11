@@ -198,3 +198,91 @@ class TestSentenceTranslationFromCorpus:
     def test_non_en_target_returns_none(self, tmp_path):
         svc = self._service_with_corpus(tmp_path)
         assert svc.translate_sentence("私は学生です。", target_lang="fr") is None
+
+
+class TestFluentMT:
+    """Google-Translate fluent MT provider (src/translator.py). Network is never
+    hit: the free-endpoint parser is pure, and the /translate integration is
+    monkeypatched."""
+
+    def test_parse_free_response_single_segment(self):
+        from src import translator as T
+        shape = [[["black cats sleep", "los gatos negros duermen", None, None, 10]], None, "es"]
+        assert T._parse_free_response(shape) == "black cats sleep"
+
+    def test_parse_free_response_multi_segment_joined(self):
+        from src import translator as T
+        shape = [[["Hello. ", "Hola. "], ["World.", "Mundo."]], None, "es"]
+        assert T._parse_free_response(shape) == "Hello. World."
+
+    def test_parse_free_response_junk_returns_none(self):
+        from src import translator as T
+        assert T._parse_free_response({}) is None
+        assert T._parse_free_response([]) is None
+        assert T._parse_free_response([None]) is None
+
+    def test_mode_selection_matrix(self, monkeypatch):
+        from src import translator as T
+        for v in ("MT_PROVIDER", "GOOGLE_TRANSLATE_API_KEY", "MT_ENABLED"):
+            monkeypatch.delenv(v, raising=False)
+        assert T.mt_mode() == "off"
+        monkeypatch.setenv("MT_ENABLED", "yes")
+        assert T.mt_mode() == "google"
+        monkeypatch.setenv("GOOGLE_TRANSLATE_API_KEY", "k")
+        assert T.mt_mode() == "google_cloud"
+        monkeypatch.setenv("MT_PROVIDER", "off")  # explicit override wins
+        assert T.mt_mode() == "off"
+
+    def test_disabled_by_default_no_network(self, monkeypatch):
+        from src import translator as T
+        for v in ("MT_PROVIDER", "GOOGLE_TRANSLATE_API_KEY", "MT_ENABLED"):
+            monkeypatch.delenv(v, raising=False)
+        assert T.translate_sentence("los gatos", "es", "en") is None
+
+    def test_unsupported_or_same_language_returns_none(self, monkeypatch):
+        from src import translator as T
+        monkeypatch.setenv("MT_ENABLED", "1")
+        assert T.translate_sentence("hello", "en", "en") is None   # same language
+        assert T.translate_sentence("hello", "xx", "en") is None   # unknown source
+        assert T.translate_sentence("", "es", "en") is None        # empty
+
+    def test_translate_endpoint_prefers_mt(self, monkeypatch):
+        # /translate should return the fluent MT result ahead of the gloss.
+        # Use a fresh client bound to the live module's app so we're not affected
+        # by other tests that reload the module (auth-secret pollution).
+        import src.app as app_module
+        monkeypatch.setattr(
+            app_module.translator, "translate_sentence",
+            lambda text, src, tgt: "the black cats sleep",
+        )
+        monkeypatch.setattr(app_module, "_INTERNAL_SECRET", "")
+        local = TestClient(app_module.app)
+        r = local.post("/translate", json={
+            "text": "los gatos negros duermen", "source_language": "es", "target_language": "en",
+        })
+        assert r.status_code == 200
+        assert r.json()["translation"] == "the black cats sleep"
+
+    def test_translate_endpoint_falls_back_to_gloss_when_mt_none(self, monkeypatch):
+        # When MT returns None, the endpoint must still try the gloss path.
+        import src.app as app_module
+        from types import SimpleNamespace
+
+        monkeypatch.setattr(app_module, "_INTERNAL_SECRET", "")
+        monkeypatch.setattr(app_module.translator, "translate_sentence", lambda *a, **k: None)
+        monkeypatch.setattr(
+            app_module, "_tokenize_for_language",
+            lambda text, lang: [SimpleNamespace(surface="gato", lemma="gato", is_content_word=True)],
+        )
+        monkeypatch.setattr(
+            app_module._dict_service, "lookup",
+            lambda lemma, language=None, target_lang=None: SimpleNamespace(
+                definitions=[SimpleNamespace(definition="cat")]
+            ),
+        )
+        local = TestClient(app_module.app)
+        r = local.post("/translate", json={
+            "text": "el gato", "source_language": "es", "target_language": "en",
+        })
+        assert r.status_code == 200
+        assert r.json()["translation"] == "gato[cat]"
