@@ -152,10 +152,15 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Populate audio asynchronously — non-blocking, best-effort.
-	if req.Reading != "" {
-		go audio.PopulateCard(h.db, id, req.LanguageCode, req.Lemma, req.Reading)
+	// Populate word + sentence audio asynchronously — non-blocking, best-effort.
+	// Runs for every card: word audio resolves per-language (JapanesePod101 for
+	// JA, TTS fallback elsewhere when enabled), and sentence audio is synthesized
+	// via TTS. Reading may be empty for non-Japanese languages.
+	var sentence string
+	if req.Sentence != nil {
+		sentence = *req.Sentence
 	}
+	go audio.PopulateCard(h.db, id, req.LanguageCode, req.Lemma, req.Reading, sentence)
 
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"id":            id,
