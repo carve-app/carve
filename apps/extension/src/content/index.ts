@@ -170,8 +170,51 @@ browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
 });
 
+// ── SPA navigation ──────────────────────────────────────────────────────────
+// YouTube/Netflix/Disney+/etc. are single-page apps: navigating from the
+// homepage to a /watch URL happens client-side with NO new page load, so a
+// content script that only runs init() once (at document_idle on the homepage,
+// where there's no video and no target language) would never mount the overlay
+// when the user actually opens a video. We watch for URL changes and re-run
+// init() — the flagship mining/annotation features depend on this.
+let lastUrl = location.href;
+
+function onNavigation(): void {
+  if (location.href === lastUrl) return;
+  lastUrl = location.href;
+  // Rebuild for the new page: tear down the previous page's state, then
+  // re-init (which re-detects language and re-mounts the platform hook). init()
+  // is a no-op if the new page has no target language / is disabled.
+  teardown();
+  // Defer so the SPA has swapped in the new DOM (video element, captions)
+  // before we detect language and mount hooks.
+  setTimeout(() => { init(); }, 300);
+}
+
+function watchSpaNavigation(): void {
+  // 1. history API (covers pushState/replaceState used by SPA routers).
+  const wrap = (key: 'pushState' | 'replaceState') => {
+    const orig = history[key];
+    history[key] = function (this: History, ...args: Parameters<History['pushState']>) {
+      const ret = orig.apply(this, args);
+      onNavigation();
+      return ret;
+    } as History[typeof key];
+  };
+  wrap('pushState');
+  wrap('replaceState');
+  // 2. back/forward.
+  window.addEventListener('popstate', onNavigation);
+  // 3. YouTube's own SPA navigation event (fires after the watch page is ready).
+  window.addEventListener('yt-navigate-finish', onNavigation);
+  // 4. Safety net: a low-frequency poll catches any router that bypasses the
+  //    above (some sites mutate location without the history API).
+  setInterval(() => { if (location.href !== lastUrl) onNavigation(); }, 1000);
+}
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => { init(); });
 } else {
   init();
 }
+watchSpaNavigation();
