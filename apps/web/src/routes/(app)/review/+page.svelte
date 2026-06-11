@@ -33,6 +33,34 @@
 
   function ratingVal(n: number): 1 | 2 | 3 | 4 { return n as 1 | 2 | 3 | 4; }
 
+  // ── Card type (recognition vs production) ───────────────────────────────────
+  // `recognition` (default): prompt with the target word, recall the meaning.
+  // `production`/`recall`: prompt with the meaning/sentence, produce the word.
+  // Unknown values fall back to recognition behaviour.
+  function isProduction(c: Card | null): boolean {
+    if (!c) return false;
+    return c.card_type === 'production' || c.card_type === 'recall';
+  }
+
+  function cardTypeLabel(c: Card | null): string {
+    if (!c) return '';
+    switch (c.card_type) {
+      case 'production': return 'Production';
+      case 'recall': return 'Recall';
+      default: return 'Recognition';
+    }
+  }
+
+  // Production prompt: show the sentence with the target word blanked out so the
+  // learner must produce it. Falls back to the meaning/definition when there is
+  // no sentence to mask.
+  function productionPrompt(c: Card): string {
+    if (c.sentence && c.front_text && c.sentence.includes(c.front_text)) {
+      return c.sentence.split(c.front_text).join('____');
+    }
+    return c.back_text ?? c.sentence ?? '';
+  }
+
   function playAudio() {
     const el = document.getElementById('card-audio') as HTMLAudioElement | null;
     el?.play();
@@ -362,29 +390,63 @@
       on:touchend={onTouchEnd}
     >
       <div class="flashcard" class:flipped={phase === 'back'}>
-        <div class="card-front">
-          <div class="word">{current.front_text}</div>
-          {#if current.audio_url}
-            <audio src={current.audio_url} preload="auto" id="card-audio"></audio>
-            <button class="audio-btn" on:click={playAudio} title="Play audio (A)">▶</button>
-          {/if}
-          {#if phase === 'front'}
-            <button class="show-btn" on:click={flip}>Show answer <span class="hint">Space</span></button>
-          {/if}
-        </div>
+        <span class="card-type-badge" class:production={isProduction(current)}>
+          {cardTypeLabel(current)}
+        </span>
 
-        {#if phase === 'back'}
-          <div class="card-back">
-            {#if current.back_text}
-              <p class="definition">{current.back_text}</p>
-            {/if}
-            {#if current.sentence}
-              <p class="sentence">{current.sentence}</p>
-            {/if}
-            {#if current.image_url}
-              <img class="card-image" src={current.image_url} alt="context screenshot" />
+        {#if current.audio_url}
+          <audio src={current.audio_url} preload="auto" id="card-audio"></audio>
+        {/if}
+
+        {#if isProduction(current)}
+          <!-- Production / recall: prompt with meaning, produce the word. -->
+          <div class="card-front">
+            <div class="prompt-label">Produce the word</div>
+            <p class="definition">{productionPrompt(current)}</p>
+            {#if phase === 'front'}
+              <button class="show-btn" on:click={flip}>Show answer <span class="hint">Space</span></button>
             {/if}
           </div>
+
+          {#if phase === 'back'}
+            <div class="card-back">
+              <div class="word">{current.front_text}</div>
+              {#if current.audio_url}
+                <button class="audio-btn" on:click={playAudio} title="Play audio (A)">▶</button>
+              {/if}
+              {#if current.sentence}
+                <p class="sentence">{current.sentence}</p>
+              {/if}
+              {#if current.image_url}
+                <img class="card-image" src={current.image_url} alt="context screenshot" />
+              {/if}
+            </div>
+          {/if}
+        {:else}
+          <!-- Recognition (default): prompt with the word, recall the meaning. -->
+          <div class="card-front">
+            <div class="word">{current.front_text}</div>
+            {#if current.audio_url}
+              <button class="audio-btn" on:click={playAudio} title="Play audio (A)">▶</button>
+            {/if}
+            {#if phase === 'front'}
+              <button class="show-btn" on:click={flip}>Show answer <span class="hint">Space</span></button>
+            {/if}
+          </div>
+
+          {#if phase === 'back'}
+            <div class="card-back">
+              {#if current.back_text}
+                <p class="definition">{current.back_text}</p>
+              {/if}
+              {#if current.sentence}
+                <p class="sentence">{current.sentence}</p>
+              {/if}
+              {#if current.image_url}
+                <img class="card-image" src={current.image_url} alt="context screenshot" />
+              {/if}
+            </div>
+          {/if}
         {/if}
       </div>
 
@@ -541,6 +603,7 @@
   }
 
   .flashcard {
+    position: relative;
     width: 100%;
     min-height: 260px;
     background: #1e2128;
@@ -553,6 +616,34 @@
     justify-content: center;
     gap: 1rem;
     text-align: center;
+  }
+
+  .card-type-badge {
+    position: absolute;
+    top: 0.75rem;
+    left: 0.75rem;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #8a96b3;
+    background: #2a2d36;
+    border: 1px solid #3a3d47;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+  }
+  .card-type-badge.production {
+    color: #ffb74d;
+    border-color: #ffb74d;
+    background: color-mix(in srgb, #ffb74d 12%, #1e2128);
+  }
+
+  .prompt-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #8a96b3;
   }
 
   .word { font-size: 3rem; font-weight: 700; line-height: 1.2; }

@@ -28,6 +28,7 @@ export type FsrsState = 'new' | 'learning' | 'review' | 'relearning';
 export interface Card {
   id: string;
   front_text: string;
+  card_type: string;
   back_text: string | null;
   sentence: string | null;
   source_url: string | null;
@@ -244,6 +245,7 @@ export interface CardDetail {
   id: string;
   language_code: string;
   front_text: string;
+  card_type: string;
   back_text: string | null;
   sentence: string | null;
   subtitle_translation: string | null;
