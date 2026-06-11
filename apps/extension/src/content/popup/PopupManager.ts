@@ -108,13 +108,18 @@ export class PopupManager {
       : '';
 
     const sentence = getSurroundingSentence(tokenEl);
+    const audioReading = entry?.reading ?? reading;
 
     popup.innerHTML = `
       <div>
         <div class="carve-furigana">${furiganaHtml}</div>
-        <div class="carve-reading">${escapeHtml(entry?.reading ?? reading)}${jlptHtml}${freqHtml}${pitchHtml}</div>
+        <div class="carve-reading">${escapeHtml(audioReading)}${jlptHtml}${freqHtml}${pitchHtml}<button class="carve-audio-btn" title="Play audio" aria-label="Play word audio" style="display:none;flex:0 0 auto;width:22px;height:22px;padding:0;margin-left:6px;border:none;border-radius:50%;background:#37404e;color:#cdd6e8;font-size:11px;line-height:22px;cursor:pointer;vertical-align:middle">▶</button></div>
         <span class="carve-status ${escapeHtml(status)}">${escapeHtml(status)}</span>
         <div class="carve-defs">${defsHtml}</div>
+        <div class="carve-ai" style="display:none;margin-top:8px;padding-top:6px;border-top:1px solid #2d3344">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.04em;color:#6b7a99;margin-bottom:3px">AI explanation</div>
+          <div class="carve-ai-body" style="font-size:12px;color:#b8c2d8;line-height:1.45"></div>
+        </div>
         ${sentence ? `<div class="carve-sentence">${escapeHtml(sentence)}</div>` : ''}
         <div class="carve-actions">
           <button class="btn-mine" data-lemma="${escapeHtml(lemma)}" data-sentence="${escapeHtml(sentence ?? '')}">Mine</button>
@@ -122,6 +127,15 @@ export class PopupManager {
         </div>
       </div>
     `;
+
+    // Lazy-load word audio. Show the ▶ button only once a URL resolves; clicking
+    // plays it via the Audio API. Best-effort — silently stays hidden on failure.
+    this.loadWordAudio(popup, tokenEl, lemma, audioReading);
+
+    // Lazy-load the AI contextual explanation. Reveals the section with a subtle
+    // "explaining…" placeholder, then the text; the whole section stays hidden
+    // when the server returns null (e.g. no API key configured).
+    this.loadExplanation(popup, tokenEl, lemma, sentence);
 
     popup.querySelector('.btn-mine')?.addEventListener('click', (e) => {
       // The button is removed from the DOM when innerHTML is replaced below.
@@ -145,6 +159,85 @@ export class PopupManager {
     });
 
     this.positionPopup(tokenEl);
+  }
+
+  /**
+   * Resolve a word-audio URL in the background and, if found, reveal the play
+   * button. Guards against the popup having moved to a different token while
+   * the request was in flight. Best-effort — failures leave the button hidden.
+   */
+  private loadWordAudio(
+    popup: HTMLElement,
+    tokenEl: HTMLElement,
+    lemma: string,
+    reading: string,
+  ): void {
+    if (!reading) return;
+    browser.runtime.sendMessage({
+      type: 'WORD_AUDIO',
+      language: 'ja',
+      lemma,
+      reading,
+    })
+      .then((res) => {
+        const url = (res?.audioUrl as string | null) ?? null;
+        if (!url || this.currentToken !== tokenEl) return;
+        const btn = popup.querySelector<HTMLButtonElement>('.carve-audio-btn');
+        if (!btn) return;
+        btn.style.display = 'inline-block';
+        let audio: HTMLAudioElement | null = null;
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (!audio) audio = new Audio(url);
+          audio.currentTime = 0;
+          audio.play().catch(() => {/* autoplay/network — non-fatal */});
+        });
+      })
+      .catch(() => {/* audio is optional */});
+  }
+
+  /**
+   * Lazy-load an AI contextual explanation. Reveals the section with an
+   * "explaining…" placeholder while the request is in flight, then swaps in the
+   * text. If the server returns null (e.g. no API key) the section is hidden.
+   */
+  private loadExplanation(
+    popup: HTMLElement,
+    tokenEl: HTMLElement,
+    lemma: string,
+    sentence: string | null,
+  ): void {
+    if (!sentence) return;
+    const section = popup.querySelector<HTMLElement>('.carve-ai');
+    const body = popup.querySelector<HTMLElement>('.carve-ai-body');
+    if (!section || !body) return;
+
+    section.style.display = 'block';
+    body.textContent = 'explaining…';
+    body.style.fontStyle = 'italic';
+    body.style.color = '#6b7a99';
+
+    browser.runtime.sendMessage({
+      type: 'EXPLAIN_WORD',
+      word: lemma,
+      sentence,
+      language: 'ja',
+    })
+      .then((res) => {
+        if (this.currentToken !== tokenEl) return;
+        const explanation = (res?.explanation as string | null) ?? null;
+        if (!explanation) {
+          section.style.display = 'none';
+          return;
+        }
+        // textContent escapes by construction — never inject unescaped strings.
+        body.textContent = explanation;
+        body.style.fontStyle = 'normal';
+        body.style.color = '#b8c2d8';
+      })
+      .catch(() => {
+        section.style.display = 'none';
+      });
   }
 
   private getOrCreatePopup(): HTMLElement {

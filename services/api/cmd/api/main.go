@@ -97,6 +97,7 @@ func main() {
 	reviewHandler := review.NewHandler(pool)
 	immersionHandler := immersion.NewHandler(pool)
 	nlpProxy := nlp.NewProxy()
+	nlpExplain := nlp.NewExplainHandler(pool)
 	decksHandler := decks.NewHandler(pool)
 	exportHandler := export.NewHandler(pool)
 	settingsHandler := settings.NewHandler(pool)
@@ -222,6 +223,8 @@ func main() {
 		r.Post("/translate", nlpProxy.Translate)
 		r.Post("/select-sentence", nlpProxy.SelectSentence)
 		r.Get("/grammar/patterns", nlpProxy.GrammarPatterns)
+		r.Post("/explain", nlpExplain.Explain)
+		r.Get("/word-audio", nlpExplain.WordAudio)
 	})
 
 	port := os.Getenv("PORT")

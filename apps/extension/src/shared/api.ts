@@ -202,6 +202,46 @@ export async function translateText(
 }
 
 /**
+ * Get an AI contextual explanation of how a word is used in a sentence.
+ * Returns { explanation: null } when the server has no API key configured.
+ */
+export async function explainWord(params: {
+  word: string;
+  sentence: string;
+  language: string;
+  nativeLanguage?: string;
+}): Promise<{ explanation: string | null }> {
+  const response = await apiFetch('/v1/nlp/explain', {
+    method: 'POST',
+    body: JSON.stringify({
+      word: params.word,
+      sentence: params.sentence,
+      language: params.language,
+      native_language: params.nativeLanguage,
+    }),
+  });
+  return response.json();
+}
+
+/**
+ * Resolve a word-audio URL for the given lemma + reading.
+ * Returns { audio_url: null } when no audio is available.
+ */
+export async function getWordAudio(params: {
+  language: string;
+  lemma: string;
+  reading: string;
+}): Promise<{ audio_url: string | null }> {
+  const query = new URLSearchParams({
+    language: params.language,
+    lemma: params.lemma,
+    reading: params.reading,
+  });
+  const response = await apiFetch(`/v1/nlp/word-audio?${query.toString()}`);
+  return response.json();
+}
+
+/**
  * Get the number of cards due for review.
  */
 export async function getDueCount(language?: string): Promise<number> {
