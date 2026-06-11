@@ -52,6 +52,16 @@ jobs:
         working-directory: services/nlp
         run: python scripts/import_wordnet.py
 
+      - name: Import multilingual dictionaries (zh, ko, es/de/fr/it/pt)
+        working-directory: services/nlp
+        run: |
+          # CC-CEDICT (zh, ~4 MB download), curated Korean list (no download),
+          # and FreeDict bilingual dicts (es/de/fr/it/pt, ~40 MB total download).
+          # All write into the same data/dictionary.db the JMdict step created.
+          python scripts/import_cedict_sqlite.py
+          python scripts/import_kde4_sqlite.py
+          python scripts/import_freedict.py
+
       - name: Run correctness test suite (Phase 0 gate)
         working-directory: services/nlp
         run: |
@@ -348,6 +358,14 @@ jobs:
           pip install sudachipy sudachidict-core wordfreq
           python scripts/import_jmdict.py
           python scripts/import_wordnet.py
+
+      - name: Import multilingual dictionaries for NLP image
+        working-directory: services/nlp
+        run: |
+          # Bake zh/ko/es/de/fr/it/pt dictionaries into the same SQLite db.
+          python scripts/import_cedict_sqlite.py
+          python scripts/import_kde4_sqlite.py
+          python scripts/import_freedict.py
 
       - name: Build and start services
         run: docker compose up -d --build postgres redis api nlp

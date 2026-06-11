@@ -67,3 +67,4 @@ demo/videos/
 
 # Generated e2e media fixture (created by ffmpeg in `make test-video-mining`/CI)
 e2e/fixtures/media/
+.claude/

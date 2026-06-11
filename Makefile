@@ -5,7 +5,7 @@
         test-property test-integration test-contract test-e2e \
         test-mutation test-mutation-api test-mutation-nlp test-mutation-ts \
         test-perf test-polish test-canary test-synthetic \
-        import-jmdict import-tatoeba import-wordnet migrate \
+        import-jmdict import-tatoeba import-wordnet import-cedict import-kde4 import-freedict import-all migrate \
         lint build clean record-promo \
         docker-up docker-down docker-logs
 
@@ -39,6 +39,10 @@ help:
 	@echo "Data:"
 	@echo "  make import-jmdict  — download and import JMdict (already done if db exists)"
 	@echo "  make import-tatoeba — import Tatoeba sentence pairs"
+	@echo "  make import-cedict  — import CC-CEDICT (Chinese, zh)"
+	@echo "  make import-kde4    — import Korean curated dictionary (ko)"
+	@echo "  make import-freedict— import FreeDict bilingual dicts (es/de/fr/it/pt)"
+	@echo "  make import-all     — import every dictionary into one SQLite db"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test-nlp       — NLP correctness + API tests"
@@ -152,6 +156,22 @@ import-tatoeba: $(NLP_DIR)/data/dictionary.db
 import-wordnet: $(NLP_DIR)/data/dictionary.db
 	cd $(NLP_DIR) && $(PYTHON) scripts/import_wordnet.py
 	@echo "✓ WordNet English dictionary imported"
+
+import-cedict: $(NLP_DIR)/data/dictionary.db
+	cd $(NLP_DIR) && $(PYTHON) scripts/import_cedict_sqlite.py
+	@echo "✓ CC-CEDICT (zh) imported"
+
+import-kde4: $(NLP_DIR)/data/dictionary.db
+	cd $(NLP_DIR) && $(PYTHON) scripts/import_kde4_sqlite.py
+	@echo "✓ Korean dictionary (ko) imported"
+
+import-freedict: $(NLP_DIR)/data/dictionary.db
+	cd $(NLP_DIR) && $(PYTHON) scripts/import_freedict.py
+	@echo "✓ FreeDict (es/de/fr/it/pt) imported"
+
+# Build the full multilingual dictionary in one shot.
+import-all: import-jmdict import-wordnet import-cedict import-kde4 import-freedict
+	@echo "✓ All dictionaries imported"
 
 $(NLP_DIR)/data/dictionary.db:
 	@$(MAKE) import-jmdict

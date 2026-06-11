@@ -57,12 +57,22 @@ class TestSelectSentence:
         assert body["ranked"] == []
 
     def test_unsupported_language_returns_422(self):
+        # 'ru' is genuinely unsupported (es/de/fr/pt/it/vi are now wired up).
         r = client.post("/select-sentence", json={
-            "candidates": ["bonjour"],
+            "candidates": ["privet"],
             "target_lemma": "x",
-            "language": "fr",
+            "language": "ru",
         })
         assert r.status_code == 422
+
+    def test_french_select_sentence_supported(self):
+        r = client.post("/select-sentence", json={
+            "candidates": ["Le chat dort.", "Le chien court."],
+            "target_lemma": "chat",
+            "language": "fr",
+        })
+        assert r.status_code == 200
+        assert r.json()["best"]["text"] == "Le chat dort."
 
     def test_ranked_descending_by_fit(self):
         r = client.post("/select-sentence", json={
@@ -149,8 +159,18 @@ class TestTokenize:
         assert any(t["user_status"] == "unknown" for t in content)
 
     def test_unsupported_language(self):
-        r = client.post("/tokenize", json={"text": "hello", "language": "fr"})
+        # 'ru' is genuinely unsupported (fr is now wired up via the Latin tokenizer).
+        r = client.post("/tokenize", json={"text": "privet", "language": "ru"})
         assert r.status_code == 422
+
+    def test_french_tokenize_supported(self):
+        r = client.post("/tokenize", json={"text": "Le chat mange le poisson.", "language": "fr"})
+        assert r.status_code == 200
+        tokens = r.json()["tokens"]
+        lemmas = {t["lemma"] for t in tokens}
+        # function words flagged non-content; content words present
+        assert "chat" in lemmas
+        assert any(t["surface"] == "Le" and not t["is_content_word"] for t in tokens)
 
     def test_english_tokenize(self):
         r = client.post("/tokenize", json={"text": "The cats were running quickly.", "language": "en"})
@@ -222,8 +242,15 @@ class TestLookup:
             assert "reading" in span
 
     def test_lookup_unsupported_language(self):
-        r = client.post("/lookup", json={"surface": "bonjour", "language": "fr"})
+        # 'ru' is genuinely unsupported; fr/es/de/it/pt/vi now resolve.
+        r = client.post("/lookup", json={"surface": "privet", "language": "ru"})
         assert r.status_code == 422
+
+    def test_lookup_french_supported(self):
+        # Returns 200 even without dictionary data (found may be False); the
+        # point is the language is no longer rejected with 422.
+        r = client.post("/lookup", json={"surface": "maison", "language": "fr"})
+        assert r.status_code == 200
 
     def test_lookup_kana_only(self):
         """Pure kana input should still return a result."""

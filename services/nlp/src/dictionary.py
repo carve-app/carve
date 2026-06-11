@@ -24,6 +24,19 @@ from pathlib import Path
 from .pitch_accent import PITCH_ACCENT
 
 
+def normalize_language_code(language: str) -> str:
+    """
+    Map a request language to the `language_code` stored in the dictionary.
+
+    Chinese variants (zh, zh-tw) collapse to 'zh-cn' because CC-CEDICT is
+    imported with simplified headwords under that code. Everything else passes
+    through unchanged.
+    """
+    if language in ("zh", "zh-tw", "zh-cn"):
+        return "zh-cn"
+    return language
+
+
 @dataclass
 class Definition:
     sense_index: int
@@ -96,6 +109,8 @@ class DictionaryService:
         if conn is None:
             return None
 
+        language = normalize_language_code(language)
+
         # 1. Exact lemma match
         result = self._query_by_lemma(conn, lemma, language, target_lang)
         if result:
@@ -107,6 +122,16 @@ class DictionaryService:
             normalized = kata_to_hira(lemma)
             if normalized != lemma:
                 result = self._query_by_lemma(conn, normalized, language, target_lang, confidence=0.9)
+                if result:
+                    return result
+
+        # 3. Case-insensitive fallback for Latin-script languages — dictionary
+        #    headwords are typically lowercase, but lemmas may arrive capitalized
+        #    (sentence-initial words, German nouns).
+        if language not in ("ja", "zh-cn", "ko"):
+            lowered = lemma.lower()
+            if lowered != lemma:
+                result = self._query_by_lemma(conn, lowered, language, target_lang, confidence=0.95)
                 if result:
                     return result
 
@@ -167,7 +192,7 @@ class DictionaryService:
             frequency_rank=row["frequency_rank"],
             jlpt_level=row["jlpt_level"],
             is_exact_match=confidence == 1.0,
-            pitch_accent=PITCH_ACCENT.get(row["lemma"]),
+            pitch_accent=PITCH_ACCENT.get(row["lemma"]) if language == "ja" else None,
         )
 
     def translate_sentence(self, text: str, target_lang: str = "en") -> str | None:
@@ -242,6 +267,8 @@ class DictionaryService:
         conn = self._get_conn()
         if conn is None:
             return {l: None for l in lemmas}
+
+        language = normalize_language_code(language)
 
         placeholders = ",".join("?" * len(lemmas))
         word_rows = conn.execute(

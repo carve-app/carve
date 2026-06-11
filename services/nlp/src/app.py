@@ -28,6 +28,7 @@ from .tokenizer import JapaneseTokenizer
 from .tokenizer_zh import ChineseTokenizer
 from .tokenizer_ko import KoreanTokenizer
 from .tokenizer_en import EnglishTokenizer
+from .tokenizer_latin import LatinTokenizer, SUPPORTED_LANGUAGES as LATIN_LANGUAGES
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,9 @@ _ja_tokenizer = JapaneseTokenizer()
 _zh_tokenizer = ChineseTokenizer()
 _ko_tokenizer = KoreanTokenizer()
 _en_tokenizer = EnglishTokenizer()
+# One LatinTokenizer per supported Latin-script / Vietnamese language. Each is
+# cheap (a regex + simplemma cache), so we eagerly construct them at import.
+_latin_tokenizers = {lang: LatinTokenizer(lang) for lang in LATIN_LANGUAGES}
 
 
 @asynccontextmanager
@@ -185,6 +189,9 @@ def tokenize(
     elif req.language == "en":
         en_result = _en_tokenizer.tokenize(req.text)
         raw_tokens = en_result.tokens
+    elif req.language in _latin_tokenizers:
+        latin_result = _latin_tokenizers[req.language].tokenize(req.text)
+        raw_tokens = latin_result.tokens
     else:
         raise HTTPException(status_code=422, detail=f"Language '{req.language}' not yet supported")
 
@@ -208,6 +215,10 @@ def tokenize(
             reading_hira = t.romanization
         elif req.language == "en":
             # English: 'reading' is the lowercased orthographic form
+            reading = t.reading
+            reading_hira = t.reading
+        elif req.language in _latin_tokenizers:
+            # Latin-script / Vietnamese: 'reading' is the lowercased surface form
             reading = t.reading
             reading_hira = t.reading
         else:
@@ -323,10 +334,29 @@ def lookup(
             reading = t.reading
             reading_hira = t.reading
         furigana = [{"text": req.surface, "reading": ""}]
+    elif req.language in _latin_tokenizers:
+        latin_result = _latin_tokenizers[req.language].tokenize(req.surface)
+        # Prefer the first content word, else the first token.
+        content = [t for t in latin_result.tokens if t.is_content_word]
+        chosen = (content[0] if content else latin_result.tokens[0]) if latin_result.tokens else None
+        if chosen:
+            lemma = chosen.lemma
+            reading = chosen.reading
+            reading_hira = chosen.reading
+        furigana = [{"text": req.surface, "reading": ""}]
     else:
         raise HTTPException(status_code=422, detail=f"Language '{req.language}' not yet supported")
 
     entry = _dict_service.lookup(lemma, language=req.language, target_lang=req.target_lang)
+
+    # Fallback: the lemmatizer can over-stem (e.g. German "Haus" -> "hausen"),
+    # so if the lemma misses, retry on the raw surface form. Skip for Japanese,
+    # which has its own reading-based normalization in the dict service.
+    if not entry and req.language != "ja" and req.surface != lemma:
+        fallback = _dict_service.lookup(req.surface, language=req.language, target_lang=req.target_lang)
+        if fallback:
+            entry = fallback
+            lemma = fallback.lemma
 
     if not entry:
         return LookupResponse(
@@ -452,6 +482,22 @@ def score_text(
             recommended_mode="mining_read" if pct >= 90 else "study_read" if pct >= 80 else "too_hard",
             top_unknown_lemmas=[t.lemma for t in content if t.lemma not in known and t.lemma not in learning][:10],
         )
+    elif req.language in _latin_tokenizers:
+        latin_result = _latin_tokenizers[req.language].tokenize(req.text)
+        content = [t for t in latin_result.tokens if t.is_content_word]
+        known_ct = sum(1 for t in content if t.lemma in known or t.lemma in learning)
+        total = len(content) or 1
+        pct = round(known_ct / total * 100, 1)
+        from .scorer import ContentScore
+        s = ContentScore(
+            comprehension_pct=pct,
+            difficulty_score=round(1.0 - pct / 100, 2),
+            total_content_words=total,
+            unknown_count=total - known_ct,
+            learning_count=0,
+            recommended_mode="mining_read" if pct >= 90 else "study_read" if pct >= 80 else "too_hard",
+            top_unknown_lemmas=[t.lemma for t in content if t.lemma not in known and t.lemma not in learning][:10],
+        )
     else:
         raise HTTPException(status_code=422, detail=f"Language '{req.language}' not yet supported")
 
@@ -476,6 +522,8 @@ def _tokenize_for_language(text: str, language: str):
         return _ko_tokenizer.tokenize(text).tokens
     if language == "en":
         return _en_tokenizer.tokenize(text).tokens
+    if language in _latin_tokenizers:
+        return _latin_tokenizers[language].tokenize(text).tokens
     raise HTTPException(status_code=422, detail=f"Language '{language}' not yet supported")
 
 

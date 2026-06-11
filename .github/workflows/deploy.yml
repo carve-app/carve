@@ -113,18 +113,23 @@ jobs:
       - id: tag
         run: echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
 
-      - name: Prepare dictionaries (JMdict + WordNet)
+      - name: Prepare dictionaries (JMdict + WordNet + multilingual)
         working-directory: services/nlp
         run: |
           # NLP image bundles a pre-built SQLite dict. Build it in CI so the
-          # image is self-contained at runtime. JMdict = Japanese; WordNet =
-          # English monolingual (for intermediate+ English learners).
+          # image is self-contained at runtime. JMdict = Japanese (needs
+          # SudachiPy); WordNet = English monolingual; CC-CEDICT/FreeDict =
+          # zh/ko/es/de/fr/it/pt. Multilingual importers are pure stdlib.
           pip install sudachipy sudachidict-core wordfreq
           mkdir -p data
           curl -sL "http://ftp.edrdg.org/pub/Nihongo/JMdict_e.gz" -o data/JMdict_e.gz
           gzip -d data/JMdict_e.gz
           python scripts/import_jmdict.py
           python scripts/import_wordnet.py
+          # zh (CC-CEDICT), ko (curated list), es/de/fr/it/pt (FreeDict)
+          python scripts/import_cedict_sqlite.py
+          python scripts/import_kde4_sqlite.py
+          python scripts/import_freedict.py
 
       - name: Build & push
         working-directory: services/nlp
