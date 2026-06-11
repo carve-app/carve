@@ -79,6 +79,10 @@ services:
       JWT_SECRET: dev-secret-change-in-production-at-least-32-chars
       PORT: "8080"
       NLP_SERVICE_URL: http://nlp:8001
+      # The API proxies card media uploads to the media service; without this it
+      # defaults to localhost:8002 (unreachable from inside the api container)
+      # and every screenshot/audio upload silently no-ops.
+      MEDIA_SERVICE_URL: http://media:8002
     depends_on:
       postgres:
         condition: service_healthy

@@ -76,6 +76,7 @@ async function handleMessage(msg: Message): Promise<MessageResponse> {
           translation: msg.translation,
           sentence: msg.sentence,
           source_url: msg.sourceUrl,
+          source_timestamp: msg.sourceTimestamp,
         });
         return { type: 'MINE_CARD_RESULT', success: true, cardId: card.id };
       } catch (e: unknown) {
@@ -222,6 +223,11 @@ async function handleMessage(msg: Message): Promise<MessageResponse> {
           });
         });
         const blob = await cropDataUrl(dataUrl, msg.rect, msg.dpr);
+        if (!blob) {
+          // Degenerate / off-screen rect — better to report no frame than to
+          // attach a screenshot of unrelated page chrome.
+          return { type: 'CAPTURE_VIDEO_FRAME_RESULT', imageBase64: null };
+        }
         const imageBase64 = await blobToBase64Worker(blob);
         return { type: 'CAPTURE_VIDEO_FRAME_RESULT', imageBase64 };
       } catch {
@@ -280,19 +286,30 @@ async function handleMessage(msg: Message): Promise<MessageResponse> {
           headers: { Authorization: `Bearer ${token}` },
           body: form,
         });
+
+        // Report what the SERVER actually persisted, not just what we sent —
+        // the media service can reject a part (size/format) or be down, in
+        // which case the API returns the failure and the URL is null. Trusting
+        // local blobs here would tell the user "Mined! (+image & audio)" while
+        // the card silently has no media.
+        let body: { image_url?: string | null; audio_url?: string | null; error?: string } = {};
+        try { body = await resp.json(); } catch {/* non-JSON error body */}
+
+        const hasImage = !!body.image_url;
+        const hasAudio = !!body.audio_url;
         return {
           type: 'ATTACH_VIDEO_MEDIA_RESULT',
-          success: resp.ok,
-          hasImage: !!imageBlob,
-          hasAudio: !!audioBlob,
-          error: resp.ok ? undefined : `HTTP ${resp.status}`,
+          success: resp.ok && (hasImage || hasAudio),
+          hasImage,
+          hasAudio,
+          error: resp.ok ? undefined : (body.error ?? `HTTP ${resp.status}`),
         };
       } catch (e: unknown) {
         return {
           type: 'ATTACH_VIDEO_MEDIA_RESULT',
           success: false,
-          hasImage: !!imageBlob,
-          hasAudio: !!audioBlob,
+          hasImage: false,
+          hasAudio: false,
           error: e instanceof Error ? e.message : 'upload failed',
         };
       }
@@ -345,7 +362,7 @@ async function cropDataUrl(
   dataUrl: string,
   rect: { x: number; y: number; width: number; height: number },
   dpr: number,
-): Promise<Blob> {
+): Promise<Blob | null> {
   const fullBlob = dataURLToBlob(dataUrl);
   const bitmap = await createImageBitmap(fullBlob);
 
@@ -359,19 +376,23 @@ async function cropDataUrl(
   // viewport, so a rect partially scrolled out of view must be trimmed.
   sx = Math.max(0, Math.min(sx, bitmap.width));
   sy = Math.max(0, Math.min(sy, bitmap.height));
-  sw = Math.max(1, Math.min(sw, bitmap.width - sx));
-  sh = Math.max(1, Math.min(sh, bitmap.height - sy));
+  sw = Math.max(0, Math.min(sw, bitmap.width - sx));
+  sh = Math.max(0, Math.min(sh, bitmap.height - sy));
 
-  // Degenerate rect — capture the whole visible frame instead of a sliver.
+  // Degenerate rect (video hidden/zero-size/fully scrolled off-screen). Return
+  // null rather than a whole-viewport screenshot of unrelated page content —
+  // the caller turns this into an honest "no frame" outcome. The content script
+  // already skips capture for <16px videos; this is the worker-side backstop.
   if (sw < 16 || sh < 16) {
-    sx = 0; sy = 0; sw = bitmap.width; sh = bitmap.height;
+    bitmap.close();
+    return null;
   }
 
   const canvas = new OffscreenCanvas(sw, sh);
   const ctx = canvas.getContext('2d');
   if (!ctx) {
     bitmap.close();
-    return fullBlob; // can't crop — better to attach the full frame than nothing
+    return null;
   }
   ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
   bitmap.close();

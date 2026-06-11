@@ -168,6 +168,66 @@ class DictionaryService:
             pitch_accent=PITCH_ACCENT.get(row["lemma"]),
         )
 
+    def translate_sentence(self, text: str, target_lang: str = "en") -> str | None:
+        """
+        Return a real human translation of a Japanese sentence from the Tatoeba
+        corpus when one exists, else None.
+
+        Matches exactly first, then on a punctuation/space-normalized form so
+        trailing 。/！ or width differences don't prevent a hit. Returns None
+        (never a guess) when the corpus is absent or has no match, so callers can
+        fall back to a word gloss.
+        """
+        if target_lang != "en":
+            return None
+        stripped = text.strip()
+        if not stripped:
+            return None
+
+        conn = self._get_conn()
+        if conn is None:
+            return None
+
+        try:
+            # 1) Exact match.
+            row = conn.execute(
+                "SELECT en_text FROM ja_en_pairs WHERE ja_text = ? LIMIT 1",
+                (stripped,),
+            ).fetchone()
+            if row and row["en_text"]:
+                return row["en_text"]
+
+            # 2) Normalized match. Strip common terminal punctuation + spaces
+            #    from BOTH sides so a user who typed "私は学生です" still matches a
+            #    stored "私は学生です。" (and vice versa). Always attempted when the
+            #    exact match misses — the difference may be on the stored side.
+            norm = self._normalize_ja(stripped)
+            if norm:
+                row = conn.execute(
+                    """
+                    SELECT en_text FROM ja_en_pairs
+                    WHERE replace(replace(replace(replace(replace(replace(
+                          ja_text,'。',''),'、',''),'！',''),'？',''),' ',''),'　','') = ?
+                    LIMIT 1
+                    """,
+                    (norm,),
+                ).fetchone()
+                if row and row["en_text"]:
+                    return row["en_text"]
+        except sqlite3.Error:
+            # Tatoeba tables/view absent in this build (OperationalError), or a
+            # threadpool connection hiccup (Programming/InterfaceError) — fall
+            # back to the word gloss rather than 500 the endpoint.
+            return None
+        return None
+
+    @staticmethod
+    def _normalize_ja(text: str) -> str:
+        out = text.strip()
+        for ch in ("。", "、", "！", "？", " ", "　"):
+            out = out.replace(ch, "")
+        return out
+
     def batch_lookup(
         self,
         lemmas: list[str],

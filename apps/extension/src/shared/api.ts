@@ -76,6 +76,7 @@ export async function createCard(params: {
   translation?: string;
   sentence?: string;
   source_url?: string;
+  source_timestamp?: number;
 }): Promise<{ id: string; lemma: string }> {
   const response = await apiFetch('/v1/cards', {
     method: 'POST',
@@ -87,6 +88,7 @@ export async function createCard(params: {
       subtitle_translation: params.translation,
       sentence: params.sentence,
       source_url: params.source_url,
+      source_timestamp: params.source_timestamp,
     }),
   });
   return response.json();

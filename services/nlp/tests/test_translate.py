@@ -114,3 +114,57 @@ class TestTranslate:
         assert r.status_code == 200
         # Restore
         monkeypatch.delenv("NLP_INTERNAL_SECRET")
+
+
+class TestSentenceTranslationFromCorpus:
+    """
+    translate_sentence() must return a real human translation from the Tatoeba
+    corpus when present, matching exactly or after punctuation normalization, and
+    return None (so the caller falls back to a gloss) when absent.
+    """
+
+    def _service_with_corpus(self, tmp_path):
+        import sqlite3
+        from src.dictionary import DictionaryService
+
+        db = tmp_path / "dict.db"
+        conn = sqlite3.connect(str(db))
+        # Minimal shape of the Tatoeba view that translate_sentence queries.
+        conn.executescript(
+            """
+            CREATE TABLE ja_en_pairs (ja_id INTEGER, ja_text TEXT, en_text TEXT);
+            INSERT INTO ja_en_pairs (ja_id, ja_text, en_text) VALUES
+              (1, '私は学生です。', 'I am a student.'),
+              (2, '映画を見ながら勉強する', 'I study while watching movies');
+            """
+        )
+        conn.commit()
+        conn.close()
+        return DictionaryService(db_path=str(db))
+
+    def test_exact_corpus_match(self, tmp_path):
+        svc = self._service_with_corpus(tmp_path)
+        assert svc.translate_sentence("私は学生です。") == "I am a student."
+
+    def test_normalized_corpus_match(self, tmp_path):
+        # User text drops the trailing 。 — normalization should still match.
+        svc = self._service_with_corpus(tmp_path)
+        assert svc.translate_sentence("私は学生です") == "I am a student."
+
+    def test_no_match_returns_none(self, tmp_path):
+        svc = self._service_with_corpus(tmp_path)
+        assert svc.translate_sentence("これは存在しない文です") is None
+
+    def test_missing_corpus_returns_none_not_error(self, tmp_path):
+        # A dictionary DB with no Tatoeba view must not raise — fall back to None.
+        import sqlite3
+        from src.dictionary import DictionaryService
+
+        db = tmp_path / "bare.db"
+        sqlite3.connect(str(db)).close()
+        svc = DictionaryService(db_path=str(db))
+        assert svc.translate_sentence("私は学生です。") is None
+
+    def test_non_en_target_returns_none(self, tmp_path):
+        svc = self._service_with_corpus(tmp_path)
+        assert svc.translate_sentence("私は学生です。", target_lang="fr") is None

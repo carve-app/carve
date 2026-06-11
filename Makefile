@@ -1,7 +1,7 @@
 .PHONY: help setup docker-check \
         infra-up infra-down infra-logs \
         dev dev-api dev-nlp dev-web \
-        test-nlp test-api test-extension test-promo test-all \
+        test-nlp test-api test-extension test-video-mining test-promo test-all \
         test-property test-integration test-contract test-e2e \
         test-mutation test-mutation-api test-mutation-nlp test-mutation-ts \
         test-perf test-polish test-canary test-synthetic \
@@ -12,6 +12,7 @@
 PYTHON  := services/nlp/.venv/bin/python3.13
 NLP_DIR := services/nlp
 API_DIR := services/api
+MEDIA_DIR := services/media
 
 # Local dev database URL (matches docker-compose postgres service)
 DATABASE_URL ?= postgres://carve:carve@localhost:5432/carve?sslmode=disable
@@ -166,6 +167,26 @@ test-extension:
 	@echo "→ Running extension e2e test..."
 	cd e2e && node extension.test.js
 	@echo "✓ Extension e2e test passed"
+
+# Real end-to-end video sentence-mining test: drives the actual extension in a
+# real Chromium against the real Go api + media binaries and a real Postgres,
+# then asserts the mined card carries a real screenshot, exact-sentence audio,
+# sentence, translation, and cue timing. Self-contained (boots its own pg
+# container + services). Skips gracefully if docker/artifacts are unavailable.
+test-video-mining: build
+	@echo "→ Building media binary + chrome extension..."
+	cd $(MEDIA_DIR) && go build -o ../../bin/media ./cmd/media
+	cd apps/extension && npm run build:chrome
+	@echo "→ Generating the audio/video fixture (vp8 + opus)..."
+	@mkdir -p e2e/fixtures/media
+	@test -f e2e/fixtures/media/sample.webm || ffmpeg -hide_banner -loglevel error -y \
+		-f lavfi -i "color=c=0x1e88e5:s=480x270:d=6,format=yuv420p" \
+		-f lavfi -i "sine=frequency=440:duration=6" \
+		-c:v libvpx -b:v 400k -c:a libopus -b:a 96k -shortest \
+		e2e/fixtures/media/sample.webm
+	@echo "→ Running real video-mining e2e..."
+	cd e2e && node video-mining.test.js
+	@echo "✓ Video sentence-mining e2e passed"
 
 test-promo:
 	@echo "→ Running promo demo flow (CI mode — no video saved)..."

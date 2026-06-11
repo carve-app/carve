@@ -554,7 +554,9 @@ def select_sentence(
 
 
 class TranslateRequest(BaseModel):
-    text: str
+    # Bound the input like TokenizeRequest/ScoreRequest — a sentence translation
+    # is never this long; the cap keeps gloss-building from unbounded work.
+    text: str = Field(..., max_length=50_000)
     source_language: str = "ja"
     target_language: str = "en"
 
@@ -571,9 +573,16 @@ def translate(
     x_internal_secret: Annotated[str | None, Header()] = None,
 ) -> TranslateResponse:
     """
-    Translate a sentence.  Currently returns the top-3 definitions of each
-    content word as a gloss — a lightweight placeholder until a proper MT
-    service (DeepL / Google / Claude) is wired up.
+    Translate a sentence to the target language.
+
+    Strategy (best available, no external network call):
+      1. Tatoeba corpus — a real human translation when the sentence (or a
+         punctuation-normalized form) is in the imported JA→EN pairs.
+      2. Word-gloss fallback — the top definition of each content word, clearly
+         bracketed so it reads as a gloss, not a fluent translation.
+
+    Returns None (never a fabricated sentence) when neither is available, so the
+    client can leave the field blank rather than show a wrong translation.
     """
     _check_auth(x_internal_secret)
 
@@ -584,21 +593,29 @@ def translate(
             target_language=req.target_language,
         )
 
-    # Build a word-gloss from the dictionary for Japanese text
-    gloss_parts: list[str] = []
+    translation: str | None = None
+
     if req.source_language == "ja":
-        result = _ja_tokenizer.tokenize(req.text)
-        for tok in result.tokens:
-            if not tok.is_content_word:
-                continue
-            entry = _dict_service.lookup(tok.lemma, req.source_language)
-            if entry and entry.definitions:
-                top_def = entry.definitions[0].definition
-                gloss_parts.append(f"{tok.surface}[{top_def}]")
-        translation = " ".join(gloss_parts) if gloss_parts else None
-    else:
-        # Other languages: no MT yet
-        translation = None
+        # 1) Real corpus translation, if we have one.
+        translation = _dict_service.translate_sentence(req.text, req.target_language)
+
+        # 2) Fall back to a word gloss built from the dictionary.
+        if not translation:
+            gloss_parts: list[str] = []
+            result = _ja_tokenizer.tokenize(req.text)
+            for tok in result.tokens:
+                if not tok.is_content_word:
+                    continue
+                entry = _dict_service.lookup(
+                    tok.lemma,
+                    language=req.source_language,
+                    target_lang=req.target_language,
+                )
+                if entry and entry.definitions:
+                    top_def = entry.definitions[0].definition
+                    gloss_parts.append(f"{tok.surface}[{top_def}]")
+            translation = " ".join(gloss_parts) if gloss_parts else None
+    # Other source languages: no MT corpus yet → None.
 
     return TranslateResponse(
         translation=translation,

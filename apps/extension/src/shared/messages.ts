@@ -4,7 +4,7 @@ import type { CachedReviewCard } from './storage';
 export type Message =
   | { type: 'TOKENIZE'; text: string; language: string; knownLemmas: string[]; learningLemmas: string[] }
   | { type: 'LOOKUP'; surface: string; language: string }
-  | { type: 'MINE_CARD'; lemma: string; reading: string; definition?: string; translation?: string; sentence: string; sourceUrl: string; languageCode: string }
+  | { type: 'MINE_CARD'; lemma: string; reading: string; definition?: string; translation?: string; sentence: string; sourceUrl: string; sourceTimestamp?: number; languageCode: string }
   | { type: 'IGNORE_WORD'; lemma: string; languageCode: string }
   | { type: 'LOG_IMMERSION'; languageCode: string; sessionType: string; durationSec: number; startedAt: string; url: string }
   | { type: 'GET_AUTH_STATE' }

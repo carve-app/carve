@@ -214,10 +214,15 @@ components:
         source_timestamp:     { type: number, nullable: true }
     CardCreateResponse:
       type: object
-      required: [id]
+      required: [id, lemma, language_code, created_at]
       properties:
-        id:        { $ref: '#/components/schemas/UUID' }
-        is_leech:  { type: boolean }
+        id:            { $ref: '#/components/schemas/UUID' }
+        lemma:         { type: string }
+        language_code: { $ref: '#/components/schemas/LanguageCode' }
+        created_at:    { type: string, format: date-time }
+        # Present and true only on a 200 response, when the (user, language,
+        # lemma) card already existed and was returned instead of created.
+        existing:      { type: boolean }
     CardUpdateRequest:
       type: object
       properties:
@@ -951,6 +956,11 @@ paths:
       tags: [cards]
       operationId: createCard
       summary: Create a card (mining)
+      description: >
+        Idempotent on (user, language, lemma). Returns 201 with the new card, or
+        200 with the existing card (response includes "existing": true) when the
+        word was already mined — so the client can attach media to it rather than
+        creating a duplicate.
       security: [{ bearer: [] }]
       requestBody:
         required: true
@@ -958,6 +968,7 @@ paths:
           application/json: { schema: { $ref: '#/components/schemas/CardCreateRequest' } }
       responses:
         '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/CardCreateResponse' } } } }
+        '200': { description: Existing card returned (already mined), content: { application/json: { schema: { $ref: '#/components/schemas/CardCreateResponse' } } } }
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
@@ -1027,7 +1038,9 @@ paths:
       summary: Upload image/audio (and subtitle metadata) for a card
       description: >
         Multipart upload. All parts are optional; the handler stores whatever is
-        provided and returns the resulting URLs (null when not uploaded).
+        provided and returns the resulting URLs (null when not uploaded). If a
+        part is supplied but the media backend fails to store it, the endpoint
+        returns 502 (any part that did succeed is still persisted).
       security: [{ bearer: [] }]
       requestBody:
         required: true
@@ -1055,6 +1068,7 @@ paths:
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Card not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: A supplied media part failed to store, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/cards/{id}/suspend:
     parameters:

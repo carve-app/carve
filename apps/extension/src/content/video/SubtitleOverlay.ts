@@ -177,46 +177,76 @@ export class SubtitleOverlay {
       if (!targetToken) targetToken = targetEl.querySelector<HTMLElement>('[data-carve="token"][data-content="1"]');
     }
 
-    const lemma = targetToken?.getAttribute('data-lemma') ?? cue.text.slice(0, 10);
-    const reading = targetToken?.getAttribute('data-reading') ?? '';
+    // Front of the card. When tokenization is unavailable (NLP down → no token
+    // spans) we fall back to the whole cue text rather than an arbitrary
+    // mid-grapheme 10-char slice — a coherent, editable front beats a truncated
+    // fragment. The user can trim it in the card editor.
+    const targetLemma = targetToken?.getAttribute('data-lemma')?.trim();
+    const lemma = targetLemma && targetLemma.length > 0 ? targetLemma : cue.text.trim().slice(0, 80);
+    const reading = targetToken?.getAttribute('data-reading')?.trim() ?? '';
 
     this.setMineStatus('Mining…');
     this.miningInProgress = true;
 
-    // i+1 sentence selection: prev + current + next cues are candidates.
-    let pickedSentence = cue.text;
     try {
-      const prev = this.cueHistory[this.historyIndex - 1]?.text;
-      const next = this.cueHistory[this.historyIndex + 1]?.text;
-      const candidates = [prev, cue.text, next].filter((t): t is string => !!t);
-      if (candidates.length > 1) {
-        const sel = await browser.runtime.sendMessage({
-          type: 'SELECT_SENTENCE',
-          candidates,
-          targetLemma: lemma,
-          language: this.lang,
-          knownLemmas: this.vocabCache.getKnownLemmas(),
-          learningLemmas: this.vocabCache.getLearningLemmas(),
-        });
-        if (sel?.bestText && sel.bestContainsTarget) {
-          pickedSentence = sel.bestText;
+      // i+1 sentence selection: prev + current + next cues are candidates.
+      let pickedSentence = cue.text;
+      try {
+        const prev = this.cueHistory[this.historyIndex - 1]?.text;
+        const next = this.cueHistory[this.historyIndex + 1]?.text;
+        const candidates = [prev, cue.text, next].filter((t): t is string => !!t);
+        if (candidates.length > 1) {
+          const sel = await browser.runtime.sendMessage({
+            type: 'SELECT_SENTENCE',
+            candidates,
+            targetLemma: lemma,
+            language: this.lang,
+            knownLemmas: this.vocabCache.getKnownLemmas(),
+            learningLemmas: this.vocabCache.getLearningLemmas(),
+          });
+          if (sel?.bestText && sel.bestContainsTarget) {
+            pickedSentence = sel.bestText;
+          }
         }
-      }
-    } catch {/* selector is best-effort; fall back to current cue */}
+      } catch {/* selector is best-effort; fall back to current cue */}
 
-    try {
-      // Create card via background (to reuse existing API path)
+      // Real translation of the mined sentence. Prefer the on-screen native
+      // subtitle (a genuine human translation, when the user runs dual subs);
+      // otherwise ask the NLP service. The popup mining path already does this —
+      // video mining used to skip it entirely, so video cards had no
+      // translation at all. Best-effort: a missing translation never blocks the
+      // card.
+      let translation = this.getNativeCueText(cue);
+      if (!translation) {
+        try {
+          const tr = await browser.runtime.sendMessage({
+            type: 'TRANSLATE',
+            text: pickedSentence,
+            sourceLanguage: this.lang,
+          });
+          translation = (tr?.translation as string | null) ?? undefined;
+        } catch {/* translation is optional */}
+      }
+
+      // Link the card back to the exact moment in the video (seconds).
+      const sourceTimestamp = cue.startMs > 0 ? cue.startMs / 1000 : undefined;
+
+      // Create card via background (to reuse existing API path). The backend is
+      // idempotent on (lemma, language): re-mining the same word returns the
+      // existing card id, so media still attaches instead of orphaning.
       const result = await browser.runtime.sendMessage({
         type: 'MINE_CARD',
         lemma,
         reading,
+        translation,
         sentence: pickedSentence,
         sourceUrl: window.location.href,
+        sourceTimestamp,
         languageCode: this.lang,
       });
 
       if (!result?.cardId) {
-        this.setMineStatus(result?.error ?? 'Already mined', true);
+        this.setMineStatus(result?.error ?? 'Mine failed', true);
         return;
       }
 
@@ -226,24 +256,30 @@ export class SubtitleOverlay {
       await this.vocabCache.markLearning(lemma);
       if (targetToken) targetToken.setAttribute('data-status', 'learning');
 
-      // Capture frame + audio and attach to the card. Frame capture runs in
-      // the background worker (DRM-safe screenshot+crop); audio is recorded
-      // here. We report what actually landed so DRM sites that block media
-      // give an honest message instead of a silent failure.
+      // Capture screenshot + EXACT-sentence audio and attach to the card.
+      // attachVideoMedia seeks to the cue's true source timing, grabs the frame
+      // there (DRM-safe, via the worker) and records the audio over the cue
+      // window — so the card's audio matches the sentence even if the user
+      // paused or scrolled back through history. hasImage/hasAudio reflect what
+      // the SERVER persisted, so DRM/upload failures get an honest message.
       const video = getVideoElement();
       if (video) {
         this.setMineStatus('Mined! Capturing media…');
-        const cueDurationMs = cue.endMs - cue.startMs || 4000;
-        const media = await attachVideoMedia(video, cardId, cueDurationMs, {
-          sourceUrl: window.location.href,
-          subtitleTranslation: cue.nativeText,
-        });
+        const media = await attachVideoMedia(
+          video,
+          cardId,
+          { startMs: cue.startMs, endMs: cue.endMs },
+          { sourceUrl: window.location.href, subtitleTranslation: translation },
+        );
         if (media.hasImage || media.hasAudio) {
           const parts = [media.hasImage ? 'image' : null, media.hasAudio ? 'audio' : null].filter(Boolean);
           this.setMineStatus(`Mined! (+${parts.join(' & ')})`);
+        } else if (media.error) {
+          // Card saved (with sentence + translation) but media failed. Tell the
+          // user honestly rather than implying success.
+          this.setMineStatus(`Mined! (media failed: ${media.error})`, true);
         } else {
-          // Card saved with subtitle + translation, but this player blocks
-          // frame/audio capture (e.g. HDCP-protected DRM).
+          // This player blocks frame/audio capture (e.g. HDCP-protected DRM).
           this.setMineStatus('Mined! (media unavailable on this site)');
         }
       } else {
@@ -256,6 +292,34 @@ export class SubtitleOverlay {
     } finally {
       this.miningInProgress = false;
     }
+  }
+
+  /**
+   * Returns the text of a second "showing" subtitle track whose language
+   * differs from the learning target — i.e. the user's native-language
+   * subtitle, a real human translation of the current line. Returns undefined
+   * when no such track is active (the common single-subtitle case), in which
+   * case the caller falls back to the NLP translation.
+   */
+  private getNativeCueText(cue: ActiveCue): string | undefined {
+    if (cue.nativeText && cue.nativeText.trim()) return cue.nativeText.trim();
+    const video = getVideoElement();
+    if (!video || !video.textTracks) return undefined;
+    for (let i = 0; i < video.textTracks.length; i++) {
+      const track = video.textTracks[i];
+      if (track.mode !== 'showing') continue;
+      const lang = (track.language || '').slice(0, 2).toLowerCase();
+      if (lang && lang === this.lang.slice(0, 2).toLowerCase()) continue; // same as target — skip
+      const active = track.activeCues;
+      if (!active || active.length === 0) continue;
+      const text = Array.from(active)
+        .map(c => (c as VTTCue).text ?? '')
+        .join(' ')
+        .replace(/<[^>]+>/g, '')
+        .trim();
+      if (text) return text;
+    }
+    return undefined;
   }
 
   private setMineStatus(msg: string, error = false): void {

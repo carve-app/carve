@@ -277,6 +277,55 @@ jobs:
           name: extension-e2e-screenshot
           path: e2e/extension-e2e.png
 
+  # ── Real video sentence-mining e2e (full stack) ───────────────────────────
+  video-mining:
+    name: Video mining (real stack)
+    runs-on: ubuntu-latest
+    needs: [api, media]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.26"
+          cache-dependency-path: services/api/go.sum
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Install ffmpeg (for the audio/video fixture)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Build Go binaries (api, migrate, media)
+        run: |
+          mkdir -p bin
+          (cd services/api && go build -o ../../bin/api ./cmd/api && go build -o ../../bin/migrate ./cmd/migrate)
+          (cd services/media && go build -o ../../bin/media ./cmd/media)
+
+      - name: Build chrome extension
+        working-directory: apps/extension
+        run: npm ci && npm run build:chrome
+
+      - name: Generate the fixture video (vp8 + opus, with audio tone)
+        run: |
+          mkdir -p e2e/fixtures/media
+          ffmpeg -hide_banner -loglevel error -y \
+            -f lavfi -i "color=c=0x1e88e5:s=480x270:d=6,format=yuv420p" \
+            -f lavfi -i "sine=frequency=440:duration=6" \
+            -c:v libvpx -b:v 400k -c:a libopus -b:a 96k -shortest \
+            e2e/fixtures/media/sample.webm
+
+      - name: Install e2e deps + Playwright Chromium
+        working-directory: e2e
+        run: npm ci && npx playwright install --with-deps chromium
+
+      - name: Run real video-mining e2e
+        working-directory: e2e
+        run: node video-mining.test.js
+
   # ── Integration: Docker Compose ───────────────────────────────────────────
   integration:
     name: Docker Compose Integration
