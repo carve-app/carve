@@ -85,4 +85,70 @@ test.describe('extension — streaming-platform fixtures', () => {
       }
     });
   }
+
+  test('youtube captions render in chunks instead of word-by-word', async ({ browserName }, testInfo) => {
+    test.skip(browserName !== 'chromium', 'Chrome extension fixtures run once under Chromium');
+
+    const fixturePath = path.join(FIXTURES_DIR, 'youtube.html');
+    const fixture = fs.readFileSync(fixturePath, 'utf8').replace('Active YouTube caption text.', '');
+    const fixtureUrl = PLATFORM_URLS.youtube;
+
+    const context = await chromium.launchPersistentContext(testInfo.outputPath('profile-youtube-progressive'), {
+      headless: false,
+      args: [
+        `--disable-extensions-except=${EXTENSION_DIR}`,
+        `--load-extension=${EXTENSION_DIR}`,
+      ],
+    });
+
+    try {
+      let [sw] = context.serviceWorkers();
+      if (!sw) sw = await context.waitForEvent('serviceworker');
+      await sw.evaluate(async () => {
+        await chrome.storage.local.set({ targetLanguage: 'en', annotateLatinSites: true });
+      });
+
+      const page = await context.newPage();
+      await page.route('**/*', (route) => {
+        if (route.request().url() === fixtureUrl) {
+          return route.fulfill({ status: 200, contentType: 'text/html', body: fixture });
+        }
+        return route.abort();
+      });
+      await page.goto(fixtureUrl);
+      await page.waitForFunction(() => !!document.querySelector('#carve-sub-overlay'), { timeout: 5_000 });
+
+      const setCaption = async (text: string) => {
+        await page.evaluate((next) => {
+          const segment = document.querySelector<HTMLElement>('.ytp-caption-segment');
+          if (!segment) throw new Error('missing YouTube caption segment');
+          segment.textContent = next;
+        }, text);
+        await page.waitForTimeout(80);
+      };
+
+      const target = page.locator('#cso-target');
+      await setCaption('I');
+      await expect(target).toHaveText('');
+
+      await setCaption('I had');
+      await expect(target).toHaveText('');
+
+      await setCaption('I had a');
+      await expect(target).toHaveText('');
+
+      await setCaption('I had a conversation');
+      await expect(target).toHaveText('I had a conversation');
+
+      await setCaption('I had a conversation recently');
+      await expect(target).toHaveText('I had a conversation');
+      await page.waitForTimeout(450);
+      await expect(target).toHaveText('I had a conversation');
+
+      await setCaption('I had a conversation recently that I have');
+      await expect(target).toHaveText('I had a conversation recently that I have');
+    } finally {
+      await context.close();
+    }
+  });
 });

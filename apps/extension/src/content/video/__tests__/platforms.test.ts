@@ -151,6 +151,7 @@ describe('dual-subtitle native text capture (textTracks)', () => {
   afterEach(() => {
     for (const hook of mountedHooks) hook.unmount?.();
     mountedHooks = [];
+    vi.unstubAllGlobals();
   });
 
   // Each platform's <video> selector as the hook queries it.
@@ -240,6 +241,123 @@ describe('dual-subtitle native text capture (textTracks)', () => {
     });
   });
 
+  it('loads YouTube timedtext captions from player metadata before the cue starts', async () => {
+    document.documentElement.innerHTML = `
+      <html><body>
+        <script>
+          var ytInitialPlayerResponse = {
+            "videoDetails": { "videoId": "captioned-video" },
+            "captions": {
+              "playerCaptionsTracklistRenderer": {
+                "captionTracks": [{
+                  "baseUrl": "https://www.youtube.com/api/timedtext?v=captioned-video&lang=en",
+                  "languageCode": "en",
+                  "isTranslatable": true,
+                  "name": { "simpleText": "English" }
+                }]
+              }
+            }
+          };
+        </script>
+        <video class="video-stream"></video>
+      </body></html>
+    `;
+    const video = document.querySelector<HTMLVideoElement>('video.video-stream')!;
+    Object.defineProperty(video, 'currentTime', { configurable: true, value: 9.25 });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      events: [{
+        tStartMs: 10_000,
+        dDurationMs: 2_000,
+        segs: [{ utf8: 'Timed text caption.' }],
+      }],
+    })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const overlay = makeStubOverlay();
+    const hook = new YouTubeHook(overlay, 'en');
+    mountedHooks.push(hook);
+    hook.mount();
+    await new Promise((r) => setTimeout(r, 0));
+    await Promise.resolve();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]![0])).toContain('fmt=json3');
+    expect(overlay.onCue).toHaveBeenCalledWith({
+      text: 'Timed text caption.',
+      startMs: 10_000,
+      endMs: 12_000,
+    });
+  });
+
+  it('falls back to the Android VR player response when web captions require a proof token', async () => {
+    document.documentElement.innerHTML = `
+      <html><body>
+        <script>
+          var ytInitialPlayerResponse = {
+            "videoDetails": { "videoId": "token-gated-video" },
+            "captions": {
+              "playerCaptionsTracklistRenderer": {
+                "captionTracks": [{
+                  "baseUrl": "https://www.youtube.com/api/timedtext?v=token-gated-video&ei=web&lang=en&exp=xpe",
+                  "languageCode": "en",
+                  "isTranslatable": true,
+                  "name": { "simpleText": "English" }
+                }]
+              }
+            }
+          };
+        </script>
+        <video class="video-stream"></video>
+      </body></html>
+    `;
+    const video = document.querySelector<HTMLVideoElement>('video.video-stream')!;
+    Object.defineProperty(video, 'currentTime', { configurable: true, value: 10.2 });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/youtubei/v1/player')) {
+        return new Response(JSON.stringify({
+          captions: {
+            playerCaptionsTracklistRenderer: {
+              captionTracks: [{
+                baseUrl: 'https://www.youtube.com/api/timedtext?v=token-gated-video&ei=android&lang=en',
+                languageCode: 'en',
+                isTranslatable: true,
+                name: { simpleText: 'English' },
+              }],
+            },
+          },
+        }));
+      }
+      if (url.includes('ei=web')) return new Response('');
+      if (url.includes('ei=android')) {
+        return new Response(JSON.stringify({
+          events: [{
+            tStartMs: 10_000,
+            dDurationMs: 2_000,
+            segs: [{ utf8: 'Fallback caption.' }],
+          }],
+        }));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const overlay = makeStubOverlay();
+    const hook = new YouTubeHook(overlay, 'en');
+    mountedHooks.push(hook);
+    hook.mount();
+    await new Promise((r) => setTimeout(r, 0));
+    await Promise.resolve();
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/youtubei/v1/player'))).toBe(true);
+    expect(overlay.onCue).toHaveBeenCalledWith({
+      text: 'Fallback caption.',
+      startMs: 10_000,
+      endMs: 12_000,
+    });
+  });
+
   it('clicks YouTube CC when captions are off so text tracks load after navigation', () => {
     document.documentElement.innerHTML = `
       <html><body>
@@ -247,6 +365,30 @@ describe('dual-subtitle native text capture (textTracks)', () => {
         <button class="ytp-subtitles-button" aria-pressed="false"></button>
       </body></html>
     `;
+    const button = document.querySelector<HTMLButtonElement>('.ytp-subtitles-button')!;
+    button.click = vi.fn();
+
+    const overlay = makeStubOverlay();
+    const hook = new YouTubeHook(overlay, 'en');
+    mountedHooks.push(hook);
+    hook.mount();
+
+    expect(button.click).toHaveBeenCalledTimes(1);
+  });
+
+  it('clicks YouTube CC when a target text track exists but has no active cue yet', () => {
+    document.documentElement.innerHTML = `
+      <html><body>
+        <video class="video-stream"></video>
+        <button class="ytp-subtitles-button" aria-pressed="false"></button>
+      </body></html>
+    `;
+    installTextTracks('video.video-stream', [{
+      kind: 'subtitles',
+      language: 'en',
+      mode: 'disabled',
+      activeCues: [],
+    }]);
     const button = document.querySelector<HTMLButtonElement>('.ytp-subtitles-button')!;
     button.click = vi.fn();
 

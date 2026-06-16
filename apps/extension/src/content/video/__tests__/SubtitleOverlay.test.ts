@@ -190,13 +190,40 @@ describe('SubtitleOverlay — cue stabilizer', () => {
     vi.useRealTimers();
   });
 
-  it('renders partial subtitle updates immediately as the cue grows', () => {
+  it('renders growing subtitle prefixes in readable chunks, not word-by-word', () => {
+    vi.useFakeTimers();
     const overlay = new SubtitleOverlay('en', mockVocabCache as any, mockPopupManager as any);
-    overlay.onCue(cue('I had', 0, 500));
-    expect(document.getElementById('cso-target')?.textContent).toBe('I had');
+    overlay.onCue(cue('I', 0, 200));
+    expect(document.getElementById('cso-target')?.textContent).toBe('');
 
-    overlay.onCue(cue('I had a conversation', 0, 1000));
+    overlay.onCue(cue('I had', 0, 400));
+    expect(document.getElementById('cso-target')?.textContent).toBe('');
+
+    overlay.onCue(cue('I had a conversation', 0, 800));
     expect(document.getElementById('cso-target')?.textContent).toBe('I had a conversation');
+
+    overlay.onCue(cue('I had a conversation recently', 0, 1000));
+    expect(document.getElementById('cso-target')?.textContent).toBe('I had a conversation');
+
+    vi.advanceTimersByTime(320);
+    expect(document.getElementById('cso-target')?.textContent).toBe('I had a conversation');
+
+    overlay.onCue(cue('I had a conversation recently that I have', 0, 1400));
+    expect(document.getElementById('cso-target')?.textContent).toBe('I had a conversation recently that I have');
+    overlay.destroy();
+  });
+
+  it('renders a short standalone subtitle after a brief stabilizing delay', () => {
+    vi.useFakeTimers();
+    const overlay = new SubtitleOverlay('en', mockVocabCache as any, mockPopupManager as any);
+    overlay.onCue(cue('Okay', 0, 500));
+    expect(document.getElementById('cso-target')?.textContent).toBe('');
+
+    vi.advanceTimersByTime(319);
+    expect(document.getElementById('cso-target')?.textContent).toBe('');
+
+    vi.advanceTimersByTime(1);
+    expect(document.getElementById('cso-target')?.textContent).toBe('Okay');
     overlay.destroy();
   });
 
@@ -207,12 +234,16 @@ describe('SubtitleOverlay — cue stabilizer', () => {
     overlay.destroy();
   });
 
-  it('renders the next partial immediately after a finalized sentence', () => {
+  it('stabilizes the next short partial after a finalized sentence', () => {
+    vi.useFakeTimers();
     const overlay = new SubtitleOverlay('en', mockVocabCache as any, mockPopupManager as any);
     overlay.onCue(cue('First sentence.', 0, 1000));
     expect(document.getElementById('cso-target')?.textContent).toBe('First sentence.');
 
     overlay.onCue(cue('Second', 1200, 1800));
+    expect(document.getElementById('cso-target')?.textContent).toBe('First sentence.');
+
+    vi.advanceTimersByTime(320);
     expect(document.getElementById('cso-target')?.textContent).toBe('Second');
     overlay.destroy();
   });

@@ -33,6 +33,8 @@ mkdir -p "$LOGDIR" "$MEDIA_DIR"
 # ── Config (override via env) ──────────────────────────────────────────────
 export DATABASE_URL="${DATABASE_URL:-postgres://carve:carve@localhost:5432/carve?sslmode=disable}"
 export JWT_SECRET="${JWT_SECRET:-dev-secret-change-in-production-at-least-32-chars}"
+SEED_EMAIL="${SEED_EMAIL:-dev@carve.app}"
+SEED_PASS="${SEED_PASS:-devpassword123}"
 NLP_PORT=8001
 MEDIA_PORT=8002
 API_PORT=8080
@@ -52,7 +54,7 @@ done
 GOOGLE_CREDS="${CARVE_GOOGLE_CREDS:-${GOOGLE_APPLICATION_CREDENTIALS:-}}"
 if [ -z "$GOOGLE_CREDS" ]; then
   # Best-effort: pick the first SA-looking JSON in ~/Downloads.
-  GOOGLE_CREDS="$(ls "$HOME"/Downloads/default-*.json 2>/dev/null | head -1 || true)"
+  GOOGLE_CREDS="$(find "$HOME/Downloads" -maxdepth 1 -type f -name 'default-*.json' -print 2>/dev/null | head -n 1 || true)"
 fi
 if [ -n "$GOOGLE_CREDS" ] && [ -f "$GOOGLE_CREDS" ]; then
   export GOOGLE_APPLICATION_CREDENTIALS="$GOOGLE_CREDS"
@@ -82,7 +84,7 @@ dc() { docker compose "$@" 2>/dev/null || docker-compose "$@"; }
 
 wait_http() { # url, name, tries
   local url="$1" name="$2" tries="${3:-40}"
-  for i in $(seq 1 "$tries"); do
+  for _ in $(seq 1 "$tries"); do
     if curl -fsS "$url" >/dev/null 2>&1; then echo "  ✓ $name up ($url)"; return 0; fi
     sleep 0.5
   done
@@ -92,7 +94,7 @@ wait_http() { # url, name, tries
 # ── 1. Infra ────────────────────────────────────────────────────────────────
 echo "→ [1/6] Starting postgres + redis (Docker)..."
 dc up -d postgres redis
-for i in $(seq 1 40); do
+for _ in $(seq 1 40); do
   dc exec -T postgres pg_isready -U carve -q 2>/dev/null && break
   sleep 0.5
 done
@@ -101,8 +103,12 @@ echo "  ✓ postgres ready"
 
 # ── 2. Migrations ─────────────────────────────────────────────────────────
 echo "→ [2/6] Applying migrations..."
-( cd services/api && go run ./cmd/migrate --dir ./migrations ) >"$LOGDIR/migrate.log" 2>&1 \
-  && echo "  ✓ migrations applied" || { echo "  ✗ migrations failed — see $LOGDIR/migrate.log"; exit 1; }
+if ( cd services/api && go run ./cmd/migrate --dir ./migrations ) >"$LOGDIR/migrate.log" 2>&1; then
+  echo "  ✓ migrations applied"
+else
+  echo "  ✗ migrations failed — see $LOGDIR/migrate.log"
+  exit 1
+fi
 
 # ── 3. Media service (local-disk storage) ──────────────────────────────────
 echo "→ [3/6] Starting media service :$MEDIA_PORT (local disk: $MEDIA_DIR)..."
@@ -151,7 +157,8 @@ wait_http "http://localhost:$WEB_PORT" web 60 || true  # vite can take a moment
 # ── Optional seed ─────────────────────────────────────────────────────────
 if [ "$SEED" = "1" ]; then
   echo "→ Seeding test data..."
-  API_BASE="http://localhost:$API_PORT" bash scripts/seed-dev.sh || echo "  ⚠ seed failed (see output above)"
+  API_BASE="http://localhost:$API_PORT" SEED_EMAIL="$SEED_EMAIL" SEED_PASS="$SEED_PASS" \
+    bash scripts/seed-dev.sh || echo "  ⚠ seed failed (see output above)"
 fi
 
 cat <<EOF
@@ -166,12 +173,16 @@ cat <<EOF
   Media service  http://localhost:$MEDIA_PORT/health
   Postgres       localhost:5432   redis localhost:6379
 
+  Local credentials:
+    App login     $SEED_EMAIL / $SEED_PASS $( [ "$SEED" = "1" ] && echo "(seeded this run)" || echo "(run make seed once if missing)" )
+    Postgres      $DATABASE_URL
+    Redis         no password
+    MinIO         minioadmin / minioadmin (only when minio is started)
+
   Browser extension (Netflix/YouTube mining, popup, annotation):
     built at apps/extension/dist/chrome — load it unpacked in Chrome
     (chrome://extensions → Developer mode → Load unpacked). It defaults to
     http://localhost:$API_PORT.
-$( [ "$SEED" = "1" ] && echo "
-  Seeded login:  dev@carve.app / devpassword123" )
 
   Logs:   tail -f dev-logs/*.log
   Stop:   Ctrl+C

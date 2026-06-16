@@ -13,9 +13,14 @@ export interface ActiveCue {
 
 const OVERLAY_ID = 'carve-sub-overlay';
 const MAX_HISTORY = 30;
+const CUE_DEFERRED_RENDER_DELAY_MS = 320;
 const CUE_IDLE_FINALIZE_DELAY_MS = 1200;
 const MAX_CHUNK_CHARS = 120;
 const MAX_CUE_GAP_MS = 1600;
+const MIN_INITIAL_CHUNK_WORDS = 4;
+const MIN_INITIAL_CHUNK_CHARS = 16;
+const MIN_CHUNK_ADVANCE_WORDS = 4;
+const MIN_CHUNK_ADVANCE_CHARS = 28;
 const SENTENCE_END_RE = /[.!?。！？…]["')\]]*$/u;
 
 export class SubtitleOverlay {
@@ -33,6 +38,7 @@ export class SubtitleOverlay {
   private readonly updatePositionBound = () => this.updatePosition();
   private pendingCue: ActiveCue | null = null;
   private pendingHistoryIndex = -1;
+  private pendingRenderTimer: number | null = null;
   private pendingFinalizeTimer: number | null = null;
 
   constructor(
@@ -111,15 +117,40 @@ export class SubtitleOverlay {
       endMs: Math.max(pending.endMs, normalized.endMs),
       nativeText: mergeOptionalSubtitleText(pending.nativeText, normalized.nativeText),
     };
-    this.renderPendingCue();
+    this.publishOrSchedulePendingCue();
     this.finalizeOrSchedulePendingCue();
   }
 
   private startPendingCue(cue: ActiveCue): void {
     this.pendingCue = cue;
     this.pendingHistoryIndex = -1;
-    this.renderPendingCue();
+    this.publishOrSchedulePendingCue();
     this.finalizeOrSchedulePendingCue();
+  }
+
+  private publishOrSchedulePendingCue(): void {
+    if (!this.pendingCue) return;
+    if (shouldPublishPendingCue(this.pendingCue.text, this.renderedPendingText())) {
+      this.publishPendingCue();
+      return;
+    }
+    if (!this.renderedPendingText()) {
+      this.schedulePendingRender();
+    }
+  }
+
+  private schedulePendingRender(): void {
+    this.clearPendingRender();
+    this.pendingRenderTimer = window.setTimeout(() => {
+      this.pendingRenderTimer = null;
+      this.publishPendingCue(true);
+    }, CUE_DEFERRED_RENDER_DELAY_MS);
+  }
+
+  private clearPendingRender(): void {
+    if (this.pendingRenderTimer == null) return;
+    window.clearTimeout(this.pendingRenderTimer);
+    this.pendingRenderTimer = null;
   }
 
   private finalizeOrSchedulePendingCue(): void {
@@ -146,14 +177,22 @@ export class SubtitleOverlay {
   }
 
   private finalizePendingCue(): void {
+    if (this.pendingCue && !this.isPendingCueRendered()) {
+      this.publishPendingCue(true);
+    }
+    this.clearPendingRender();
     this.clearPendingFinalize();
     this.pendingCue = null;
     this.pendingHistoryIndex = -1;
   }
 
-  private renderPendingCue(): void {
+  private publishPendingCue(force = false): void {
     const cue = this.pendingCue;
     if (!cue) return;
+    if (!force && !shouldPublishPendingCue(cue.text, this.renderedPendingText())) return;
+    if (this.isPendingCueRendered()) return;
+
+    this.clearPendingRender();
 
     if (this.pendingHistoryIndex >= 0 && this.cueHistory[this.pendingHistoryIndex]) {
       this.cueHistory[this.pendingHistoryIndex] = cue;
@@ -167,6 +206,17 @@ export class SubtitleOverlay {
     this.historyIndex = this.cueHistory.length - 1;
     this.pendingHistoryIndex = this.historyIndex;
     this.renderAt(this.historyIndex);
+  }
+
+  private renderedPendingText(): string | null {
+    if (this.pendingHistoryIndex < 0) return null;
+    return this.cueHistory[this.pendingHistoryIndex]?.text ?? null;
+  }
+
+  private isPendingCueRendered(): boolean {
+    const cue = this.pendingCue;
+    if (!cue) return false;
+    return this.renderedPendingText() === cue.text;
   }
 
   private stepHistory(delta: number): void {
@@ -548,6 +598,7 @@ export class SubtitleOverlay {
     this.nativeHideStyles.forEach((entry) => entry.element.remove());
     this.nativeHideStyles = [];
     this.resumeAfterHover();
+    this.clearPendingRender();
     this.clearPendingFinalize();
     this.resizeObserver?.disconnect();
     window.removeEventListener('resize', this.updatePositionBound);
@@ -580,6 +631,29 @@ function isSentenceComplete(text: string): boolean {
 
 function shouldFinalizeCue(cue: ActiveCue): boolean {
   return isSentenceComplete(cue.text) || cue.text.length >= MAX_CHUNK_CHARS;
+}
+
+function shouldPublishPendingCue(text: string, renderedText: string | null): boolean {
+  if (isSentenceComplete(text) || text.length >= MAX_CHUNK_CHARS) return true;
+
+  if (!renderedText) {
+    return wordCount(text) >= MIN_INITIAL_CHUNK_WORDS
+      || compactCharCount(text) >= MIN_INITIAL_CHUNK_CHARS;
+  }
+
+  if (text === renderedText) return false;
+  if (!text.startsWith(renderedText)) return true;
+
+  return wordCount(text) - wordCount(renderedText) >= MIN_CHUNK_ADVANCE_WORDS
+    || compactCharCount(text) - compactCharCount(renderedText) >= MIN_CHUNK_ADVANCE_CHARS;
+}
+
+function wordCount(text: string): number {
+  return text.trim().split(/\s+/u).filter(Boolean).length;
+}
+
+function compactCharCount(text: string): number {
+  return Array.from(text.replace(/\s+/gu, '')).length;
 }
 
 function mergeOptionalSubtitleText(prev: string | undefined, next: string | undefined): string | undefined {
