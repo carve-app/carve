@@ -22,7 +22,13 @@ vi.mock('../../../shared/browser', () => ({
 import { attachVideoMedia } from '../VideoCapture';
 
 // A fake <video> that records seeks and play/pause, and fires `seeked`.
-function makeVideo(opts: { currentTime?: number; paused?: boolean; rect?: { width: number; height: number }; withStream?: boolean } = {}) {
+function makeVideo(opts: {
+  currentTime?: number;
+  paused?: boolean;
+  rect?: { width: number; height: number };
+  seekableRanges?: Array<[number, number]>;
+  withStream?: boolean;
+} = {}) {
   const listeners: Record<string, Array<() => void>> = {};
   const seeks: number[] = [];
   let _time = opts.currentTime ?? 12;
@@ -48,6 +54,11 @@ function makeVideo(opts: { currentTime?: number; paused?: boolean; rect?: { widt
     getBoundingClientRect() {
       const r = opts.rect ?? { width: 480, height: 270 };
       return { left: 40, top: 50, width: r.width, height: r.height, right: 40 + r.width, bottom: 50 + r.height };
+    },
+    seekable: {
+      length: opts.seekableRanges?.length ?? 0,
+      start(i: number) { return opts.seekableRanges![i]![0]; },
+      end(i: number) { return opts.seekableRanges![i]![1]; },
     },
     textTracks: [],
   };
@@ -87,6 +98,30 @@ describe('attachVideoMedia — exact-cue capture', () => {
 
     expect(res.hasImage).toBe(true);
     expect(res.success).toBe(true);
+  });
+
+  it('captures the current cue moment when cue start is not seekable but playhead is inside the cue', async () => {
+    sendMessage.mockImplementation(async (msg: any) => {
+      if (msg.type === 'CAPTURE_VIDEO_FRAME') return { imageBase64: 'AAAA' };
+      if (msg.type === 'ATTACH_VIDEO_MEDIA') return { success: true, hasImage: true, hasAudio: false };
+      return {};
+    });
+
+    const { video, seeks } = makeVideo({
+      currentTime: 2.6,
+      paused: false,
+      seekableRanges: [[0, 0]],
+    });
+
+    const res = await attachVideoMedia(video, 'card-current', { startMs: 2000, endMs: 5000 });
+
+    expect(seeks).not.toContain(2);
+    const sentFrame = sendMessage.mock.calls.some((c) => c[0].type === 'CAPTURE_VIDEO_FRAME');
+    expect(sentFrame).toBe(true);
+    const attach = sendMessage.mock.calls.map((c) => c[0]).find((m) => m.type === 'ATTACH_VIDEO_MEDIA');
+    expect(attach.startMs).toBe(2000);
+    expect(attach.endMs).toBe(5000);
+    expect(res.hasImage).toBe(true);
   });
 
   it('does NOT request a frame when the video element is invisible (zero-size)', async () => {

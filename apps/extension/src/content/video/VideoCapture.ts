@@ -214,6 +214,25 @@ function seekTo(video: HTMLVideoElement, timeSec: number, timeoutMs = 1500): Pro
   });
 }
 
+function seekabilityAt(video: HTMLVideoElement, timeSec: number): 'seekable' | 'unseekable' | 'unknown' {
+  const ranges = video.seekable;
+  if (!ranges || ranges.length === 0) return 'unknown';
+
+  for (let i = 0; i < ranges.length; i++) {
+    const start = ranges.start(i);
+    const end = ranges.end(i);
+    if (end - start < 0.25) continue;
+    if (timeSec >= start - 0.25 && timeSec <= end + 0.25) return 'seekable';
+  }
+
+  return 'unseekable';
+}
+
+function isInsideCueWindow(timeSec: number, startMs: number, endMs: number): boolean {
+  const timeMs = timeSec * 1000;
+  return timeMs >= startMs - 250 && timeMs <= endMs + 250;
+}
+
 /**
  * Record the EXACT audio of a subtitle cue.
  *
@@ -320,17 +339,24 @@ export async function attachVideoMedia(
 
   const originalTime = video.currentTime;
   const wasPaused = video.paused;
+  const cueStartSec = startMs / 1000;
+  // Some progressive/video-fixture streams play normally but report no useful
+  // seekable range. If the user mines while already inside the cue, keep the
+  // current rendered moment instead of seeking backward and losing all media.
+  const captureAtCurrentCueMoment =
+    isInsideCueWindow(originalTime, startMs, endMs)
+    && seekabilityAt(video, cueStartSec) === 'unseekable';
 
   let imageBase64: string | null = null;
   let audioBlob: Blob | null = null;
   try {
     // 1) Move to the cue start so both frame and audio reflect the mined
-    //    sentence — not wherever the playhead drifted to. On a live stream with
-    //    no seekable window the playhead can't move; `landedAtCue` is false and
-    //    we skip media capture rather than grab the wrong (current) moment.
-    const landedAtCue = await seekTo(video, startMs / 1000);
+    //    sentence — not wherever the playhead drifted to. If the cue start is
+    //    unseekable but the playhead is already inside this cue, capture the
+    //    current rendered sentence moment instead of throwing away media.
+    const canCaptureMedia = captureAtCurrentCueMoment || await seekTo(video, cueStartSec);
 
-    if (landedAtCue) {
+    if (canCaptureMedia) {
       // 2) Capture the frame at the cue start, while paused. Skip entirely when
       //    the video element is not actually rendered (zero-size / display:none)
       //    so we never fall back to a whole-viewport screenshot of unrelated
@@ -343,17 +369,24 @@ export async function attachVideoMedia(
         imageBase64 = frameResult?.imageBase64 ?? null;
       }
 
-      // 3) Record the exact sentence audio (plays from the cue start; a paused
-      //    element yields silence, so recordCueAudio resumes playback itself).
-      audioBlob = await recordCueAudio(video, duration);
+      // 3) Record cue audio. In the normal path this plays from the cue start;
+      //    in the unseekable-current-cue fallback it records the remaining cue.
+      if (!captureAtCurrentCueMoment || !wasPaused) {
+        const recordDuration = captureAtCurrentCueMoment
+          ? Math.min(duration, Math.max(Math.round(endMs - originalTime * 1000), 1000))
+          : duration;
+        audioBlob = await recordCueAudio(video, recordDuration);
+      }
     }
   } finally {
     // 4) ALWAYS restore the user exactly where they were — even if frame or
     //    audio capture threw. Leaving the real player seeked-away or in the
     //    wrong play state would be a jarring, visible regression.
-    try {
-      await seekTo(video, originalTime);
-    } catch {/* best-effort restore */}
+    if (!captureAtCurrentCueMoment) {
+      try {
+        await seekTo(video, originalTime);
+      } catch {/* best-effort restore */}
+    }
     if (wasPaused) {
       video.pause();
     } else {
