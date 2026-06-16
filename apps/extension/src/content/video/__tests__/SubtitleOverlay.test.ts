@@ -33,6 +33,9 @@ const mockVocabCache = {
 const mockPopupManager = {
   showForElement: vi.fn().mockResolvedValue(undefined),
   hidePopup: vi.fn(),
+  scheduleHidePopup: vi.fn(),
+  cancelScheduledHide: vi.fn(),
+  setInteractiveHoverCallbacks: vi.fn(),
 };
 
 import { SubtitleOverlay, type ActiveCue } from '../SubtitleOverlay';
@@ -51,6 +54,9 @@ describe('SubtitleOverlay — cue history', () => {
     mockSendMessage.mockClear();
     mockPopupManager.showForElement.mockClear();
     mockPopupManager.hidePopup.mockClear();
+    mockPopupManager.scheduleHidePopup.mockClear();
+    mockPopupManager.cancelScheduledHide.mockClear();
+    mockPopupManager.setInteractiveHoverCallbacks.mockClear();
     // SubtitleOverlay appends itself to body in constructor
     overlay = new SubtitleOverlay('ja', mockVocabCache as any, mockPopupManager as any);
   });
@@ -116,6 +122,22 @@ describe('SubtitleOverlay — cue history', () => {
   it('hideNativeContainer is a no-op when selector matches nothing', () => {
     expect(() => overlay.hideNativeContainer('.nonexistent')).not.toThrow();
   });
+
+  it('captures mining shortcut before the host video player handles it', () => {
+    const hostHandler = vi.fn();
+    document.addEventListener('keydown', hostHandler);
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'm',
+      bubbles: true,
+      cancelable: true,
+    });
+    document.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(hostHandler).not.toHaveBeenCalled();
+    document.removeEventListener('keydown', hostHandler);
+  });
 });
 
 // ── Video-relative positioning ───────────────────────────────────────────────
@@ -127,6 +149,9 @@ describe('SubtitleOverlay — positioning', () => {
     mockSendMessage.mockClear();
     mockPopupManager.showForElement.mockClear();
     mockPopupManager.hidePopup.mockClear();
+    mockPopupManager.scheduleHidePopup.mockClear();
+    mockPopupManager.cancelScheduledHide.mockClear();
+    mockPopupManager.setInteractiveHoverCallbacks.mockClear();
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1000 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 });
   });
@@ -183,6 +208,9 @@ describe('SubtitleOverlay — cue stabilizer', () => {
     mockSendMessage.mockClear();
     mockPopupManager.showForElement.mockClear();
     mockPopupManager.hidePopup.mockClear();
+    mockPopupManager.scheduleHidePopup.mockClear();
+    mockPopupManager.cancelScheduledHide.mockClear();
+    mockPopupManager.setInteractiveHoverCallbacks.mockClear();
     mockSendMessage.mockResolvedValue({ tokens: [] });
   });
 
@@ -318,7 +346,7 @@ describe('SubtitleOverlay — onCue sends TOKENIZE message', () => {
     overlay.destroy();
   });
 
-  it('pauses video and shows popup immediately when hovering a subtitle token', async () => {
+  it('keeps the subtitle popup interactive during cursor handoff', async () => {
     mockSendMessage.mockResolvedValue({
       tokens: [
         { surface: '勉強', lemma: '勉強', reading_hira: 'べんきょう', is_content_word: true },
@@ -342,9 +370,20 @@ describe('SubtitleOverlay — onCue sends TOKENIZE message', () => {
     expect(video.pause).toHaveBeenCalled();
     expect(mockPopupManager.showForElement).toHaveBeenCalledWith(token);
 
+    token!.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(mockPopupManager.scheduleHidePopup).not.toHaveBeenCalled();
+
+    vi.useFakeTimers();
     document.querySelector<HTMLElement>('.cso-lines')!.dispatchEvent(new MouseEvent('mouseleave'));
-    expect(mockPopupManager.hidePopup).toHaveBeenCalled();
+    expect(mockPopupManager.scheduleHidePopup).toHaveBeenCalled();
+    expect(mockPopupManager.hidePopup).not.toHaveBeenCalled();
+    expect(video.play).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(179);
+    expect(video.play).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
     expect(video.play).toHaveBeenCalled();
+    vi.useRealTimers();
     overlay.destroy();
   });
 });
@@ -357,6 +396,9 @@ describe('SubtitleOverlay — native subtitle', () => {
     document.head.innerHTML = '';
     mockPopupManager.showForElement.mockClear();
     mockPopupManager.hidePopup.mockClear();
+    mockPopupManager.scheduleHidePopup.mockClear();
+    mockPopupManager.cancelScheduledHide.mockClear();
+    mockPopupManager.setInteractiveHoverCallbacks.mockClear();
     mockSendMessage.mockResolvedValue({ tokens: [] });
   });
 

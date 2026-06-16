@@ -71,7 +71,9 @@ function makeVideo(opts: {
 describe('attachVideoMedia — exact-cue capture', () => {
   beforeEach(() => {
     sendMessage.mockReset();
-    (globalThis as any).window = { devicePixelRatio: 1 };
+    document.head.innerHTML = '';
+    document.body.innerHTML = '';
+    Object.defineProperty(window, 'devicePixelRatio', { value: 1, configurable: true });
   });
 
   it('captures the FRAME at the cue start (not the current playhead) and restores position', async () => {
@@ -98,6 +100,34 @@ describe('attachVideoMedia — exact-cue capture', () => {
 
     expect(res.hasImage).toBe(true);
     expect(res.success).toBe(true);
+  });
+
+  it('temporarily hides subtitles and YouTube controls only while capturing the frame', async () => {
+    let captureStyleText = '';
+    sendMessage.mockImplementation(async (msg: any) => {
+      if (msg.type === 'CAPTURE_VIDEO_FRAME') {
+        const style = document.getElementById('carve-video-capture-hide-ui');
+        captureStyleText = style?.textContent ?? '';
+        return { imageBase64: 'AAAA' };
+      }
+      if (msg.type === 'ATTACH_VIDEO_MEDIA') return { success: true, hasImage: true, hasAudio: false };
+      return {};
+    });
+
+    document.body.innerHTML = `
+      <div id="carve-sub-overlay">current subtitle</div>
+      <div class="ytp-chrome-bottom">youtube controls</div>
+    `;
+    const { video } = makeVideo({ currentTime: 12, paused: true });
+
+    await attachVideoMedia(video, 'card-clean-frame', { startMs: 5000, endMs: 8000 });
+
+    expect(captureStyleText).toContain('#carve-sub-overlay');
+    expect(captureStyleText).toContain('.ytp-caption-window-container');
+    expect(captureStyleText).toContain('.ytp-chrome-bottom');
+    expect(captureStyleText).toContain('cursor: none');
+    expect(captureStyleText).not.toContain('.ytp-scroll-min');
+    expect(document.getElementById('carve-video-capture-hide-ui')).toBeNull();
   });
 
   it('captures the current cue moment when cue start is not seekable but playhead is inside the cue', async () => {

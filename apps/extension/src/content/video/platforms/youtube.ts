@@ -4,16 +4,6 @@ import { readAnyActiveTextTrackTiming, readTargetTextTrackCue } from './textTrac
 
 const NATIVE_SELECTOR = '.ytp-caption-window-container, .caption-window';
 const VIDEO_SELECTOR = 'video.html5-main-video, video.video-stream';
-const CAPTION_BUTTON_SELECTOR = [
-  '.ytp-subtitles-button',
-  'button[aria-keyshortcuts="c"]',
-  'button[aria-label*="Subtitles" i]',
-  'button[aria-label*="captions" i]',
-  'button[title*="Subtitles" i]',
-  'button[title*="captions" i]',
-].join(', ');
-const CAPTION_CLICK_THROTTLE_MS = 700;
-const MAX_CONFIDENT_CAPTION_CLICKS = 3;
 const TIMED_TEXT_LOOKAHEAD_MS = 900;
 const TIMED_TEXT_HOLD_MS = 250;
 const ANDROID_VR_CLIENT_NAME = '28';
@@ -58,9 +48,6 @@ export class YouTubeHook {
   private observer: MutationObserver | null = null;
   private pollId: number | null = null;
   private lastCueKey = '';
-  private captionRequestKey = '';
-  private captionClickAttempts = 0;
-  private lastCaptionClickAt = 0;
   private transcriptCues: ActiveCue[] = [];
   private transcriptKey = '';
   private transcriptLoadKey = '';
@@ -80,7 +67,6 @@ export class YouTubeHook {
 
   private checkSubtitle(): void {
     const video = document.querySelector<HTMLVideoElement>(VIDEO_SELECTOR);
-    this.ensureNativeCaptionSource(video);
     this.ensureTimedTextTranscript(video);
 
     const segments = document.querySelectorAll<HTMLElement>('.ytp-caption-segment');
@@ -99,44 +85,6 @@ export class YouTubeHook {
     const { startMs, endMs } = domText ? this.getActiveCueTiming(video) : trackCue ?? defaultTiming();
     const nativeText = extractNativeCueText(video, this.lang);
     this.emitCue({ text, startMs, endMs, nativeText });
-  }
-
-  private ensureNativeCaptionSource(video: HTMLVideoElement | null): void {
-    const activeTargetCue = readTargetTextTrackCue(video, this.lang);
-    if (!video) return;
-    this.resetCaptionRequestState(video);
-    if (activeTargetCue?.text || this.hasNativeCaptionText()) return;
-    this.clickCaptionButtonIfNeeded();
-  }
-
-  private resetCaptionRequestState(video: HTMLVideoElement): void {
-    const key = `${location.href}::${video.currentSrc || video.src || ''}`;
-    if (key === this.captionRequestKey) return;
-    this.captionRequestKey = key;
-    this.captionClickAttempts = 0;
-    this.lastCaptionClickAt = 0;
-  }
-
-  private hasNativeCaptionText(): boolean {
-    return Array.from(document.querySelectorAll<HTMLElement>('.ytp-caption-segment'))
-      .some((el) => Boolean(el.textContent?.trim()));
-  }
-
-  private clickCaptionButtonIfNeeded(): void {
-    const button = document.querySelector<HTMLButtonElement>(CAPTION_BUTTON_SELECTOR);
-    if (!button || button.disabled || !button.isConnected) return;
-
-    const state = captionButtonState(button);
-    if (state === 'on') return;
-    if (state === 'unknown' && this.captionClickAttempts > 0) return;
-    if (state === 'off' && this.captionClickAttempts >= MAX_CONFIDENT_CAPTION_CLICKS) return;
-
-    const now = Date.now();
-    if (now - this.lastCaptionClickAt < CAPTION_CLICK_THROTTLE_MS) return;
-
-    this.captionClickAttempts += 1;
-    this.lastCaptionClickAt = now;
-    button.click();
   }
 
   private ensureTimedTextTranscript(video: HTMLVideoElement | null): void {
@@ -218,23 +166,6 @@ export class YouTubeHook {
     if (this.pollId != null) window.clearInterval(this.pollId);
     this.overlay.showNativeContainer(NATIVE_SELECTOR);
   }
-}
-
-function captionButtonState(button: HTMLButtonElement): 'on' | 'off' | 'unknown' {
-  const pressed = button.getAttribute('aria-pressed');
-  if (pressed === 'true') return 'on';
-  if (pressed === 'false') return 'off';
-
-  const label = [
-    button.getAttribute('aria-label'),
-    button.getAttribute('title'),
-    button.getAttribute('data-title-no-tooltip'),
-    button.textContent,
-  ].filter(Boolean).join(' ').toLowerCase();
-
-  if (/\b(turn off|disable|hide|off)\b/.test(label)) return 'on';
-  if (/\b(turn on|enable|show|on)\b/.test(label)) return 'off';
-  return 'unknown';
 }
 
 function findTimedTextCue(cues: ActiveCue[], currentMs: number): ActiveCue | null {

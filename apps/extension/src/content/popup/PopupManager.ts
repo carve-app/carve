@@ -2,15 +2,26 @@ import { browser } from '../../shared/browser';
 import type { VocabCache } from '../../nlp/VocabCache';
 import type { DictEntry, FuriganaSpan } from '../../shared/types';
 
+export interface PopupHoverCallbacks {
+  onEnter?: () => void;
+  onLeave?: () => void;
+}
+
 export class PopupManager {
   private popup: HTMLElement | null = null;
   private currentToken: HTMLElement | null = null;
+  private hideTimer: number | null = null;
+  private hoverCallbacks: PopupHoverCallbacks | null = null;
 
   constructor(
     private language: string,
     private vocabCache: VocabCache,
   ) {
     this.setupListeners();
+  }
+
+  setInteractiveHoverCallbacks(callbacks: PopupHoverCallbacks | null): void {
+    this.hoverCallbacks = callbacks;
   }
 
   private setupListeners(): void {
@@ -33,6 +44,7 @@ export class PopupManager {
   }
 
   private async showPopupForToken(tokenEl: HTMLElement): Promise<void> {
+    this.cancelScheduledHide();
     if (this.currentToken === tokenEl) return;
     this.currentToken = tokenEl;
 
@@ -297,6 +309,14 @@ export class PopupManager {
       this.popup = document.createElement('div');
       this.popup.id = 'carve-popup';
       this.popup.setAttribute('data-carve', 'ui');
+      this.popup.addEventListener('mouseenter', () => {
+        this.cancelScheduledHide();
+        this.hoverCallbacks?.onEnter?.();
+      });
+      this.popup.addEventListener('mouseleave', () => {
+        this.hoverCallbacks?.onLeave?.();
+        this.scheduleHidePopup();
+      });
       document.body.appendChild(this.popup);
     }
     return this.popup;
@@ -506,10 +526,22 @@ export class PopupManager {
   }
 
   hidePopup(): void {
+    this.cancelScheduledHide();
     if (this.popup) {
       this.popup.style.display = 'none';
     }
     this.currentToken = null;
+  }
+
+  scheduleHidePopup(delayMs = 180): void {
+    this.cancelScheduledHide();
+    this.hideTimer = window.setTimeout(() => this.hidePopup(), delayMs);
+  }
+
+  cancelScheduledHide(): void {
+    if (this.hideTimer == null) return;
+    window.clearTimeout(this.hideTimer);
+    this.hideTimer = null;
   }
 
   /**

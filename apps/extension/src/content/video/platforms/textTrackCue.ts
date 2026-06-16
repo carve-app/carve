@@ -78,15 +78,7 @@ export function readTargetTextTrackCue(
 ): TextTrackCueSnapshot | null {
   const track = chooseTargetTrack(video, targetLang);
   if (!track) return null;
-
-  if (track.mode === 'disabled') {
-    try {
-      track.mode = 'hidden';
-    } catch {
-      // Some streaming players expose read-only track objects. In that case,
-      // fall through and use active cues if the browser still provides them.
-    }
-  }
+  if (track.mode === 'disabled') return null;
 
   return cueSnapshot(track);
 }

@@ -216,7 +216,7 @@ describe('dual-subtitle native text capture (textTracks)', () => {
     });
   }
 
-  it('uses a hidden target text track when native subtitle DOM is absent', async () => {
+  it('does not activate a disabled target text track when native subtitle DOM is absent', async () => {
     document.documentElement.innerHTML = '<html><body><video class="video-stream"></video></body></html>';
     const tracks: FakeTrack[] = [{
       kind: 'subtitles',
@@ -232,13 +232,8 @@ describe('dual-subtitle native text capture (textTracks)', () => {
     hook.mount();
     await new Promise((r) => setTimeout(r, 0));
 
-    expect(tracks[0].mode).toBe('hidden');
-    expect(overlay.onCue).toHaveBeenCalled();
-    expect(overlay.cues[0]).toMatchObject({
-      text: 'Hidden text-track caption.',
-      startMs: 12000,
-      endMs: 14500,
-    });
+    expect(tracks[0].mode).toBe('disabled');
+    expect(overlay.onCue).not.toHaveBeenCalled();
   });
 
   it('loads YouTube timedtext captions from player metadata before the cue starts', async () => {
@@ -358,7 +353,7 @@ describe('dual-subtitle native text capture (textTracks)', () => {
     });
   });
 
-  it('clicks YouTube CC when captions are off so text tracks load after navigation', () => {
+  it('does not click YouTube CC when captions are off', () => {
     document.documentElement.innerHTML = `
       <html><body>
         <video class="video-stream"></video>
@@ -373,10 +368,10 @@ describe('dual-subtitle native text capture (textTracks)', () => {
     mountedHooks.push(hook);
     hook.mount();
 
-    expect(button.click).toHaveBeenCalledTimes(1);
+    expect(button.click).not.toHaveBeenCalled();
   });
 
-  it('clicks YouTube CC when a target text track exists but has no active cue yet', () => {
+  it('does not click YouTube CC when a target text track exists but has no active cue yet', () => {
     document.documentElement.innerHTML = `
       <html><body>
         <video class="video-stream"></video>
@@ -397,10 +392,10 @@ describe('dual-subtitle native text capture (textTracks)', () => {
     mountedHooks.push(hook);
     hook.mount();
 
-    expect(button.click).toHaveBeenCalledTimes(1);
+    expect(button.click).not.toHaveBeenCalled();
   });
 
-  it('clicks YouTube CC once when YouTube exposes no aria pressed state', async () => {
+  it('does not click YouTube CC when YouTube exposes no aria pressed state', async () => {
     document.documentElement.innerHTML = `
       <html><body>
         <video class="video-stream"></video>
@@ -417,7 +412,7 @@ describe('dual-subtitle native text capture (textTracks)', () => {
     document.body.appendChild(document.createElement('div'));
     await new Promise((r) => setTimeout(r, 0));
 
-    expect(button.click).toHaveBeenCalledTimes(1);
+    expect(button.click).not.toHaveBeenCalled();
   });
 
   it('does not click YouTube CC when captions already look enabled', () => {

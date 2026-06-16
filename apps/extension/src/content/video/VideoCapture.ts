@@ -1,5 +1,42 @@
 import { browser } from '../../shared/browser';
 
+const CAPTURE_HIDE_STYLE_ID = 'carve-video-capture-hide-ui';
+const CAPTURE_HIDE_SELECTORS = [
+  '#carve-sub-overlay',
+  '#carve-popup',
+  '.ytp-caption-window-container',
+  '.caption-window',
+  '.ytp-chrome-top',
+  '.ytp-chrome-bottom',
+  '.ytp-gradient-top',
+  '.ytp-gradient-bottom',
+  '.ytp-bezel',
+  '.ytp-bezel-text',
+  '.ytp-bezel-text-wrapper',
+  '.ytp-pause-overlay',
+  '.ytp-spinner',
+  '.ytp-cards-button',
+  '.ytp-cards-teaser',
+  '.ytp-ce-element',
+  '.ytp-paid-content-overlay',
+  '.ytp-tooltip',
+  '.ytp-popup',
+  '.ytp-settings-menu',
+  '.ytp-volume-panel',
+  '.ytp-volume-popup',
+  '.ytp-volume-slider',
+  '.ytp-title',
+  '.ytp-show-cards-title',
+  '.ytp-watermark',
+  '.iv-branding',
+  '.ytp-iv-player-content',
+  '.ytp-suggested-action',
+  '.ytp-autonav-endscreen-countdown-container',
+  '.ytp-upnext',
+  '.html5-endscreen',
+  '.annotation',
+];
+
 export interface CaptureResult {
   imageBlob: Blob | null;
   audioBlob: Blob | null;
@@ -176,6 +213,70 @@ function blobToBase64(blob: Blob): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error('read failed'));
     reader.readAsDataURL(blob);
   });
+}
+
+function nextFrame(): Promise<void> {
+  return new Promise(resolve => {
+    const raf = window.requestAnimationFrame
+      ?? ((cb: FrameRequestCallback) => window.setTimeout(() => cb(Date.now()), 16));
+    raf(() => resolve());
+  });
+}
+
+function isYouTubePage(): boolean {
+  const host = window.location.hostname;
+  return host === 'youtube.com' || host.endsWith('.youtube.com') || host === 'youtu.be';
+}
+
+async function withCleanVideoFrame<T>(capture: () => Promise<T>): Promise<T> {
+  const previous = document.getElementById(CAPTURE_HIDE_STYLE_ID);
+  previous?.remove();
+
+  const style = document.createElement('style');
+  style.id = CAPTURE_HIDE_STYLE_ID;
+  style.textContent = `
+${CAPTURE_HIDE_SELECTORS.join(',\n')} {
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+html, body, video, #movie_player, .html5-video-player {
+  cursor: none !important;
+}
+*, *::before, *::after {
+  cursor: none !important;
+}
+`;
+  (document.head || document.documentElement).appendChild(style);
+
+  try {
+    await nextFrame();
+    await nextFrame();
+    return await capture();
+  } finally {
+    style.remove();
+  }
+}
+
+async function captureCleanFrameBase64(
+  video: HTMLVideoElement,
+  rect: { x: number; y: number; width: number; height: number },
+  dpr: number,
+): Promise<string | null> {
+  // YouTube is not DRM-protected, and a direct video-frame capture is cleaner:
+  // no subtitles, no player chrome, no hover cursor. DRM sites still use the
+  // compositor screenshot fallback below.
+  if (isYouTubePage()) {
+    const directFrame = await captureFrame(video);
+    if (directFrame && directFrame.size > 0) {
+      const base64 = await blobToBase64(directFrame).catch(() => '');
+      if (base64) return base64;
+    }
+  }
+
+  const frameResult = await withCleanVideoFrame(() =>
+    browser.runtime.sendMessage({ type: 'CAPTURE_VIDEO_FRAME', rect, dpr }),
+  );
+  return frameResult?.imageBase64 ?? null;
 }
 
 /**
@@ -365,8 +466,7 @@ export async function attachVideoMedia(
       if (r.width >= 16 && r.height >= 16) {
         const rect = { x: r.left, y: r.top, width: r.width, height: r.height };
         const dpr = window.devicePixelRatio || 1;
-        const frameResult = await browser.runtime.sendMessage({ type: 'CAPTURE_VIDEO_FRAME', rect, dpr });
-        imageBase64 = frameResult?.imageBase64 ?? null;
+        imageBase64 = await captureCleanFrameBase64(video, rect, dpr);
       }
 
       // 3) Record cue audio. In the normal path this plays from the cue start;

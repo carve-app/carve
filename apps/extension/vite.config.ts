@@ -50,6 +50,7 @@ export default defineConfig({
           viteStaticCopy({
             targets: [
               { src: `src/manifest.${BROWSER}.json`, dest: '.', rename: 'manifest.json' },
+              { src: 'src/content/shortcut-bridge.js', dest: 'content' },
               { src: 'src/icons/*', dest: 'icons' },
               { src: 'src/popup-page/popup.html', dest: 'popup', rename: 'index.html' },
               { src: 'src/wasm/ja_tokenizer_bg.wasm', dest: 'wasm' },

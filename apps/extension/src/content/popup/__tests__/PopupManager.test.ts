@@ -135,4 +135,32 @@ describe('PopupManager', () => {
     expect(vocabCache.markKnown).not.toHaveBeenCalled();
     expect(token.getAttribute('data-status')).toBe('known');
   });
+
+  it('keeps the popup open when the cursor moves from token to popup', async () => {
+    vi.useFakeTimers();
+    const token = makeToken();
+    const manager = new PopupManager('en', vocabCache as any);
+    const onEnter = vi.fn();
+    const onLeave = vi.fn();
+    manager.setInteractiveHoverCallbacks({ onEnter, onLeave });
+
+    await manager.showForElement(token);
+
+    const popup = document.getElementById('carve-popup')!;
+    expect(popup.style.display).toBe('block');
+
+    manager.scheduleHidePopup();
+    vi.advanceTimersByTime(120);
+    popup.dispatchEvent(new MouseEvent('mouseenter'));
+    expect(onEnter).toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1000);
+    expect(popup.style.display).toBe('block');
+
+    popup.dispatchEvent(new MouseEvent('mouseleave'));
+    expect(onLeave).toHaveBeenCalled();
+    vi.advanceTimersByTime(180);
+    expect(popup.style.display).toBe('none');
+    vi.useRealTimers();
+  });
 });

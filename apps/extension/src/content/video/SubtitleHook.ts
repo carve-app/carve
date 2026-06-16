@@ -8,7 +8,8 @@ import { AmazonPrimeHook } from './platforms/amazonprime';
 import { CrunchyrollHook } from './platforms/crunchyroll';
 import { VikiHook } from './platforms/viki';
 
-type HookCtor = new (overlay: SubtitleOverlay, lang: string) => { mount: () => void; unmount?: () => void };
+type PlatformHook = { mount: () => void; unmount?: () => void };
+type HookCtor = new (overlay: SubtitleOverlay, lang: string) => PlatformHook;
 
 const PLATFORM_HOOKS: { match: RegExp; ctor: HookCtor }[] = [
   { match: /netflix\.com\/watch/,           ctor: NetflixHook },
@@ -21,23 +22,28 @@ const PLATFORM_HOOKS: { match: RegExp; ctor: HookCtor }[] = [
 
 export class SubtitleHook {
   private overlay: SubtitleOverlay | null = null;
+  private platformHook: PlatformHook | null = null;
 
   constructor(
     private lang: string,
     private vocabCache: VocabCache,
     private popupManager: PopupManager,
+    private platformHooks = PLATFORM_HOOKS,
   ) {}
 
   mount(): void {
     const url = window.location.href;
-    const platform = PLATFORM_HOOKS.find(p => p.match.test(url));
+    const platform = this.platformHooks.find(p => p.match.test(url));
     if (!platform) return;
 
     this.overlay = new SubtitleOverlay(this.lang, this.vocabCache, this.popupManager);
-    new platform.ctor(this.overlay, this.lang).mount();
+    this.platformHook = new platform.ctor(this.overlay, this.lang);
+    this.platformHook.mount();
   }
 
   destroy(): void {
+    this.platformHook?.unmount?.();
+    this.platformHook = null;
     this.overlay?.destroy();
     this.overlay = null;
   }

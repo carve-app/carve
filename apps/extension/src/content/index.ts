@@ -5,6 +5,7 @@ import { PopupManager } from './popup/PopupManager';
 import { ImmersionTracker } from './tracker/ImmersionTracker';
 import { SubtitleHook } from './video/SubtitleHook';
 import { injectStyles } from './annotator/styles';
+import { VIDEO_SHORTCUT_EVENT, type VideoShortcutAction } from './video/shortcutEvents';
 
 // All active subsystems are held so the "enable on this site" toggle can tear
 // them down (and rebuild them) cleanly, without a page reload. `active` guards
@@ -14,6 +15,36 @@ let subtitleHook: SubtitleHook | null = null;
 let immersionTracker: ImmersionTracker | null = null;
 let active = false;
 let overlayVisible = false;
+
+function isEditableShortcutTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target instanceof HTMLInputElement
+    || target instanceof HTMLTextAreaElement
+    || target.isContentEditable;
+}
+
+function reserveVideoShortcuts(): void {
+  const handler = (e: KeyboardEvent) => {
+    if (isEditableShortcutTarget(e.target)) return;
+    if (!document.getElementById('carve-sub-overlay')) return;
+
+    let action: VideoShortcutAction | null = null;
+    if (e.key === 'ArrowLeft') action = 'prev';
+    else if (e.key === 'ArrowRight') action = 'next';
+    else if (e.key.toLowerCase() === 'm' && !e.ctrlKey && !e.metaKey) action = 'mine';
+    if (!action) return;
+
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (e.type === 'keydown') {
+      window.dispatchEvent(new CustomEvent(VIDEO_SHORTCUT_EVENT, { detail: { action } }));
+    }
+  };
+
+  window.addEventListener('keydown', handler, true);
+  window.addEventListener('keypress', handler, true);
+  window.addEventListener('keyup', handler, true);
+}
 
 async function isSiteDisabled(): Promise<boolean> {
   const result = await browser.storage.local.get('disabledDomains');
@@ -217,4 +248,5 @@ if (document.readyState === 'loading') {
 } else {
   init();
 }
+reserveVideoShortcuts();
 watchSpaNavigation();

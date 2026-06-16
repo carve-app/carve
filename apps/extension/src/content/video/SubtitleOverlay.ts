@@ -3,6 +3,7 @@ import type { VocabCache } from '../../nlp/VocabCache';
 import type { PopupManager } from '../popup/PopupManager';
 import type { Token } from '../../shared/types';
 import { getVideoElement, attachVideoMedia } from './VideoCapture';
+import { VIDEO_SHORTCUT_EVENT, type VideoShortcutAction } from './shortcutEvents';
 
 export interface ActiveCue {
   text: string;
@@ -30,8 +31,10 @@ export class SubtitleOverlay {
   private showNative = true;
   private miningInProgress = false;
   private keyHandler: ((e: KeyboardEvent) => void) | null = null;
+  private shortcutHandler: ((e: Event) => void) | null = null;
   private renderVersion = 0;
   private hoverPausedVideo: HTMLVideoElement | null = null;
+  private hoverResumeTimer: number | null = null;
   private nativeHideStyles: Array<{ selector: string; element: HTMLStyleElement }> = [];
   private resizeObserver: ResizeObserver | null = null;
   private observedVideo: HTMLVideoElement | null = null;
@@ -48,6 +51,15 @@ export class SubtitleOverlay {
   ) {
     this.container = this.buildContainer();
     document.body.appendChild(this.container);
+    this.popupManager.setInteractiveHoverCallbacks({
+      onEnter: () => {
+        this.cancelHoverResume();
+        this.pauseForHover();
+      },
+      onLeave: () => {
+        this.scheduleResumeAfterHover();
+      },
+    });
     this.bindPositionUpdates();
     this.updatePosition();
     this.bindKeys();
@@ -73,10 +85,14 @@ export class SubtitleOverlay {
     }
 
     const lines = el.querySelector<HTMLElement>('.cso-lines');
-    lines?.addEventListener('mouseenter', () => this.pauseForHover());
+    lines?.addEventListener('mouseenter', () => {
+      this.popupManager.cancelScheduledHide();
+      this.cancelHoverResume();
+      this.pauseForHover();
+    });
     lines?.addEventListener('mouseleave', () => {
-      this.popupManager.hidePopup();
-      this.resumeAfterHover();
+      this.popupManager.scheduleHidePopup();
+      this.scheduleResumeAfterHover();
     });
 
     return el;
@@ -280,14 +296,14 @@ export class SubtitleOverlay {
         if (tok.is_content_word) {
           span.classList.add(`cso-${this.vocabCache.getStatus(tok.lemma)}`);
           span.addEventListener('mouseenter', () => {
+            this.popupManager.cancelScheduledHide();
+            this.cancelHoverResume();
             this.pauseForHover();
             void this.popupManager.showForElement(span);
           });
-          span.addEventListener('mouseleave', () => {
-            this.popupManager.hidePopup();
-          });
           span.addEventListener('click', e => {
             e.stopPropagation();
+            this.popupManager.cancelScheduledHide();
             this.popupManager.showForElement(span);
           });
         }
@@ -548,6 +564,7 @@ export class SubtitleOverlay {
   }
 
   private resumeAfterHover(): void {
+    this.cancelHoverResume();
     const video = this.hoverPausedVideo;
     this.hoverPausedVideo = null;
     if (!video || !video.paused) return;
@@ -557,17 +574,52 @@ export class SubtitleOverlay {
     });
   }
 
+  private scheduleResumeAfterHover(delayMs = 180): void {
+    this.cancelHoverResume();
+    this.hoverResumeTimer = window.setTimeout(() => {
+      this.hoverResumeTimer = null;
+      this.resumeAfterHover();
+    }, delayMs);
+  }
+
+  private cancelHoverResume(): void {
+    if (this.hoverResumeTimer == null) return;
+    window.clearTimeout(this.hoverResumeTimer);
+    this.hoverResumeTimer = null;
+  }
+
   private bindKeys(): void {
-    this.keyHandler = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (e.key === 'ArrowLeft') { e.preventDefault(); this.stepHistory(-1); }
-      else if (e.key === 'ArrowRight') { e.preventDefault(); this.stepHistory(+1); }
-      else if (e.key.toLowerCase() === 'm' && !e.ctrlKey && !e.metaKey) {
-        e.preventDefault();
-        this.mineCurrentCue();
+    const runShortcut = (action: VideoShortcutAction) => {
+      if (action === 'prev') this.stepHistory(-1);
+      else if (action === 'next') this.stepHistory(+1);
+      else this.mineCurrentCue();
+    };
+
+    this.shortcutHandler = (e: Event) => {
+      const action = (e as CustomEvent<{ action?: VideoShortcutAction }>).detail?.action;
+      if (action === 'prev' || action === 'next' || action === 'mine') {
+        runShortcut(action);
       }
     };
-    document.addEventListener('keydown', this.keyHandler);
+    window.addEventListener(VIDEO_SHORTCUT_EVENT, this.shortcutHandler);
+
+    this.keyHandler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        runShortcut('prev');
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        runShortcut('next');
+      } else if (e.key.toLowerCase() === 'm' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        runShortcut('mine');
+      }
+    };
+    document.addEventListener('keydown', this.keyHandler, true);
   }
 
   /** Hide the native subtitle container for a given selector. */
@@ -598,6 +650,7 @@ export class SubtitleOverlay {
     this.nativeHideStyles.forEach((entry) => entry.element.remove());
     this.nativeHideStyles = [];
     this.resumeAfterHover();
+    this.popupManager.setInteractiveHoverCallbacks(null);
     this.clearPendingRender();
     this.clearPendingFinalize();
     this.resizeObserver?.disconnect();
@@ -605,7 +658,8 @@ export class SubtitleOverlay {
     window.removeEventListener('scroll', this.updatePositionBound, true);
     document.removeEventListener('fullscreenchange', this.updatePositionBound);
     this.container.remove();
-    if (this.keyHandler) document.removeEventListener('keydown', this.keyHandler);
+    if (this.shortcutHandler) window.removeEventListener(VIDEO_SHORTCUT_EVENT, this.shortcutHandler);
+    if (this.keyHandler) document.removeEventListener('keydown', this.keyHandler, true);
     document.getElementById('carve-sub-overlay-styles')?.remove();
   }
 }
