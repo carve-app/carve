@@ -432,75 +432,8 @@ def score_text(
     known = set(req.known_lemmas)
     learning = set(req.learning_lemmas)
 
-    if req.language == "ja":
-        result = _ja_tokenizer.tokenize(req.text)
-        s = score_content(result.tokens, known, learning)
-    elif req.language in ("zh-cn", "zh-tw", "zh"):
-        zh_result = _zh_tokenizer.tokenize(req.text)
-        content = [t for t in zh_result.tokens if t.is_content_word]
-        known_ct = sum(1 for t in content if t.lemma in known or t.lemma in learning)
-        total = len(content) or 1
-        pct = round(known_ct / total * 100, 1)
-        from .scorer import ContentScore
-        s = ContentScore(
-            comprehension_pct=pct,
-            difficulty_score=round(1.0 - pct / 100, 2),
-            total_content_words=total,
-            unknown_count=total - known_ct,
-            learning_count=0,
-            recommended_mode="mining_read" if pct >= 90 else "study_read" if pct >= 80 else "too_hard",
-            top_unknown_lemmas=[t.lemma for t in content if t.lemma not in known and t.lemma not in learning][:10],
-        )
-    elif req.language == "ko":
-        ko_result = _ko_tokenizer.tokenize(req.text)
-        content = [t for t in ko_result.tokens if t.is_content_word]
-        known_ct = sum(1 for t in content if t.lemma in known or t.lemma in learning)
-        total = len(content) or 1
-        pct = round(known_ct / total * 100, 1)
-        from .scorer import ContentScore
-        s = ContentScore(
-            comprehension_pct=pct,
-            difficulty_score=round(1.0 - pct / 100, 2),
-            total_content_words=total,
-            unknown_count=total - known_ct,
-            learning_count=0,
-            recommended_mode="mining_read" if pct >= 90 else "study_read" if pct >= 80 else "too_hard",
-            top_unknown_lemmas=[t.lemma for t in content if t.lemma not in known and t.lemma not in learning][:10],
-        )
-    elif req.language == "en":
-        en_result = _en_tokenizer.tokenize(req.text)
-        content = [t for t in en_result.tokens if t.is_content_word]
-        known_ct = sum(1 for t in content if t.lemma in known or t.lemma in learning)
-        total = len(content) or 1
-        pct = round(known_ct / total * 100, 1)
-        from .scorer import ContentScore
-        s = ContentScore(
-            comprehension_pct=pct,
-            difficulty_score=round(1.0 - pct / 100, 2),
-            total_content_words=total,
-            unknown_count=total - known_ct,
-            learning_count=0,
-            recommended_mode="mining_read" if pct >= 90 else "study_read" if pct >= 80 else "too_hard",
-            top_unknown_lemmas=[t.lemma for t in content if t.lemma not in known and t.lemma not in learning][:10],
-        )
-    elif req.language in _latin_tokenizers:
-        latin_result = _latin_tokenizers[req.language].tokenize(req.text)
-        content = [t for t in latin_result.tokens if t.is_content_word]
-        known_ct = sum(1 for t in content if t.lemma in known or t.lemma in learning)
-        total = len(content) or 1
-        pct = round(known_ct / total * 100, 1)
-        from .scorer import ContentScore
-        s = ContentScore(
-            comprehension_pct=pct,
-            difficulty_score=round(1.0 - pct / 100, 2),
-            total_content_words=total,
-            unknown_count=total - known_ct,
-            learning_count=0,
-            recommended_mode="mining_read" if pct >= 90 else "study_read" if pct >= 80 else "too_hard",
-            top_unknown_lemmas=[t.lemma for t in content if t.lemma not in known and t.lemma not in learning][:10],
-        )
-    else:
-        raise HTTPException(status_code=422, detail=f"Language '{req.language}' not yet supported")
+    tokens = _tokenize_for_language(req.text, req.language)
+    s = score_content(tokens, known, learning)
 
     return ScoreResponse(
         comprehension_pct=s.comprehension_pct,
