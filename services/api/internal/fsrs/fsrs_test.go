@@ -290,6 +290,18 @@ func TestLeechNotTriggeredBelowThreshold(t *testing.T) {
 	}
 }
 
+func TestCustomLeechThreshold(t *testing.T) {
+	custom := p
+	custom.LeechThreshold = 2
+	c := CardState{
+		State: StateReview, Stability: 5, Difficulty: 8,
+		LastReview: now.Add(-7 * 24 * time.Hour), Lapses: 1,
+	}
+	if res := Schedule(custom, c, Again, now); !res.IsLeech || res.Lapses != 2 {
+		t.Fatalf("custom threshold not applied: %+v", res)
+	}
+}
+
 // ── Relearning state ──────────────────────────────────────────────────────────
 
 func TestRelearningGoodGraduates(t *testing.T) {

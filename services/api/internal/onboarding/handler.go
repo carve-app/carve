@@ -114,12 +114,45 @@ func (h *Handler) StarterDeck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.db.Exec(ctx,
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx,
 		`INSERT INTO user_deck_subscriptions (user_id, deck_id)
 		 VALUES ($1, $2)
 		 ON CONFLICT (user_id, deck_id) DO NOTHING`,
 		claims.UserID, deckID,
-	)
+	); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO cards
+		    (id, user_id, deck_id, language_code, front_text, back_text, sentence, fsrs_state)
+		 SELECT gen_random_uuid(), $1, c.deck_id, c.language_code,
+		        c.front_text, c.back_text, c.sentence, 'new'
+		 FROM cards c
+		 WHERE c.deck_id = $2
+		   AND c.deleted_at IS NULL
+		   AND NOT EXISTS (
+		     SELECT 1 FROM cards existing
+		     WHERE existing.user_id = $1
+		       AND existing.deck_id = $2
+		       AND existing.front_text = c.front_text
+		       AND existing.deleted_at IS NULL
+		   )`,
+		claims.UserID, deckID,
+	); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"deck_id": deckID, "status": "subscribed"})
 }

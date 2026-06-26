@@ -228,6 +228,20 @@ async function showDueCount(): Promise<void> {
   }
 
   document.getElementById('logout-btn')!.addEventListener('click', async () => {
+    const stored = await browser.storage.local.get('refreshToken');
+    const refreshToken = stored['refreshToken'] as string | undefined;
+    if (refreshToken) {
+      try {
+        const base = await getApiBase();
+        await fetch(`${base}/v1/auth/logout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+      } catch {
+        // Local logout must still complete while the API is unreachable.
+      }
+    }
     await clearToken();
     showLogin();
   });

@@ -50,11 +50,12 @@ func (h *Handler) loadParamsDB(r *http.Request, userID, lang string) fsrs.Params
 	p := fsrs.DefaultParams()
 	var weightsJSON []byte
 	var retention float64
+	var leechThreshold int
 	err := h.db.QueryRow(r.Context(),
-		`SELECT weights, target_retention FROM user_fsrs_params
+		`SELECT weights, target_retention, leech_threshold FROM user_fsrs_params
 		 WHERE user_id = $1 AND language_code = $2`,
 		userID, lang,
-	).Scan(&weightsJSON, &retention)
+	).Scan(&weightsJSON, &retention, &leechThreshold)
 	if err != nil {
 		return p // default
 	}
@@ -66,6 +67,9 @@ func (h *Handler) loadParamsDB(r *http.Request, userID, lang string) fsrs.Params
 	}
 	if retention > 0 && retention < 1 {
 		p.TargetRetention = retention
+	}
+	if leechThreshold > 0 {
+		p.LeechThreshold = leechThreshold
 	}
 	return p
 }
@@ -83,23 +87,35 @@ func (h *Handler) DueCount(w http.ResponseWriter, r *http.Request) {
 	if language == "" {
 		language = "ja"
 	}
+	_, _ = h.db.Exec(r.Context(),
+		`UPDATE cards SET buried = FALSE, buried_until = NULL
+		 WHERE user_id = $1 AND buried = TRUE AND buried_until <= CURRENT_DATE`,
+		claims.UserID,
+	)
 
-	var count int
+	dailyNewLimit := h.dailyNewRemaining(r.Context(), claims.UserID, language)
+	var scheduledCount, newCount int
 	err := h.db.QueryRow(r.Context(),
-		`SELECT COUNT(*) FROM cards
+		`SELECT
+		   COUNT(*) FILTER (WHERE fsrs_state <> 'new' AND fsrs_due <= now()),
+		   COUNT(*) FILTER (WHERE fsrs_state = 'new')
+		 FROM cards
 		 WHERE user_id = $1
 		   AND language_code = $2
 		   AND deleted_at IS NULL
 		   AND suspended = FALSE
-		   AND buried = FALSE
-		   AND (fsrs_state = 'new' OR fsrs_due <= now())`,
+		   AND buried = FALSE`,
 		claims.UserID, language,
-	).Scan(&count)
+	).Scan(&scheduledCount, &newCount)
 	if err != nil {
 		slog.Error("due count query", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	if newCount > dailyNewLimit {
+		newCount = dailyNewLimit
+	}
+	count := scheduledCount + newCount
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"due_count":     count,
@@ -140,6 +156,11 @@ func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
 	if language == "" {
 		language = "ja"
 	}
+	_, _ = h.db.Exec(r.Context(),
+		`UPDATE cards SET buried = FALSE, buried_until = NULL
+		 WHERE user_id = $1 AND buried = TRUE AND buried_until <= CURRENT_DATE`,
+		claims.UserID,
+	)
 	limit := 20
 	if v := q.Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 100 {
@@ -216,14 +237,22 @@ func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
 	seen := make(map[string]int)
 	selected := make([]bool, len(all))
 	var session []sessionCard
+	newRemaining := h.dailyNewRemaining(r.Context(), claims.UserID, language)
+	newSelected := 0
+	eligible := func(c rawCard) bool {
+		return c.FsrsState != "new" || newSelected < newRemaining
+	}
 	for i, c := range all {
 		if len(session) >= limit {
 			break
 		}
-		if seen[c.sortKey] < maxPerBucket {
+		if eligible(c) && seen[c.sortKey] < maxPerBucket {
 			session = append(session, c.sessionCard)
 			seen[c.sortKey]++
 			selected[i] = true
+			if c.FsrsState == "new" {
+				newSelected++
+			}
 		}
 	}
 	// Backfill: append not-yet-selected cards (in DB priority order) until we
@@ -233,9 +262,12 @@ func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
 		if len(session) >= limit {
 			break
 		}
-		if !selected[i] {
+		if !selected[i] && eligible(c) {
 			session = append(session, c.sessionCard)
 			selected[i] = true
+			if c.FsrsState == "new" {
+				newSelected++
+			}
 		}
 	}
 
@@ -244,6 +276,30 @@ func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
 		"total":         len(session),
 		"language_code": language,
 	})
+}
+
+func (h *Handler) dailyNewRemaining(ctx context.Context, userID, language string) int {
+	limit := 20
+	_ = h.db.QueryRow(ctx,
+		`SELECT daily_new_limit FROM user_fsrs_params
+		 WHERE user_id = $1 AND language_code = $2`,
+		userID, language,
+	).Scan(&limit)
+	var reviewedToday int
+	_ = h.db.QueryRow(ctx,
+		`SELECT COUNT(*)
+		 FROM review_events e
+		 JOIN cards c ON c.id = e.card_id
+		 WHERE e.user_id = $1
+		   AND c.language_code = $2
+		   AND e.prior_fsrs_state = 'new'
+		   AND e.reviewed_at >= CURRENT_DATE`,
+		userID, language,
+	).Scan(&reviewedToday)
+	if remaining := limit - reviewedToday; remaining > 0 {
+		return remaining
+	}
+	return 0
 }
 
 // ── POST /v1/review/events ────────────────────────────────────────────────────
@@ -350,22 +406,27 @@ func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 	var card struct {
 		Stability  *float64
 		Difficulty *float64
+		Due        *time.Time
 		LastReview *time.Time
 		State      string
 		Reps       int
 		Lapses     int
 		Language   string
+		Suspended  bool
+		IsLeech    bool
 	}
 	err = tx.QueryRow(ctx,
-		`SELECT fsrs_stability, fsrs_difficulty, fsrs_last_review,
-		        fsrs_state, fsrs_reps, fsrs_lapses, language_code
+		`SELECT fsrs_stability, fsrs_difficulty, fsrs_due, fsrs_last_review,
+		        fsrs_state, fsrs_reps, fsrs_lapses, language_code,
+		        suspended, is_leech
 		 FROM cards
 		 WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL AND suspended = FALSE
 		 FOR UPDATE`,
 		req.CardID, claims.UserID,
 	).Scan(
-		&card.Stability, &card.Difficulty, &card.LastReview,
+		&card.Stability, &card.Difficulty, &card.Due, &card.LastReview,
 		&card.State, &card.Reps, &card.Lapses, &card.Language,
+		&card.Suspended, &card.IsLeech,
 	)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "card not found")
@@ -420,7 +481,8 @@ func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 		   fsrs_last_review= $5,
 		   fsrs_reps       = $6,
 		   fsrs_lapses     = $7,
-		   suspended       = $8
+		   suspended       = $8,
+		   is_leech        = is_leech OR $8
 		 WHERE id = $9 AND user_id = $10`,
 		string(result.State),
 		result.Stability,
@@ -452,12 +514,14 @@ func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 		    stability_after, difficulty_after, due_after, retrievability_at_review,
 		    state_after, reps_after, lapses_after, is_leech_after, response_after,
 		    prior_fsrs_state, prior_fsrs_stability, prior_fsrs_difficulty,
-		    prior_fsrs_due, prior_fsrs_reps, prior_fsrs_lapses)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
+		    prior_fsrs_due, prior_fsrs_last_review, prior_fsrs_reps, prior_fsrs_lapses,
+		    prior_suspended, prior_is_leech)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)`,
 		eventID, clientEventID, req.CardID, claims.UserID, reviewedAt, req.Rating, req.TimeMS,
 		result.Stability, result.Difficulty, result.Due, result.Retrievability,
 		string(result.State), result.Reps, result.Lapses, result.IsLeech, responseJSON,
-		card.State, card.Stability, card.Difficulty, card.LastReview, card.Reps, card.Lapses,
+		card.State, card.Stability, card.Difficulty, card.Due, card.LastReview, card.Reps, card.Lapses,
+		card.Suspended, card.IsLeech,
 	)
 	if err != nil {
 		slog.Error("insert review event", "error", err)
@@ -650,7 +714,7 @@ func (h *Handler) Notifications(w http.ResponseWriter, r *http.Request) {
 		Payload   json.RawMessage `json:"payload"`
 		CreatedAt time.Time       `json:"created_at"`
 	}
-	var notifs []notif
+	notifs := []notif{}
 	for rows.Next() {
 		var n notif
 		if err := rows.Scan(&n.ID, &n.Type, &n.Payload, &n.CreatedAt); err == nil {
@@ -699,15 +763,20 @@ func (h *Handler) Undo(w http.ResponseWriter, r *http.Request) {
 		PriorStability  *float64
 		PriorDifficulty *float64
 		PriorDue        *time.Time
+		PriorLastReview *time.Time
 		PriorReps       int
 		PriorLapses     int
+		PriorSuspended  bool
+		PriorIsLeech    bool
 		ReviewedAt      time.Time
 	}
 	err := h.db.QueryRow(ctx,
 		`SELECT id, card_id,
 		        COALESCE(prior_fsrs_state, 'new'),
 		        prior_fsrs_stability, prior_fsrs_difficulty, prior_fsrs_due,
+		        prior_fsrs_last_review,
 		        COALESCE(prior_fsrs_reps, 0), COALESCE(prior_fsrs_lapses, 0),
+		        COALESCE(prior_suspended, FALSE), COALESCE(prior_is_leech, FALSE),
 		        reviewed_at
 		 FROM review_events
 		 WHERE user_id = $1
@@ -718,7 +787,8 @@ func (h *Handler) Undo(w http.ResponseWriter, r *http.Request) {
 	).Scan(
 		&event.ID, &event.CardID,
 		&event.PriorState, &event.PriorStability, &event.PriorDifficulty,
-		&event.PriorDue, &event.PriorReps, &event.PriorLapses,
+		&event.PriorDue, &event.PriorLastReview, &event.PriorReps, &event.PriorLapses,
+		&event.PriorSuspended, &event.PriorIsLeech,
 		&event.ReviewedAt,
 	)
 	if err != nil {
@@ -730,21 +800,30 @@ func (h *Handler) Undo(w http.ResponseWriter, r *http.Request) {
 	_, err = h.db.Exec(ctx,
 		`WITH deleted AS (
 		     DELETE FROM review_events WHERE id = $1 AND user_id = $2
+		 ), deleted_notification AS (
+		     DELETE FROM user_notifications
+		     WHERE user_id = $2
+		       AND type = 'leech_suspended'
+		       AND payload->>'card_id' = $13
+		       AND created_at >= $14
 		 )
 		 UPDATE cards SET
 		     fsrs_state      = $3,
 		     fsrs_stability  = $4,
 		     fsrs_difficulty = $5,
 		     fsrs_due        = $6,
-		     fsrs_reps       = $7,
-		     fsrs_lapses     = $8,
-		     suspended       = FALSE,
+		     fsrs_last_review= $7,
+		     fsrs_reps       = $8,
+		     fsrs_lapses     = $9,
+		     suspended       = $10,
+		     is_leech        = $11,
 		     updated_at      = now()
-		 WHERE id = $9 AND user_id = $2`,
+		 WHERE id = $12 AND user_id = $2`,
 		event.ID, claims.UserID,
 		event.PriorState, event.PriorStability, event.PriorDifficulty,
-		event.PriorDue, event.PriorReps, event.PriorLapses,
-		event.CardID,
+		event.PriorDue, event.PriorLastReview, event.PriorReps, event.PriorLapses,
+		event.PriorSuspended, event.PriorIsLeech,
+		event.CardID, event.CardID, event.ReviewedAt,
 	)
 	if err != nil {
 		slog.Error("review undo", "error", err)

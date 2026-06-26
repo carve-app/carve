@@ -16,19 +16,31 @@ export MINIO_CONSOLE_PORT="${MINIO_CONSOLE_PORT:-19001}"
 export API_PORT="${API_PORT:-18080}"
 export NLP_PORT="${NLP_PORT:-18001}"
 export MEDIA_PORT="${MEDIA_PORT:-18002}"
+export MEDIA_PUBLIC_BASE="${MEDIA_PUBLIC_BASE:-http://127.0.0.1:${MEDIA_PORT}}"
 
 if command -v pnpm >/dev/null 2>&1; then
   PNPM=(pnpm)
+  PNPM_COMMAND=pnpm
 else
   PNPM=(mise exec -- pnpm)
+  PNPM_COMMAND="mise exec -- pnpm"
 fi
 
 cleanup() {
+  local status=$?
+  if [ "$status" -ne 0 ]; then
+    docker compose logs --tail=200 api migrate nlp media mailpit || true
+  fi
   docker compose down -v --remove-orphans >/dev/null 2>&1 || true
+  return "$status"
 }
 trap cleanup EXIT INT TERM
 
-docker compose up -d --build postgres redis mailpit minio nlp media
+# Build every source-backed service explicitly. `docker compose run migrate`
+# and `up api` do not rebuild by default, which can otherwise make this proof
+# execute stale binaries and silently omit newly-added migrations.
+docker compose build api migrate nlp media
+docker compose up -d postgres redis mailpit minio nlp media
 docker compose run --rm migrate
 docker compose up -d api
 
@@ -45,8 +57,14 @@ for attempt in $(seq 1 60); do
   sleep 2
 done
 
+PLAYWRIGHT_ARGS=(tests/real-stack-core.spec.ts --project=web-chromium)
+if [ -n "${REAL_STACK_GREP:-}" ]; then
+  PLAYWRIGHT_ARGS+=(--grep "$REAL_STACK_GREP")
+fi
+
 E2E_USE_REAL=1 \
 API_BASE="http://127.0.0.1:${API_PORT}" \
 MAILPIT_BASE="http://127.0.0.1:${MAILPIT_HTTP_PORT}" \
 WEB_BASE_URL=http://127.0.0.1:5173 \
-"${PNPM[@]}" --dir e2e exec playwright test tests/real-stack-core.spec.ts --project=web-chromium
+PNPM_COMMAND="$PNPM_COMMAND" \
+"${PNPM[@]}" --dir e2e exec playwright test "${PLAYWRIGHT_ARGS[@]}"

@@ -145,7 +145,11 @@ func (p googleTTSProvider) Synthesize(ctx context.Context, language, text string
 	if err != nil || len(mp3) == 0 {
 		return ""
 	}
-	url, err := uploadAudioToMedia(ctx, p.client, mediaBase, mp3)
+	publicBase := strings.TrimRight(os.Getenv("MEDIA_PUBLIC_BASE"), "/")
+	if publicBase == "" {
+		publicBase = mediaBase
+	}
+	url, err := uploadAudioToMedia(ctx, p.client, mediaBase, publicBase, mp3)
 	if err != nil {
 		return ""
 	}
@@ -199,7 +203,7 @@ func (p googleTTSProvider) synthesize(ctx context.Context, token, langCode, text
 // uploadAudioToMedia POSTs MP3 bytes to ${MEDIA_SERVICE_URL}/audio and returns
 // the absolute media URL. Mirrors cards.uploadToMediaService (replicated here
 // to avoid importing the cards package).
-func uploadAudioToMedia(ctx context.Context, client *http.Client, mediaBase string, mp3 []byte) (string, error) {
+func uploadAudioToMedia(ctx context.Context, client *http.Client, mediaBase, publicBase string, mp3 []byte) (string, error) {
 	endpoint := mediaBase + "/audio"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(mp3))
 	if err != nil {
@@ -226,5 +230,8 @@ func uploadAudioToMedia(ctx context.Context, client *http.Client, mediaBase stri
 	if result.URL == "" {
 		return "", fmt.Errorf("media service returned empty url")
 	}
-	return mediaBase + result.URL, nil
+	if strings.HasPrefix(result.URL, "http://") || strings.HasPrefix(result.URL, "https://") {
+		return result.URL, nil
+	}
+	return strings.TrimRight(publicBase, "/") + "/" + strings.TrimLeft(result.URL, "/"), nil
 }

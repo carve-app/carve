@@ -48,6 +48,7 @@ const (
 type Params struct {
 	W               [19]float64
 	TargetRetention float64 // default 0.90
+	LeechThreshold  int     // default 5
 }
 
 // DefaultParams returns the published FSRS-6 default parameters.
@@ -75,18 +76,19 @@ func DefaultParams() Params {
 			0.4300,  // w[18] short-term stability offset
 		},
 		TargetRetention: 0.90,
+		LeechThreshold:  DefaultLeechThreshold,
 	}
 }
 
 // CardState holds the mutable FSRS fields for a card.
 type CardState struct {
-	State       State
-	Stability   float64   // S: days until 90% retention
-	Difficulty  float64   // D: [1, 10]
-	Due         time.Time // next review time
-	LastReview  time.Time
-	Reps        int
-	Lapses      int
+	State      State
+	Stability  float64   // S: days until 90% retention
+	Difficulty float64   // D: [1, 10]
+	Due        time.Time // next review time
+	LastReview time.Time
+	Reps       int
+	Lapses     int
 }
 
 // ReviewResult is what the algorithm returns after processing one review.
@@ -281,7 +283,11 @@ func Schedule(p Params, card CardState, g Rating, now time.Time) ReviewResult {
 			res.Stability = stabilityAfterForgetting(p, card.Difficulty, card.Stability, r)
 			res.Difficulty = nextDifficulty(p, card.Difficulty, Again)
 			res.Due = now.Add(stepRelearning)
-			res.IsLeech = res.Lapses >= DefaultLeechThreshold
+			threshold := p.LeechThreshold
+			if threshold <= 0 {
+				threshold = DefaultLeechThreshold
+			}
+			res.IsLeech = res.Lapses >= threshold
 		default:
 			newS := stabilityAfterRecall(p, card.Difficulty, card.Stability, r, g)
 			res.Stability = newS
@@ -339,7 +345,7 @@ func WorkloadForecast(dues []time.Time, days int, now time.Time) []int {
 	counts := make([]int, days)
 	start := now.Truncate(24 * time.Hour)
 	for _, due := range dues {
-		offset := int(due.Truncate(24 * time.Hour).Sub(start).Hours() / 24)
+		offset := int(due.Truncate(24*time.Hour).Sub(start).Hours() / 24)
 		if offset >= 0 && offset < days {
 			counts[offset]++
 		}

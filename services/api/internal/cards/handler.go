@@ -39,9 +39,10 @@ type MediaUploader interface {
 }
 
 type httpMediaUploader struct {
-	baseURL string
-	token   string
-	client  interface {
+	baseURL   string
+	publicURL string
+	token     string
+	client    interface {
 		Do(*http.Request) (*http.Response, error)
 	}
 }
@@ -51,10 +52,15 @@ func newHTTPMediaUploader() MediaUploader {
 	if baseURL == "" {
 		baseURL = "http://localhost:8002"
 	}
+	publicURL := strings.TrimRight(os.Getenv("MEDIA_PUBLIC_BASE"), "/")
+	if publicURL == "" {
+		publicURL = baseURL
+	}
 	return &httpMediaUploader{
-		baseURL: baseURL,
-		token:   os.Getenv("MEDIA_INTERNAL_TOKEN"),
-		client:  &http.Client{Timeout: 30 * time.Second},
+		baseURL:   baseURL,
+		publicURL: publicURL,
+		token:     os.Getenv("MEDIA_INTERNAL_TOKEN"),
+		client:    &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
@@ -99,7 +105,11 @@ func (u *httpMediaUploader) Upload(ctx context.Context, path string, body io.Rea
 	if strings.HasPrefix(result.URL, "http://") || strings.HasPrefix(result.URL, "https://") {
 		return result.URL, nil
 	}
-	return u.baseURL + result.URL, nil
+	publicURL := u.publicURL
+	if publicURL == "" {
+		publicURL = u.baseURL
+	}
+	return publicURL + "/" + strings.TrimLeft(result.URL, "/"), nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -671,6 +681,10 @@ func (h *Handler) Bury(w http.ResponseWriter, r *http.Request) {
 	h.setLifecycleFlag(w, r, "buried", true)
 }
 
+func (h *Handler) Unbury(w http.ResponseWriter, r *http.Request) {
+	h.setLifecycleFlag(w, r, "buried", false)
+}
+
 func (h *Handler) setLifecycleFlag(w http.ResponseWriter, r *http.Request, col string, val bool) {
 	claims, ok := auth.ClaimsFromContext(r.Context())
 	if !ok {
@@ -689,7 +703,11 @@ func (h *Handler) setLifecycleFlag(w http.ResponseWriter, r *http.Request, col s
 			query = `UPDATE cards SET suspended = FALSE, updated_at = now() WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`
 		}
 	case "buried":
-		query = `UPDATE cards SET buried = TRUE, updated_at = now() WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`
+		if val {
+			query = `UPDATE cards SET buried = TRUE, buried_until = CURRENT_DATE + 1, updated_at = now() WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`
+		} else {
+			query = `UPDATE cards SET buried = FALSE, buried_until = NULL, updated_at = now() WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`
+		}
 	default:
 		writeError(w, http.StatusBadRequest, "unknown lifecycle flag")
 		return
@@ -710,7 +728,7 @@ func (h *Handler) setLifecycleFlag(w http.ResponseWriter, r *http.Request, col s
 }
 
 // POST /v1/cards/bulk
-// Body: {"action": "suspend"|"unsuspend"|"bury"|"delete", "ids": [...]}
+// Body: {"action": "suspend"|"unsuspend"|"bury"|"unbury"|"delete", "ids": [...]}
 func (h *Handler) Bulk(w http.ResponseWriter, r *http.Request) {
 	claims, ok := auth.ClaimsFromContext(r.Context())
 	if !ok {
@@ -742,7 +760,9 @@ func (h *Handler) Bulk(w http.ResponseWriter, r *http.Request) {
 	case "unsuspend":
 		query = `UPDATE cards SET suspended = FALSE, updated_at = now() WHERE user_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`
 	case "bury":
-		query = `UPDATE cards SET buried = TRUE, updated_at = now() WHERE user_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`
+		query = `UPDATE cards SET buried = TRUE, buried_until = CURRENT_DATE + 1, updated_at = now() WHERE user_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`
+	case "unbury":
+		query = `UPDATE cards SET buried = FALSE, buried_until = NULL, updated_at = now() WHERE user_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`
 	case "delete":
 		query = `UPDATE cards SET deleted_at = now() WHERE user_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`
 	default:

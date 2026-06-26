@@ -18,9 +18,9 @@ import (
 )
 
 type Handler struct {
-	db         *pgxpool.Pool
-	claudeKey  string
-	claudeURL  string
+	db        *pgxpool.Pool
+	claudeKey string
+	claudeURL string
 }
 
 func NewHandler(db *pgxpool.Pool) *Handler {
@@ -69,7 +69,8 @@ func (h *Handler) ListExercises(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.db.Query(ctx,
-		`SELECT id, front_text, COALESCE(sentence,''), front_audio_url, translation
+		`SELECT id, front_text, COALESCE(sentence,''), front_audio_url,
+		        COALESCE(subtitle_translation, translation)
 		 FROM cards
 		 WHERE user_id = $1
 		   AND language_code = $2
@@ -230,9 +231,9 @@ func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 }
 
 type FeedbackDetail struct {
-	Grammar      string `json:"grammar"`
-	Vocabulary   string `json:"vocabulary"`
-	Naturalness  string `json:"naturalness"`
+	Grammar     string `json:"grammar"`
+	Vocabulary  string `json:"vocabulary"`
+	Naturalness string `json:"naturalness"`
 }
 
 func (h *Handler) getFeedback(

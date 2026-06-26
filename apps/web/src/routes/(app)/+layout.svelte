@@ -3,7 +3,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { get } from 'svelte/store';
-  import { fetchUser, fetchDueCount } from '$lib/api';
+  import { fetchUser, fetchDueCount, logout as revokeSession } from '$lib/api';
   import { lang, LANG_LABELS, type LangCode } from '$lib/stores/lang';
   import { currentUser } from '$lib/stores/user';
 
@@ -67,10 +67,14 @@
     lang.set((e.target as HTMLSelectElement).value as LangCode);
   }
 
-  function logout() {
-    localStorage.removeItem('carve_access_token');
-    currentUser.set(null);
-    goto('/login');
+  async function logout() {
+    try {
+      await revokeSession();
+    } finally {
+      localStorage.removeItem('carve_access_token');
+      currentUser.set(null);
+      goto('/login');
+    }
   }
 
   function closeSidebar() { sidebarOpen = false; }

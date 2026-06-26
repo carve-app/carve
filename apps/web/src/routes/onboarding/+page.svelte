@@ -8,6 +8,7 @@
   let knownGroups = new Set<number>();
   let loading = false;
   let errorMsg = '';
+  let starterDeckStatus: 'subscribed' | 'unavailable' | null = null;
 
   const TOTAL_STEPS = 5;
 
@@ -180,6 +181,11 @@
     knownGroups = new Set(knownGroups);
   }
 
+  function selectLanguage(code: string) {
+    language = code;
+    starterDeckStatus = null;
+  }
+
   function detectBrowser(): 'chrome' | 'firefox' | 'safari' | 'other' {
     const ua = navigator.userAgent;
     if (ua.includes('Firefox')) return 'firefox';
@@ -213,7 +219,8 @@
     if (step === 3) {
       loading = true;
       try {
-        await subscribeStarterDeck(language);
+        const result = await subscribeStarterDeck(language);
+        starterDeckStatus = result.status === 'subscribed' ? 'subscribed' : 'unavailable';
       } catch (error) {
         errorMsg = error instanceof Error ? error.message : 'Could not subscribe to the starter deck. Please try again.';
         loading = false;
@@ -271,7 +278,7 @@
             <button
               class="lang-card"
               class:selected={language === opt.code}
-              on:click={() => language = opt.code}
+              on:click={() => selectLanguage(opt.code)}
             >
               <span class="lang-flag">{opt.flag}</span>
               <span class="lang-name">{opt.name}</span>
@@ -310,8 +317,8 @@
       {:else if step === 3}
         <h2>Start with a curated deck</h2>
         <p class="sub">
-          We'll subscribe you to the official starter deck for your language — a set of
-          high-frequency words to build your foundation.
+          If an official starter deck is available for your language, we'll add its
+          high-frequency words to your collection. You can continue without one.
         </p>
         <div class="deck-preview">
           {#if language === 'ja'}
@@ -322,28 +329,20 @@
                 <div class="deck-desc">50 essential words · Official deck</div>
               </div>
             </div>
-          {:else if language === 'zh-cn'}
-            <div class="deck-card">
-              <div class="deck-icon">🇨🇳</div>
-              <div class="deck-info">
-                <div class="deck-name">HSK 1 Core Vocabulary</div>
-                <div class="deck-desc">High-frequency words · Official deck</div>
-              </div>
-            </div>
-          {:else if language === 'ko'}
-            <div class="deck-card">
-              <div class="deck-icon">🇰🇷</div>
-              <div class="deck-info">
-                <div class="deck-name">TOPIK 1 Core Vocabulary</div>
-                <div class="deck-desc">Essential vocabulary · Official deck</div>
-              </div>
-            </div>
           {:else if language === 'en'}
             <div class="deck-card">
               <div class="deck-icon">🇬🇧</div>
               <div class="deck-info">
                 <div class="deck-name">CEFR B2 Academic Word List</div>
                 <div class="deck-desc">High-utility vocabulary for advanced learners · Official deck</div>
+              </div>
+            </div>
+          {:else}
+            <div class="deck-card">
+              <div class="deck-icon">📚</div>
+              <div class="deck-info">
+                <div class="deck-name">No official starter deck yet</div>
+                <div class="deck-desc">Continue now and mine or import your own vocabulary.</div>
               </div>
             </div>
           {/if}
@@ -381,14 +380,18 @@
       {:else if step === 5}
         <h2>You're all set!</h2>
         <p class="sub">
-          Your first deck is ready to review. Start building your vocabulary, and use the extension
-          to mine words from any content you read or watch.
+          {starterDeckStatus === 'subscribed'
+            ? 'Your first deck is ready to review.'
+            : 'Your language is configured and ready for cards you mine or import.'}
+          Use the extension to mine words from any content you read or watch.
         </p>
         <div class="done-art">🎉</div>
         <div class="done-steps">
           <div class="done-item">✓ Language selected</div>
           <div class="done-item">✓ Known words marked</div>
-          <div class="done-item">✓ Starter deck subscribed</div>
+          <div class="done-item">
+            {starterDeckStatus === 'subscribed' ? '✓ Starter deck subscribed' : '✓ Starter deck availability checked'}
+          </div>
         </div>
       {/if}
 

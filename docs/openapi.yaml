@@ -1103,7 +1103,7 @@ paths:
       summary: Suspend a card (skip in review until manually unsuspended)
       security: [{ bearer: [] }]
       responses:
-        '204': { description: Suspended }
+        '200': { description: Suspended }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
@@ -1119,7 +1119,7 @@ paths:
       summary: Un-suspend a card
       security: [{ bearer: [] }]
       responses:
-        '204': { description: Unsuspended }
+        '200': { description: Unsuspended }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
@@ -1135,7 +1135,23 @@ paths:
       summary: Bury a card until tomorrow
       security: [{ bearer: [] }]
       responses:
-        '204': { description: Buried until tomorrow }
+        '200': { description: Buried until tomorrow }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/cards/{id}/unbury:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema: { $ref: '#/components/schemas/UUID' }
+    post:
+      tags: [cards]
+      operationId: unburyCard
+      summary: Make a buried card immediately available again
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: Unburied }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 

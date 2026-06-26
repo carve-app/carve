@@ -486,7 +486,9 @@ jobs:
           DATABASE_URL: postgres://carve:carve@localhost:5432/carve?sslmode=disable
         run: |
           mkdir -p /tmp/carve-old-migrations
-          find ./migrations -maxdepth 1 -name '*.sql' ! -name '015_*' -exec cp {} /tmp/carve-old-migrations/ \;
+          find ./migrations -maxdepth 1 -name '*.sql' \
+            ! -name '015_*' ! -name '016_*' ! -name '017_*' \
+            -exec cp {} /tmp/carve-old-migrations/ \;
           go run ./cmd/migrate --dir /tmp/carve-old-migrations
           go run ./cmd/migrate --dir ./migrations
           go run ./cmd/migrate --dir ./migrations

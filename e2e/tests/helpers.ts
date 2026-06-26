@@ -21,7 +21,14 @@ export async function registerTestUser(
   expect(reg.ok(), `register ${email}`).toBe(true);
   const body = await reg.json();
   expect(body.access_token, `register ${email} should return access_token`).toBeTruthy();
-  return { apiBase, email, password, access_token: body.access_token as string };
+  expect(body.refresh_token, `register ${email} should return refresh_token`).toBeTruthy();
+  return {
+    apiBase,
+    email,
+    password,
+    access_token: body.access_token as string,
+    refresh_token: body.refresh_token as string,
+  };
 }
 
 export async function createTestCard(

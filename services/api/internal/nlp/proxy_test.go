@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -74,5 +75,17 @@ func TestProxyReportsProviderFailure(t *testing.T) {
 	p.Lookup(w, httptest.NewRequest(http.MethodPost, "/v1/nlp/lookup", strings.NewReader(`{}`)))
 	if w.Code != http.StatusBadGateway {
 		t.Fatalf("expected 502, got %d", w.Code)
+	}
+}
+
+func TestMergeStringsDeduplicatesAndExcludesKnown(t *testing.T) {
+	got := mergeStrings(
+		[]any{"existing", "known", "existing", 42},
+		[]string{"added", "known", "added"},
+		map[string]bool{"known": true},
+	)
+	want := []string{"existing", "added"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mergeStrings() = %#v, want %#v", got, want)
 	}
 }

@@ -15,8 +15,9 @@ func (f mediaDoerFunc) Do(req *http.Request) (*http.Response, error) { return f(
 
 func TestHTTPMediaUploaderQualifiesRelativeURLAndAuthenticates(t *testing.T) {
 	uploader := &httpMediaUploader{
-		baseURL: "http://media.test",
-		token:   "internal-token",
+		baseURL:   "http://media.test",
+		publicURL: "https://media.public.test",
+		token:     "internal-token",
 		client: mediaDoerFunc(func(req *http.Request) (*http.Response, error) {
 			if req.URL.String() != "http://media.test/audio" {
 				t.Fatalf("unexpected URL: %s", req.URL)
@@ -34,7 +35,7 @@ func TestHTTPMediaUploaderQualifiesRelativeURLAndAuthenticates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != "http://media.test/media/audio.mp3" {
+	if got != "https://media.public.test/media/audio.mp3" {
 		t.Fatalf("unexpected qualified URL: %s", got)
 	}
 }

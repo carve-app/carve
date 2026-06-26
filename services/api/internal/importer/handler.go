@@ -3,6 +3,7 @@ package importer
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/csv"
 	"encoding/json"
@@ -186,13 +187,16 @@ func (h *Handler) ImportMigakuCSV(w http.ResponseWriter, r *http.Request) {
 		word := strings.TrimSpace(record[0])
 		var reading, definition, sentence *string
 		if len(record) > 1 && record[1] != "" {
-			s := record[1]; reading = &s
+			s := record[1]
+			reading = &s
 		}
 		if len(record) > 2 && record[2] != "" {
-			s := record[2]; definition = &s
+			s := record[2]
+			definition = &s
 		}
 		if len(record) > 3 && record[3] != "" {
-			s := record[3]; sentence = &s
+			s := record[3]
+			sentence = &s
 		}
 
 		id := auth.NewID()
@@ -293,14 +297,10 @@ func (h *Handler) ImportYomitan(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			// Yomitan import: just mark as known in user_word_knowledge, no card.
-			_, err := h.db.Exec(ctx,
-				`INSERT INTO user_word_knowledge (user_id, language_code, lemma, status)
-				 VALUES ($1, $2, $3, 'known')
-				 ON CONFLICT (user_id, language_code, lemma)
-				 DO UPDATE SET status = 'known', updated_at = now()`,
-				claims.UserID, language, term,
-			)
+			// Yomitan imports known vocabulary rather than flashcards. Knowledge is
+			// keyed through words.word_id; user_word_knowledge deliberately does not
+			// duplicate language/lemma columns.
+			err := h.upsertKnowledge(ctx, claims.UserID, language, term, reading, "known")
 			if err != nil {
 				slog.Warn("yomitan import: upsert knowledge", "error", err, "term", term)
 				skipped++
@@ -381,13 +381,12 @@ func (h *Handler) ImportJPDBCSV(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		_, err := h.db.Exec(ctx,
-			`INSERT INTO user_word_knowledge (user_id, language_code, lemma, status)
-			 VALUES ($1, $2, $3, $4)
-			 ON CONFLICT (user_id, language_code, lemma)
-			 DO UPDATE SET status = EXCLUDED.status, updated_at = now()`,
-			claims.UserID, language, word, status,
-		)
+		reading := ""
+		if len(record) >= 2 {
+			reading = strings.TrimSpace(record[1])
+		}
+
+		err := h.upsertKnowledge(ctx, claims.UserID, language, word, reading, status)
 		if err != nil {
 			skipped++
 			continue
@@ -404,6 +403,47 @@ func (h *Handler) ImportJPDBCSV(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
+
+func (h *Handler) upsertKnowledge(
+	ctx context.Context,
+	userID string,
+	language string,
+	lemma string,
+	reading string,
+	status string,
+) error {
+	if reading == "" {
+		reading = lemma
+	}
+
+	var wordID string
+	if err := h.db.QueryRow(ctx,
+		`INSERT INTO words (language_code, lemma, reading)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (language_code, lemma, reading)
+		 DO UPDATE SET language_code = EXCLUDED.language_code
+		 RETURNING id`,
+		language, lemma, reading,
+	).Scan(&wordID); err != nil {
+		return err
+	}
+
+	_, err := h.db.Exec(ctx,
+		`INSERT INTO user_word_knowledge
+		    (user_id, word_id, status, first_seen_at, known_since)
+		 VALUES ($1, $2, $3, now(), CASE WHEN $3 = 'known' THEN now() ELSE NULL END)
+		 ON CONFLICT (user_id, word_id) DO UPDATE
+		 SET status = EXCLUDED.status,
+		     known_since = CASE
+		         WHEN EXCLUDED.status = 'known'
+		         THEN COALESCE(user_word_knowledge.known_since, now())
+		         ELSE user_word_knowledge.known_since
+		     END,
+		     updated_at = now()`,
+		userID, wordID, status,
+	)
+	return err
+}
 
 // ankiNote holds the parsed fields from a single Anki note row, plus the
 // scheduling fields of its most-progressed sibling card. Anki cards table
@@ -546,9 +586,17 @@ func stripHTMLSimple(s string) string {
 	var sb strings.Builder
 	inTag := false
 	for _, r := range s {
-		if r == '<' { inTag = true; continue }
-		if r == '>' { inTag = false; continue }
-		if !inTag { sb.WriteRune(r) }
+		if r == '<' {
+			inTag = true
+			continue
+		}
+		if r == '>' {
+			inTag = false
+			continue
+		}
+		if !inTag {
+			sb.WriteRune(r)
+		}
 	}
 	return strings.TrimSpace(sb.String())
 }

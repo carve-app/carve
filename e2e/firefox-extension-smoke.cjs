@@ -20,7 +20,10 @@ function listen(server, port, host = '127.0.0.1') {
 }
 
 function close(server) {
-  return new Promise((resolve) => server.close(resolve));
+  return new Promise((resolve) => {
+    server.close(resolve);
+    server.closeAllConnections?.();
+  });
 }
 
 async function main() {
@@ -88,10 +91,15 @@ async function main() {
       child.once('exit', (code) => reject(new Error(`Firefox exited before content-script proof (${code})\n${logs}`)));
       child.once('error', reject);
     });
+    let timeoutID;
     const timeout = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error(`Firefox extension did not call tokenize within 25s (page hits: ${pageHits}; API requests: ${apiRequests.join(', ') || 'none'})\n${logs}`)), 25_000);
+      timeoutID = setTimeout(() => reject(new Error(`Firefox extension did not call tokenize within 25s (page hits: ${pageHits}; API requests: ${apiRequests.join(', ') || 'none'})\n${logs}`)), 25_000);
     });
-    await Promise.race([tokenized, exited, timeout]);
+    try {
+      await Promise.race([tokenized, exited, timeout]);
+    } finally {
+      clearTimeout(timeoutID);
+    }
     console.log('Firefox packaged extension executed its content script.');
   } finally {
     if (child && child.exitCode === null) child.kill('SIGTERM');

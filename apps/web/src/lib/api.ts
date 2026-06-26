@@ -284,6 +284,13 @@ export async function register(email: string, password: string, displayName: str
   });
 }
 
+export async function logout(): Promise<void> {
+  await fetch(`${API_BASE}/v1/auth/logout`, {
+    method: 'POST',
+    credentials: 'include',
+  });
+}
+
 export async function deleteAccount(): Promise<void> {
   await apiFetch('/v1/users/me', { method: 'DELETE' });
 }

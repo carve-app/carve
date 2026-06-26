@@ -41,6 +41,8 @@ pnpm audit --audit-level moderate
 (cd services/nlp && .venv/bin/python -m pytest -q)
 (cd services/media && go vet ./... && go test -race -count=1 ./...)
 (cd apps/extension/wasm-src/ja-tokenizer && cargo test --locked)
+(cd apps/extension/wasm-src/ko-tokenizer && cargo test --locked)
+(cd apps/extension/wasm-src/zh-tokenizer && cargo test --locked)
 
 # Docker, real API/NLP/media/Postgres/Mailpit, and Chromium
 ./scripts/test-real-stack.sh
@@ -58,9 +60,12 @@ the integration proof and uses isolated volumes and non-default host ports.
 - `apps/web/src/lib/__tests__/offline*.test.ts` and
   `e2e/tests/pwa-offline.spec.ts`: IndexedDB failure is visible, persisted
   events replay, and a 50-event queue drains exactly once.
-- `e2e/tests/real-stack-core.spec.ts`: verification/reset email through
-  Mailpit, ten-language tokenization, card creation, and review replay against
-  the actual services.
+- `e2e/tests/real-stack-core.spec.ts`: five proof journeys against the actual
+  services: verification/login/refresh/logout/reset mail; persisted knowledge,
+  lookup and tokenization for all eleven API language codes; starter-deck and
+  grammar persistence; cards/media/bulk/bury/review/undo/leech/output/stats;
+  import/export/readers; and 50 real browser IndexedDB reviews with a committed
+  response deliberately lost before retry.
 - `e2e/extension.test.js`: packaged Chrome annotation, ruby preservation,
   lookup and mining.
 - `e2e/firefox-extension-smoke.cjs`: a built Firefox package is installed by
@@ -95,6 +100,12 @@ The dated audit report records the environment and reason.
   claimed pass.
 - Real AnkiConnect requires an Anki process and remains a manual/full-gate
   integration; transport behavior is automated.
+- APKG export currently preserves text and scheduling but intentionally omits
+  attached audio/images. JSON/CSV/APKG structure and scheduling round trips are
+  automated; a media-preserving APKG round trip is not claimed.
+- Official starter decks are currently seeded only for Japanese and English.
+  Onboarding explicitly reports the unavailable case for the other selectable
+  languages and no longer claims that a deck was subscribed.
 - Production synthetic, authenticated streaming services, Google Cloud and
   Anthropic checks require explicit credentials and are never inferred from
   mock or fixture success.

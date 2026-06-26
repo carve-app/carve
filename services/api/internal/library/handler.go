@@ -78,13 +78,13 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type item struct {
-		ID               string     `json:"id"`
-		URL              *string    `json:"url"`
-		Title            string     `json:"title"`
-		ComprehensionPct *float64   `json:"comprehension_pct"`
-		UnknownWordCount *int       `json:"unknown_word_count"`
-		ContentType      string     `json:"content_type"`
-		CreatedAt        time.Time  `json:"created_at"`
+		ID               string    `json:"id"`
+		URL              *string   `json:"url"`
+		Title            string    `json:"title"`
+		ComprehensionPct *float64  `json:"comprehension_pct"`
+		UnknownWordCount *int      `json:"unknown_word_count"`
+		ContentType      string    `json:"content_type"`
+		CreatedAt        time.Time `json:"created_at"`
 	}
 	var items []item
 	for rows.Next() {
@@ -200,10 +200,10 @@ func (h *Handler) Add(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]any{
-		"id":                itemID,
-		"url":               req.URL,
-		"title":             displayTitle,
-		"comprehension_pct": compPct,
+		"id":                 itemID,
+		"url":                req.URL,
+		"title":              displayTitle,
+		"comprehension_pct":  compPct,
 		"unknown_word_count": unknownCount,
 	})
 }
@@ -312,24 +312,40 @@ func (h *Handler) scoreURL(
 
 func (h *Handler) fetchUserVocab(ctx context.Context, userID, language string) (known, learning []string) {
 	rows, err := h.db.Query(ctx,
-		`SELECT front_text, fsrs_state
-		 FROM cards
-		 WHERE user_id = $1 AND language_code = $2 AND deleted_at IS NULL`,
+		`SELECT lemma, status FROM (
+		   SELECT w.lemma, uwk.status
+		   FROM user_word_knowledge uwk
+		   JOIN words w ON w.id = uwk.word_id
+		   WHERE uwk.user_id = $1 AND w.language_code = $2
+		   UNION ALL
+		   SELECT c.front_text,
+		          CASE WHEN c.fsrs_state = 'review' THEN 'known' ELSE 'learning' END
+		   FROM cards c
+		   WHERE c.user_id = $1 AND c.language_code = $2 AND c.deleted_at IS NULL
+		 ) vocab`,
 		userID, language,
 	)
 	if err != nil {
 		return nil, nil
 	}
 	defer rows.Close()
+	// Collapse duplicate sources deterministically. An explicit/learned known
+	// state wins over a learning card so the same lemma is never sent to NLP in
+	// both lists.
+	statuses := make(map[string]string)
 	for rows.Next() {
-		var lemma, state string
-		if rows.Scan(&lemma, &state) == nil {
-			switch state {
-			case "review":
-				known = append(known, lemma)
-			case "learning", "relearning":
-				learning = append(learning, lemma)
+		var lemma, status string
+		if rows.Scan(&lemma, &status) == nil {
+			if status == "known" || statuses[lemma] == "" {
+				statuses[lemma] = status
 			}
+		}
+	}
+	for lemma, status := range statuses {
+		if status == "known" {
+			known = append(known, lemma)
+		} else {
+			learning = append(learning, lemma)
 		}
 	}
 	return known, learning
@@ -468,9 +484,9 @@ func (h *Handler) Read(w http.ResponseWriter, r *http.Request) {
 
 	// Build unknown words sidebar: content words with status=unknown, sorted by frequency_rank.
 	type unknownWord struct {
-		Lemma    string  `json:"lemma"`
-		Reading  string  `json:"reading"`
-		FreqRank *int    `json:"frequency_rank"`
+		Lemma    string `json:"lemma"`
+		Reading  string `json:"reading"`
+		FreqRank *int   `json:"frequency_rank"`
 	}
 	seen := map[string]bool{}
 	var unknown []unknownWord
@@ -501,8 +517,12 @@ func (h *Handler) Read(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(unknown, func(i, j int) bool {
 		ri := unknown[i].FreqRank
 		rj := unknown[j].FreqRank
-		if ri == nil { return false }
-		if rj == nil { return true }
+		if ri == nil {
+			return false
+		}
+		if rj == nil {
+			return true
+		}
 		return *ri < *rj
 	})
 	if len(unknown) > 50 {
@@ -654,7 +674,9 @@ func uploadMedia(mediaBase, path string, r io.Reader, ct string) (string, error)
 	if resp.StatusCode != http.StatusCreated {
 		return "", fmt.Errorf("media service returned %d", resp.StatusCode)
 	}
-	var res struct{ URL string `json:"url"` }
+	var res struct {
+		URL string `json:"url"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
 		return "", err
 	}

@@ -24,6 +24,7 @@
     "@playwright/test": "^1.60.0",
     "@types/chrome": "^0.0.320",
     "@types/node": "^25.9.1",
+    "fflate": "^0.8.3",
     "typescript": "^5.9.3",
     "web-ext": "^10.4.0"
   }

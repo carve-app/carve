@@ -12,10 +12,10 @@
  *   Neutral → gray (#9E9E9E)
  */
 
+use jieba_rs::Jieba;
+use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use wasm_bindgen::prelude::*;
-use serde::{Deserialize, Serialize};
-use jieba_rs::Jieba;
 
 #[cfg(feature = "console_error_panic_hook")]
 extern crate console_error_panic_hook;
@@ -112,9 +112,10 @@ pub fn annotate_html(text: &str) -> String {
 // This scaffold returns the character itself as pinyin when not found.
 
 fn annotate_pinyin(word: &str) -> (String, String, Vec<u8>) {
-    let syllables: Vec<(String, String, u8)> = word.chars()
+    let syllables: Vec<(String, String, u8)> = word
+        .chars()
         .map(|c| {
-            if let Some((diac, num, tone)) = PINYIN_TABLE.iter().find(|e| e.0 == c) {
+            if let Some((_, diac, num, tone)) = PINYIN_TABLE.iter().find(|e| e.0 == c) {
                 (diac.to_string(), num.to_string(), *tone)
             } else {
                 (c.to_string(), c.to_string(), 0)
@@ -122,8 +123,16 @@ fn annotate_pinyin(word: &str) -> (String, String, Vec<u8>) {
         })
         .collect();
 
-    let pinyin = syllables.iter().map(|(d, _, _)| d.as_str()).collect::<Vec<_>>().join(" ");
-    let pinyin_num = syllables.iter().map(|(_, n, _)| n.as_str()).collect::<Vec<_>>().join(" ");
+    let pinyin = syllables
+        .iter()
+        .map(|(d, _, _)| d.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let pinyin_num = syllables
+        .iter()
+        .map(|(_, n, _)| n.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
     let tones = syllables.iter().map(|(_, _, t)| *t).collect();
     (pinyin, pinyin_num, tones)
 }
@@ -141,10 +150,24 @@ fn tone_css_class(tone: u8) -> &'static str {
 fn is_content_word(word: &str) -> bool {
     // Punctuation, spaces, and ASCII are not content words
     !word.chars().all(|c| {
-        c.is_ascii() || c == '，' || c == '。' || c == '！' || c == '？'
-            || c == '、' || c == '：' || c == '；' || c == '"' || c == '"'
-            || c == '\'' || c == '\'' || c == '（' || c == '）'
-            || c == '【' || c == '】' || c == '《' || c == '》'
+        c.is_ascii()
+            || c == '，'
+            || c == '。'
+            || c == '！'
+            || c == '？'
+            || c == '、'
+            || c == '：'
+            || c == '；'
+            || c == '"'
+            || c == '"'
+            || c == '\''
+            || c == '\''
+            || c == '（'
+            || c == '）'
+            || c == '【'
+            || c == '】'
+            || c == '《'
+            || c == '》'
     })
 }
 
@@ -268,3 +291,37 @@ static PINYIN_TABLE: &[(char, &str, &str, u8)] = &[
     ('得', "de", "de5", 0),
     ('情', "qíng", "qing2", 2),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn common_characters_keep_diacritics_numbers_and_tones() {
+        let (pinyin, numbered, tones) = annotate_pinyin("你好");
+        assert_eq!(pinyin, "nǐ hǎo");
+        assert_eq!(numbered, "ni3 hao3");
+        assert_eq!(tones, vec![3, 3]);
+    }
+
+    #[test]
+    fn unknown_characters_fall_back_without_claiming_a_tone() {
+        let (pinyin, numbered, tones) = annotate_pinyin("龘");
+        assert_eq!(pinyin, "龘");
+        assert_eq!(numbered, "龘");
+        assert_eq!(tones, vec![0]);
+    }
+
+    #[test]
+    fn punctuation_and_ascii_are_not_content_words() {
+        assert!(!is_content_word("。!?"));
+        assert!(is_content_word("学习"));
+    }
+
+    #[test]
+    fn tone_classes_cover_all_tones() {
+        assert_eq!(tone_css_class(1), "zh-t1");
+        assert_eq!(tone_css_class(4), "zh-t4");
+        assert_eq!(tone_css_class(0), "zh-t0");
+    }
+}

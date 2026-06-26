@@ -341,11 +341,10 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		h.db.Exec(ctx,
-			`UPDATE refresh_tokens SET revoked_at = now()
-			 WHERE user_id = $1 AND revoked_at IS NULL`,
-			userID,
-		)
+		// Another request may have rotated this token concurrently. Reject this
+		// reuse, but do not revoke the winner's newly-issued token: without a
+		// persisted token-family identifier that would turn ordinary concurrent
+		// browser requests into a logout of the valid session.
 		writeError(w, http.StatusUnauthorized, "invalid or expired refresh token")
 		return
 	}
@@ -358,9 +357,20 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 // POST /auth/logout
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(refreshTokenCookie)
-	if err == nil {
-		hashed := HashRefreshToken(cookie.Value)
+	raw := ""
+	if cookie, err := r.Cookie(refreshTokenCookie); err == nil {
+		raw = cookie.Value
+	}
+	if raw == "" && r.Body != nil {
+		var body struct {
+			RefreshToken string `json:"refresh_token"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) == nil {
+			raw = body.RefreshToken
+		}
+	}
+	if raw != "" {
+		hashed := HashRefreshToken(raw)
 		h.db.Exec(r.Context(),
 			`UPDATE refresh_tokens SET revoked_at = now() WHERE token_hash = $1`,
 			hashed,
@@ -370,9 +380,11 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		Name:     refreshTokenCookie,
 		Value:    "",
 		MaxAge:   -1,
+		Expires:  time.Unix(1, 0),
 		Path:     "/v1/auth",
-		Secure:   true,
+		Secure:   cookieSecure(),
 		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
 	})
 	w.WriteHeader(http.StatusNoContent)
 }

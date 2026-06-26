@@ -127,7 +127,7 @@ func newRouter(pool *pgxpool.Pool) chi.Router {
 	cardsHandler := cards.NewHandler(pool)
 	reviewHandler := review.NewHandler(pool)
 	immersionHandler := immersion.NewHandler(pool)
-	nlpProxy := nlp.NewProxy()
+	nlpProxy := nlp.NewProxy(pool)
 	nlpExplain := nlp.NewExplainHandler(pool)
 	decksHandler := decks.NewHandler(pool)
 	exportHandler := export.NewHandler(pool)
@@ -166,6 +166,7 @@ func newRouter(pool *pgxpool.Pool) chi.Router {
 		r.Post("/cards/{id}/suspend", cardsHandler.Suspend)
 		r.Post("/cards/{id}/unsuspend", cardsHandler.Unsuspend)
 		r.Post("/cards/{id}/bury", cardsHandler.Bury)
+		r.Post("/cards/{id}/unbury", cardsHandler.Unbury)
 
 		// Review
 		r.Get("/review/due-count", reviewHandler.DueCount)
@@ -319,7 +320,10 @@ func runServer(pool *pgxpool.Pool, handler http.Handler, discoverIngester *disco
 func allowedOrigins() []string {
 	raw := os.Getenv("ALLOWED_ORIGINS")
 	if raw == "" {
-		return []string{"http://localhost:*", "https://localhost:*"}
+		return []string{
+			"http://localhost:*", "https://localhost:*",
+			"http://127.0.0.1:*", "https://127.0.0.1:*",
+		}
 	}
 	parts := strings.Split(raw, ",")
 	out := make([]string, 0, len(parts))

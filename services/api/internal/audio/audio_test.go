@@ -116,11 +116,11 @@ func TestUploadAudioToMedia(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := uploadAudioToMedia(context.Background(), srv.Client(), srv.URL, []byte(mp3))
+	got, err := uploadAudioToMedia(context.Background(), srv.Client(), srv.URL, "https://media.public.test", []byte(mp3))
 	if err != nil {
 		t.Fatalf("upload: %v", err)
 	}
-	if want := srv.URL + "/audio/x.mp3"; got != want {
+	if want := "https://media.public.test/audio/x.mp3"; got != want {
 		t.Errorf("upload url = %q, want %q", got, want)
 	}
 }

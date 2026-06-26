@@ -99,6 +99,7 @@ services:
       # defaults to localhost:8002 (unreachable from inside the api container)
       # and every screenshot/audio upload silently no-ops.
       MEDIA_SERVICE_URL: http://media:8002
+      MEDIA_PUBLIC_BASE: ${MEDIA_PUBLIC_BASE:-http://localhost:8002}
       # Google Cloud TTS (best-on-market). Synthesizes word/sentence audio via a
       # service account and persists MP3s to the media service. When unset, cards
       # simply have no audio (no lower-quality fallback). Mount the SA JSON and
