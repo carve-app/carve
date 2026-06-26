@@ -92,8 +92,8 @@ wait_http() { # url, name, tries
 }
 
 # ── 1. Infra ────────────────────────────────────────────────────────────────
-echo "→ [1/6] Starting postgres + redis (Docker)..."
-dc up -d postgres redis
+echo "→ [1/6] Starting postgres + redis + Mailpit (Docker)..."
+dc up -d postgres redis mailpit
 for _ in $(seq 1 40); do
   dc exec -T postgres pg_isready -U carve -q 2>/dev/null && break
   sleep 0.5
@@ -142,6 +142,9 @@ echo "→ [5/6] Starting core api :$API_PORT..."
     NLP_SERVICE_URL="http://localhost:$NLP_PORT" \
     MEDIA_SERVICE_URL="http://localhost:$MEDIA_PORT" \
     GOOGLE_APPLICATION_CREDENTIALS="${GOOGLE_APPLICATION_CREDENTIALS:-}" \
+    SMTP_HOST="${SMTP_HOST:-localhost}" \
+    SMTP_PORT="${SMTP_PORT:-1025}" \
+    SMTP_FROM="${SMTP_FROM:-no-reply@carve.local}" \
     COOKIE_INSECURE=1 \
     go run ./cmd/api ) >"$LOGDIR/api.log" 2>&1 &
 PIDS+=($!)
@@ -149,8 +152,8 @@ wait_http "http://localhost:$API_PORT/health" api
 
 # ── 6. Web app ──────────────────────────────────────────────────────────────
 echo "→ [6/6] Starting web app :$WEB_PORT..."
-( cd apps/web && VITE_API_BASE="http://localhost:$API_PORT" \
-    npm run dev -- --port $WEB_PORT --host >"$LOGDIR/web.log" 2>&1 ) &
+( VITE_API_BASE="http://localhost:$API_PORT" \
+    mise exec -- pnpm --filter @carve/web dev -- --port $WEB_PORT --host >"$LOGDIR/web.log" 2>&1 ) &
 PIDS+=($!)
 wait_http "http://localhost:$WEB_PORT" web 60 || true  # vite can take a moment
 
@@ -171,6 +174,7 @@ cat <<EOF
   Core API       http://localhost:$API_PORT/health
   NLP service    http://localhost:$NLP_PORT/health   (tokenize/lookup/translate)
   Media service  http://localhost:$MEDIA_PORT/health
+  Test email     http://localhost:8025             (Mailpit inbox)
   Postgres       localhost:5432   redis localhost:6379
 
   Local credentials:

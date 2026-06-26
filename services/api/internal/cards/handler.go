@@ -23,11 +23,83 @@ import (
 )
 
 type Handler struct {
-	db *pgxpool.Pool
+	db    *pgxpool.Pool
+	media MediaUploader
 }
 
 func NewHandler(db *pgxpool.Pool) *Handler {
-	return &Handler{db: db}
+	return NewHandlerWithMedia(db, newHTTPMediaUploader())
+}
+
+// MediaUploader isolates provider transport from card persistence. Fault tests
+// can inject interrupted uploads and malformed responses without a live media
+// service.
+type MediaUploader interface {
+	Upload(context.Context, string, io.Reader, string) (string, error)
+}
+
+type httpMediaUploader struct {
+	baseURL string
+	token   string
+	client  interface {
+		Do(*http.Request) (*http.Response, error)
+	}
+}
+
+func newHTTPMediaUploader() MediaUploader {
+	baseURL := strings.TrimRight(os.Getenv("MEDIA_SERVICE_URL"), "/")
+	if baseURL == "" {
+		baseURL = "http://localhost:8002"
+	}
+	return &httpMediaUploader{
+		baseURL: baseURL,
+		token:   os.Getenv("MEDIA_INTERNAL_TOKEN"),
+		client:  &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+func NewHandlerWithMedia(db *pgxpool.Pool, media MediaUploader) *Handler {
+	return &Handler{db: db, media: media}
+}
+
+func (h *Handler) mediaUploader() MediaUploader {
+	if h.media == nil {
+		return newHTTPMediaUploader()
+	}
+	return h.media
+}
+
+func (u *httpMediaUploader) Upload(ctx context.Context, path string, body io.Reader, contentType string) (string, error) {
+	endpoint := u.baseURL + path
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", contentType)
+	if u.token != "" {
+		req.Header.Set("Authorization", "Bearer "+u.token)
+	}
+	resp, err := u.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		return "", fmt.Errorf("media service %s returned %d", endpoint, resp.StatusCode)
+	}
+	var result struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<16)).Decode(&result); err != nil {
+		return "", err
+	}
+	if result.URL == "" {
+		return "", errors.New("media service returned empty URL")
+	}
+	if strings.HasPrefix(result.URL, "http://") || strings.HasPrefix(result.URL, "https://") {
+		return result.URL, nil
+	}
+	return u.baseURL + result.URL, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -337,29 +409,29 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	cardID := chi.URLParam(r, "id")
 
 	var c struct {
-		ID                  string     `json:"id"`
-		LanguageCode        string     `json:"language_code"`
-		FrontText           string     `json:"front_text"`
-		BackText            *string    `json:"back_text"`
-		Sentence            *string    `json:"sentence"`
-		Translation         *string    `json:"subtitle_translation"`
-		SourceURL           *string    `json:"source_url"`
-		VideoSourceURL      *string    `json:"video_source_url"`
-		FrontAudioURL       *string    `json:"audio_url"`
-		FrontImageURL       *string    `json:"image_url"`
-		SubtitleStartMs     *int       `json:"subtitle_start_ms"`
-		SubtitleEndMs       *int       `json:"subtitle_end_ms"`
-		FsrsState           string     `json:"fsrs_state"`
-		FsrsDue             *time.Time `json:"fsrs_due"`
-		FsrsStability       *float64   `json:"stability"`
-		FsrsDifficulty      *float64   `json:"difficulty"`
-		FsrsReps            int        `json:"reps"`
-		FsrsLapses          int        `json:"lapses"`
-		Suspended           bool       `json:"suspended"`
-		IsLeech             bool       `json:"is_leech"`
-		Notes               *string    `json:"notes"`
-		Tags                []string   `json:"tags"`
-		CreatedAt           time.Time  `json:"created_at"`
+		ID              string     `json:"id"`
+		LanguageCode    string     `json:"language_code"`
+		FrontText       string     `json:"front_text"`
+		BackText        *string    `json:"back_text"`
+		Sentence        *string    `json:"sentence"`
+		Translation     *string    `json:"subtitle_translation"`
+		SourceURL       *string    `json:"source_url"`
+		VideoSourceURL  *string    `json:"video_source_url"`
+		FrontAudioURL   *string    `json:"audio_url"`
+		FrontImageURL   *string    `json:"image_url"`
+		SubtitleStartMs *int       `json:"subtitle_start_ms"`
+		SubtitleEndMs   *int       `json:"subtitle_end_ms"`
+		FsrsState       string     `json:"fsrs_state"`
+		FsrsDue         *time.Time `json:"fsrs_due"`
+		FsrsStability   *float64   `json:"stability"`
+		FsrsDifficulty  *float64   `json:"difficulty"`
+		FsrsReps        int        `json:"reps"`
+		FsrsLapses      int        `json:"lapses"`
+		Suspended       bool       `json:"suspended"`
+		IsLeech         bool       `json:"is_leech"`
+		Notes           *string    `json:"notes"`
+		Tags            []string   `json:"tags"`
+		CreatedAt       time.Time  `json:"created_at"`
 	}
 
 	err := h.db.QueryRow(r.Context(),
@@ -415,11 +487,6 @@ func (h *Handler) AttachMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mediaBase := os.Getenv("MEDIA_SERVICE_URL")
-	if mediaBase == "" {
-		mediaBase = "http://localhost:8002"
-	}
-
 	var imageURL, audioURL *string
 	// Track parts that were SENT but failed to store, so we can report an honest
 	// error instead of a 200 with null URLs (which the client would read as
@@ -431,7 +498,7 @@ func (h *Handler) AttachMedia(w http.ResponseWriter, r *http.Request) {
 		defer f.Close()
 		uploadsAttempted++
 		ct := contentTypeOf(hdr, "image/jpeg")
-		if url, err := uploadToMediaService(r.Context(), mediaBase+"/screenshots", f, ct); err == nil {
+		if url, err := h.mediaUploader().Upload(r.Context(), "/screenshots", f, ct); err == nil {
 			imageURL = &url
 		} else {
 			slog.Warn("card media: upload image", "error", err)
@@ -443,7 +510,7 @@ func (h *Handler) AttachMedia(w http.ResponseWriter, r *http.Request) {
 		defer f.Close()
 		uploadsAttempted++
 		ct := contentTypeOf(hdr, "audio/webm")
-		if url, err := uploadToMediaService(r.Context(), mediaBase+"/audio", f, ct); err == nil {
+		if url, err := h.mediaUploader().Upload(r.Context(), "/audio", f, ct); err == nil {
 			audioURL = &url
 		} else {
 			slog.Warn("card media: upload audio", "error", err)
@@ -513,48 +580,6 @@ func contentTypeOf(hdr *multipart.FileHeader, def string) string {
 	return def
 }
 
-func uploadToMediaService(ctx context.Context, url string, body io.Reader, contentType string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", contentType)
-	// Authenticate to the media service when an internal token is configured
-	// (production). Empty in dev/e2e, where media writes are open.
-	if tok := os.Getenv("MEDIA_INTERNAL_TOKEN"); tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
-	}
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf("media service %s returned %d", url, resp.StatusCode)
-	}
-
-	var result struct {
-		URL string `json:"url"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
-	}
-
-	// The R2 backend returns an absolute (Cloudflare) URL; the local backend
-	// returns a path that we must qualify with the media service's base.
-	if strings.HasPrefix(result.URL, "http://") || strings.HasPrefix(result.URL, "https://") {
-		return result.URL, nil
-	}
-	mediaBase := os.Getenv("MEDIA_SERVICE_URL")
-	if mediaBase == "" {
-		mediaBase = "http://localhost:8002"
-	}
-	return mediaBase + result.URL, nil
-}
-
 func formInt(r *http.Request, field string) *int {
 	v := r.FormValue(field)
 	if v == "" {
@@ -578,14 +603,14 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	cardID := chi.URLParam(r, "id")
 
 	var req struct {
-		BackText    *string  `json:"back_text"`
-		Sentence    *string  `json:"sentence"`
-		Translation *string  `json:"subtitle_translation"`
-		FrontText   *string  `json:"front_text"`
-		FrontReading *string `json:"front_reading"`
-		Notes       *string  `json:"notes"`
-		Tags        []string `json:"tags"`
-		DeckID      *string  `json:"deck_id"`
+		BackText     *string  `json:"back_text"`
+		Sentence     *string  `json:"sentence"`
+		Translation  *string  `json:"subtitle_translation"`
+		FrontText    *string  `json:"front_text"`
+		FrontReading *string  `json:"front_reading"`
+		Notes        *string  `json:"notes"`
+		Tags         []string `json:"tags"`
+		DeckID       *string  `json:"deck_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON")

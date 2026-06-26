@@ -13,6 +13,14 @@ import (
 type Proxy struct {
 	serviceURL     string
 	internalSecret string
+	client         HTTPDoer
+}
+
+// HTTPDoer is the provider boundary used by NLP and dictionary-image calls.
+// Tests inject deterministic timeout/malformed-response transports without
+// requiring a real Python service or public provider.
+type HTTPDoer interface {
+	Do(*http.Request) (*http.Response, error)
 }
 
 func NewProxy() *Proxy {
@@ -23,7 +31,22 @@ func NewProxy() *Proxy {
 	return &Proxy{
 		serviceURL:     url,
 		internalSecret: os.Getenv("NLP_INTERNAL_SECRET"),
+		client:         http.DefaultClient,
 	}
+}
+
+func NewProxyWithClient(serviceURL, internalSecret string, client HTTPDoer) *Proxy {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	return &Proxy{serviceURL: serviceURL, internalSecret: internalSecret, client: client}
+}
+
+func (p *Proxy) do(req *http.Request) (*http.Response, error) {
+	if p.client == nil {
+		return http.DefaultClient.Do(req)
+	}
+	return p.client.Do(req)
 }
 
 const nlpTimeout = 120 * time.Second
@@ -35,7 +58,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, upstreamPath str
 
 	// Use a dedicated timeout longer than the global chi middleware (30s) so
 	// the first request after NLP service startup isn't killed prematurely.
-	ctx, cancel := context.WithTimeout(context.Background(), nlpTimeout)
+	ctx, cancel := context.WithTimeout(r.Context(), nlpTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, r.Body)
@@ -55,7 +78,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, upstreamPath str
 		req.Header.Set("X-Internal-Secret", p.internalSecret)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.do(req)
 	if err != nil {
 		slog.Error("nlp proxy: upstream request failed", "url", upstreamURL, "error", err)
 		http.Error(w, `{"error":"nlp service unavailable"}`, http.StatusBadGateway)
@@ -116,7 +139,7 @@ func (p *Proxy) GrammarPatterns(w http.ResponseWriter, r *http.Request) {
 // forwardGET is a GET-flavoured forward (no body).
 func (p *Proxy) forwardGET(w http.ResponseWriter, r *http.Request, upstreamPath string) {
 	upstreamURL := p.serviceURL + upstreamPath
-	ctx, cancel := context.WithTimeout(context.Background(), nlpTimeout)
+	ctx, cancel := context.WithTimeout(r.Context(), nlpTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamURL, nil)
 	if err != nil {
@@ -127,7 +150,7 @@ func (p *Proxy) forwardGET(w http.ResponseWriter, r *http.Request, upstreamPath 
 	if p.internalSecret != "" {
 		req.Header.Set("X-Internal-Secret", p.internalSecret)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.do(req)
 	if err != nil {
 		slog.Error("nlp proxy GET: upstream request failed", "url", upstreamURL, "error", err)
 		http.Error(w, `{"error":"nlp service unavailable"}`, http.StatusBadGateway)

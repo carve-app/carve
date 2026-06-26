@@ -12,4 +12,5 @@ FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=builder /out/media /usr/local/bin/media
 EXPOSE 8002
 USER nonroot:nonroot
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 CMD ["/usr/local/bin/media", "healthcheck"]
 ENTRYPOINT ["/usr/local/bin/media"]

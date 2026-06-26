@@ -12,11 +12,36 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 
 const API = __ENV.API_BASE || 'http://localhost:8080';
-const TOKEN = __ENV.ACCESS_TOKEN || '';
+const PROVIDED_TOKEN = __ENV.ACCESS_TOKEN || '';
+const PROVIDED_CARD_ID = __ENV.CARD_ID || '';
 
-const HEADERS = TOKEN
-  ? { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' }
-  : { 'Content-Type': 'application/json' };
+function headers(token) {
+  return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+}
+
+function uuid() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.floor(Math.random() * 16);
+    return (c === 'x' ? r : (r & 0x3) | 8).toString(16);
+  });
+}
+
+export function setup() {
+  if (PROVIDED_TOKEN && PROVIDED_CARD_ID) {
+    return { token: PROVIDED_TOKEN, cardId: PROVIDED_CARD_ID };
+  }
+  const email = `k6+${Date.now()}-${uuid()}@example.com`;
+  const register = http.post(`${API}/v1/auth/register`, JSON.stringify({
+    email, password: 'k6-performance-password', display_name: 'k6',
+  }), { headers: { 'Content-Type': 'application/json' } });
+  if (register.status !== 200) throw new Error(`register failed: ${register.status} ${register.body}`);
+  const token = register.json('access_token');
+  const card = http.post(`${API}/v1/cards`, JSON.stringify({
+    language_code: 'en', lemma: `performance-${uuid()}`, back_text: 'load test',
+  }), { headers: headers(token) });
+  if (card.status !== 200 && card.status !== 201) throw new Error(`card seed failed: ${card.status} ${card.body}`);
+  return { token, cardId: card.json('id') };
+}
 
 export const options = {
   scenarios: {
@@ -47,32 +72,33 @@ export const options = {
   },
 };
 
-export function listCards() {
+export function listCards(data) {
   const r = http.get(`${API}/v1/cards?language=en&limit=50`, {
-    headers: HEADERS, tags: { name: 'list' },
+    headers: headers(data.token), tags: { name: 'list' },
   });
-  check(r, { 'status 200/401': (res) => res.status === 200 || res.status === 401 });
+  check(r, { 'list status 200': (res) => res.status === 200 });
   sleep(0.2);
 }
 
-export function reviewSession() {
+export function reviewSession(data) {
   const r = http.get(`${API}/v1/review/session?language=en&limit=20`, {
-    headers: HEADERS, tags: { name: 'session' },
+    headers: headers(data.token), tags: { name: 'session' },
   });
-  check(r, { 'status 200/401': (res) => res.status === 200 || res.status === 401 });
+  check(r, { 'session status 200': (res) => res.status === 200 });
   sleep(0.1);
 }
 
-export function submitReview() {
+export function submitReview(data) {
   const r = http.post(
     `${API}/v1/review/events`,
     JSON.stringify({
-      card_id: '00000000-0000-0000-0000-000000000000',
+      event_id: uuid(),
+      card_id: data.cardId,
       rating: 3,
       time_taken_ms: 1500,
     }),
-    { headers: HEADERS, tags: { name: 'event' } },
+    { headers: headers(data.token), tags: { name: 'event' } },
   );
-  check(r, { 'status 200/400/401/404': (res) => [200, 400, 401, 404].includes(res.status) });
+  check(r, { 'event status 200': (res) => res.status === 200 });
   sleep(0.05);
 }

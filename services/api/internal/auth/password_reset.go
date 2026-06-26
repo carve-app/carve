@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"os"
 	"time"
 
+	"github.com/carve-app/carve/services/api/internal/mailer"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -17,7 +17,7 @@ const resetTokenTTL = 1 * time.Hour
 // POST /v1/auth/forgot
 // Accepts {"email": "..."}.
 // Always returns 204 (no information leakage about whether the email exists).
-// In production, SMTP/transactional email sends the reset link; here we log it.
+// Delivery uses the configured SMTP sender and never exposes the token in logs.
 func (h *Handler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email string `json:"email"`
@@ -49,7 +49,7 @@ func (h *Handler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 	rawToken := hex.EncodeToString(rawBytes)
 	tokenHash := HashRefreshToken(rawToken)
 
-	exp := time.Now().Add(resetTokenTTL)
+	exp := h.now().Add(resetTokenTTL)
 	_, err = h.db.Exec(ctx,
 		`INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at)
 		 VALUES ($1, $2, $3, $4)
@@ -61,14 +61,17 @@ func (h *Handler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	appBase := os.Getenv("APP_BASE_URL")
-	if appBase == "" {
-		appBase = "http://localhost:5173"
+	resetURL := appBaseURL() + "/reset-password?token=" + rawToken
+	if h.mailer != nil {
+		if err := h.mailer.Send(ctx, mailer.Message{
+			To: req.Email, Subject: "Reset your Carve password",
+			Text: "Reset your Carve password by opening this link:\n\n" + resetURL + "\n\nThis link expires in 1 hour.",
+		}); err != nil {
+			// Preserve the endpoint's anti-enumeration response while recording a
+			// token-free operational error.
+			slog.Error("send password reset", "error", err, "user_id", userID)
+		}
 	}
-	resetURL := appBase + "/reset-password?token=" + rawToken
-
-	// In production: send email. Here we log so local testing works.
-	slog.Info("password reset link", "email", req.Email, "url", resetURL)
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -104,7 +107,7 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		 WHERE token_hash = $1`,
 		tokenHash,
 	).Scan(&tokenID, &userID, &expiresAt, &usedAt)
-	if err != nil || usedAt != nil || time.Now().After(expiresAt) {
+	if err != nil || usedAt != nil || h.now().After(expiresAt) {
 		writeError(w, http.StatusUnauthorized, "invalid or expired reset token")
 		return
 	}

@@ -11,23 +11,42 @@
 package metrics
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
+// ProtectedHandler requires a bearer token when METRICS_TOKEN is configured.
+// Local development remains frictionless when the variable is intentionally
+// empty, while production can no longer expose operational data by accident.
+func ProtectedHandler(w http.ResponseWriter, r *http.Request) {
+	token := os.Getenv("METRICS_TOKEN")
+	if token != "" {
+		const prefix = "Bearer "
+		got := r.Header.Get("Authorization")
+		if len(got) <= len(prefix) || got[:len(prefix)] != prefix ||
+			subtle.ConstantTimeCompare([]byte(got[len(prefix):]), []byte(token)) != 1 {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+	}
+	Handler(w, r)
+}
+
 // Buckets in seconds — Prometheus' default web histogram.
 var defaultBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10}
 
 type histogram struct {
-	mu      sync.Mutex
-	counts  []uint64 // one per bucket; the last slot is +Inf overflow
-	sum     float64
-	total   uint64
+	mu     sync.Mutex
+	counts []uint64 // one per bucket; the last slot is +Inf overflow
+	sum    float64
+	total  uint64
 }
 
 func newHistogram() *histogram {
@@ -54,11 +73,11 @@ type labelKey struct {
 }
 
 var (
-	mu          sync.RWMutex
-	reqTotal    = map[labelKey]*uint64{}
-	errTotal    = map[labelKey]*uint64{}
-	latencies   = map[labelKey]*histogram{}
-	counters    = map[string]*uint64{}
+	mu        sync.RWMutex
+	reqTotal  = map[labelKey]*uint64{}
+	errTotal  = map[labelKey]*uint64{}
+	latencies = map[labelKey]*histogram{}
+	counters  = map[string]*uint64{}
 )
 
 // IncRequest records a single completed HTTP request.

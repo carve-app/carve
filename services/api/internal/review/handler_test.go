@@ -119,6 +119,23 @@ func TestSubmitEvent_MissingCardID(t *testing.T) {
 	}
 }
 
+func TestSubmitEvent_InvalidEventID(t *testing.T) {
+	h := newReviewHandler()
+	body, _ := json.Marshal(map[string]any{
+		"event_id": "not-a-uuid", "card_id": "some-id", "rating": 3,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/review/events", bytes.NewReader(body))
+	req = authedCtx(req)
+	w := httptest.NewRecorder()
+	h.SubmitEvent(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid event_id, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "event_id") {
+		t.Fatalf("expected event_id error, got %s", w.Body.String())
+	}
+}
+
 func TestSubmitEvent_RatingZero(t *testing.T) {
 	h := newReviewHandler()
 	body, _ := json.Marshal(map[string]any{"card_id": "some-id", "rating": 0})

@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"time"
 
+	"github.com/carve-app/carve/services/api/internal/mailer"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
@@ -24,11 +26,36 @@ func isUniqueViolation(err error) bool {
 const refreshTokenCookie = "carve_refresh"
 
 type Handler struct {
-	db *pgxpool.Pool
+	db     *pgxpool.Pool
+	mailer mailer.Sender
+	clock  Clock
 }
 
+type Clock interface {
+	Now() time.Time
+}
+
+type systemClock struct{}
+
+func (systemClock) Now() time.Time { return time.Now() }
+
 func NewHandler(db *pgxpool.Pool) *Handler {
-	return &Handler{db: db}
+	return NewHandlerWithMailer(db, mailer.NewFromEnv())
+}
+
+func NewHandlerWithMailer(db *pgxpool.Pool, sender mailer.Sender) *Handler {
+	return NewHandlerWithDependencies(db, sender, systemClock{})
+}
+
+func NewHandlerWithDependencies(db *pgxpool.Pool, sender mailer.Sender, clock Clock) *Handler {
+	return &Handler{db: db, mailer: sender, clock: clock}
+}
+
+func (h *Handler) now() time.Time {
+	if h.clock == nil {
+		return time.Now()
+	}
+	return h.clock.Now()
 }
 
 // ── Request / response types ──────────────────────────────────────────────────
@@ -45,8 +72,8 @@ type loginRequest struct {
 }
 
 type authResponse struct {
-	AccessToken string      `json:"access_token"`
-	ExpiresIn   int         `json:"expires_in"` // seconds
+	AccessToken string `json:"access_token"`
+	ExpiresIn   int    `json:"expires_in"` // seconds
 	// RefreshToken is also returned in the body (in addition to the HttpOnly
 	// cookie) for clients that can't rely on cookies — notably the browser
 	// extension, whose service-worker fetches to the API origin are cross-site
@@ -105,7 +132,7 @@ func (h *Handler) issueTokenPair(
 	w http.ResponseWriter,
 	userID, email, displayName string,
 ) error {
-	access, _, err := IssueAccessToken(userID, email)
+	access, _, err := issueAccessTokenAt(userID, email, h.now())
 	if err != nil {
 		return fmt.Errorf("IssueAccessToken: %w", err)
 	}
@@ -114,7 +141,7 @@ func (h *Handler) issueTokenPair(
 	if err != nil {
 		return fmt.Errorf("NewRefreshToken: %w", err)
 	}
-	refreshExp := time.Now().Add(RefreshTokenTTL)
+	refreshExp := h.now().Add(RefreshTokenTTL)
 
 	_, err = h.db.Exec(ctx,
 		`INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at)
@@ -198,6 +225,14 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	if err := tx.Commit(ctx); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
+	}
+
+	// Verification delivery is best-effort so a temporary SMTP outage cannot
+	// leave a committed account unable to log in. Resend remains available.
+	if rawToken, err := h.IssueVerificationToken(ctx, userID); err != nil {
+		slog.Error("issue registration verification", "error", err, "user_id", userID)
+	} else if err := h.sendVerification(ctx, req.Email, rawToken); err != nil {
+		slog.Error("send registration verification", "error", err, "user_id", userID)
 	}
 
 	// Token issuance writes a refresh_tokens row + the HTTP response; run it
@@ -288,7 +323,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		 WHERE rt.token_hash = $1`,
 		hashed,
 	).Scan(&userID, &email, &displayName, &expiresAt, &revokedAt)
-	if err != nil || revokedAt != nil || time.Now().After(expiresAt) {
+	if err != nil || revokedAt != nil || h.now().After(expiresAt) {
 		writeError(w, http.StatusUnauthorized, "invalid or expired refresh token")
 		return
 	}
@@ -332,11 +367,11 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:    refreshTokenCookie,
-		Value:   "",
-		MaxAge:  -1,
-		Path:    "/v1/auth",
-		Secure:  true,
+		Name:     refreshTokenCookie,
+		Value:    "",
+		MaxAge:   -1,
+		Path:     "/v1/auth",
+		Secure:   true,
 		HttpOnly: true,
 	})
 	w.WriteHeader(http.StatusNoContent)

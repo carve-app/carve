@@ -5,24 +5,28 @@
   "type": "module",
   "scripts": {
     "dev": "BROWSER=chrome BUILD_TARGET=background vite build --watch --mode development",
-    "build": "npm run build:chrome && npm run build:firefox && npm run build:safari",
+    "build": "pnpm run build:chrome && pnpm run build:firefox && pnpm run build:safari",
     "build:chrome": "BROWSER=chrome BUILD_TARGET=background vite build && BROWSER=chrome BUILD_TARGET=content vite build && BROWSER=chrome BUILD_TARGET=popup vite build",
     "build:firefox": "BROWSER=firefox BUILD_TARGET=background vite build && BROWSER=firefox BUILD_TARGET=content vite build && BROWSER=firefox BUILD_TARGET=popup vite build",
     "build:safari": "BROWSER=safari BUILD_TARGET=background vite build && BROWSER=safari BUILD_TARGET=content vite build && BROWSER=safari BUILD_TARGET=popup vite build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:wasm": "node test-wasm.mjs"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@types/chrome": "^0.0.320",
     "@types/node": "^25.9.1",
-    "@vitest/browser": "^2.1.9",
+    "@vitest/browser": "^4.1.9",
+    "@vitest/coverage-v8": "4.1.9",
     "fast-check": "^4.8.0",
     "jsdom": "^29.1.1",
     "typescript": "^5.8.0",
-    "vite": "^5.0.0",
-    "vite-plugin-static-copy": "^1.0.0",
-    "vitest": "^2.1.9"
+    "vite": "^8.1.0",
+    "vite-plugin-static-copy": "^4.1.1",
+    "vitest": "^4.1.9"
   }
 }

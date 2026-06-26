@@ -13,6 +13,7 @@ import { defineConfig, devices } from '@playwright/test';
  */
 
 const useRealServices = process.env.E2E_USE_REAL === '1';
+const realAPIBase = process.env.API_BASE ?? 'http://localhost:8080';
 
 export default defineConfig({
   testDir: './tests',
@@ -29,7 +30,7 @@ export default defineConfig({
   webServer: useRealServices
     ? [
         {
-          command: 'cd ../apps/web && VITE_API_BASE=http://localhost:8080 npm run dev -- --port 5173',
+          command: `VITE_API_BASE=${realAPIBase} pnpm --dir ../apps/web dev -- --port 5173`,
           port: 5173,
           reuseExistingServer: !process.env.CI,
           timeout: 60_000,
@@ -43,7 +44,7 @@ export default defineConfig({
           timeout: 30_000,
         },
         {
-          command: 'cd ../apps/web && VITE_API_BASE=http://localhost:8080 npm run dev -- --port 5173',
+          command: 'VITE_API_BASE=http://localhost:8080 pnpm --dir ../apps/web dev -- --port 5173',
           port: 5173,
           reuseExistingServer: !process.env.CI,
           timeout: 60_000,

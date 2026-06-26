@@ -1,7 +1,14 @@
 packages:
   - "apps/*"
+  - "e2e"
   - "services/*"
   - "packages/*"
 allowBuilds:
   esbuild: true
   svelte-preprocess: true
+minimumReleaseAgeExclude:
+  - eslint-plugin-svelte@3.20.0
+overrides:
+  "cookie@<0.7.0": "^0.7.2"
+  "qs@<6.15.2": "^6.15.2"
+  "undici@<7.28.0": "^7.28.0"

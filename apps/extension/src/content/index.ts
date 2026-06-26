@@ -168,14 +168,6 @@ function hideOverlay(): void {
   overlayVisible = false;
 }
 
-function toggleOverlay(): void {
-  if (overlayVisible) {
-    hideOverlay();
-  } else {
-    showOverlay();
-  }
-}
-
 // Listen for messages from the popup or background script.
 browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'SET_SITE_ENABLED') {

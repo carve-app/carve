@@ -5,9 +5,6 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main]
-  schedule:
-    # Hourly streaming canary; nightly perf + mutation jobs.
-    - cron: "0 * * * *"
   workflow_dispatch: {}
 
 # Least privilege: these are build/test-only jobs (no GitHub API writes), and
@@ -20,6 +17,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+
+  quality:
+    name: Workspace Quality Gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with: { version: "11.5.2" }
+
+      - uses: actions/setup-node@v5
+        with: { node-version: "22", cache: pnpm, cache-dependency-path: pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm test:coverage
+      - run: pnpm test:flow-docs
+      - run: pnpm audit --audit-level moderate
 
   # ── NLP Service (Python) ───────────────────────────────────────────────────
   nlp:
@@ -181,24 +194,24 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: pnpm/action-setup@v4
+        with: { version: "11.5.2" }
+
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: apps/extension/package-lock.json
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
-        working-directory: apps/extension
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Type-check
-        working-directory: apps/extension
-        run: npm run typecheck
+        run: pnpm --filter @carve/extension typecheck
 
       - name: Build (${{ matrix.browser }})
-        working-directory: apps/extension
-        run: npm run build:${{ matrix.browser }}
+        run: pnpm --filter @carve/extension build:${{ matrix.browser }}
 
       - name: Verify dist artifacts (${{ matrix.browser }})
         working-directory: apps/extension
@@ -225,24 +238,24 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: pnpm/action-setup@v4
+        with: { version: "11.5.2" }
+
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: apps/web/package-lock.json
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
-        working-directory: apps/web
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Type-check
-        working-directory: apps/web
-        run: npm run check
+        run: pnpm --filter @carve/web check
 
       - name: Build
-        working-directory: apps/web
-        run: npm run build
+        run: pnpm --filter @carve/web build && test -f apps/web/build/index.html
 
   # ── Extension e2e (Playwright) ────────────────────────────────────────────
   extension-e2e:
@@ -253,12 +266,19 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: pnpm/action-setup@v4
+        with: { version: "11.5.2" }
+
+      - uses: browser-actions/setup-firefox@v1
+        with:
+          firefox-version: latest
+
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: apps/extension/package-lock.json
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Download Chrome extension artifact
         uses: actions/download-artifact@v7
@@ -273,16 +293,23 @@ jobs:
           path: apps/extension/dist/firefox
 
       - name: Install e2e dependencies
-        working-directory: e2e
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: Install Playwright Chromium
         working-directory: e2e
-        run: npx playwright install chromium --with-deps
+        run: pnpm exec playwright install chromium --with-deps
+
+      - name: Validate Firefox package
+        working-directory: e2e
+        run: pnpm exec web-ext lint --source-dir ../apps/extension/dist/firefox
 
       - name: Run extension e2e tests
         working-directory: e2e
-        run: node extension.test.js
+        env:
+          FIREFOX_BINARY: firefox
+        run: |
+          node extension.test.js
+          xvfb-run -a node firefox-extension-smoke.cjs
 
       - name: Upload screenshot on failure
         if: failure()
@@ -310,6 +337,12 @@ jobs:
         with:
           node-version: "22"
 
+      - uses: pnpm/action-setup@v4
+        with: { version: "11.5.2" }
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
       - name: Install ffmpeg (for the audio/video fixture)
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
@@ -320,8 +353,7 @@ jobs:
           (cd services/media && go build -o ../../bin/media ./cmd/media)
 
       - name: Build chrome extension
-        working-directory: apps/extension
-        run: npm ci && npm run build:chrome
+        run: pnpm --filter @carve/extension build:chrome
 
       - name: Generate the fixture video (vp8 + opus, with audio tone)
         run: |
@@ -334,7 +366,7 @@ jobs:
 
       - name: Install e2e deps + Playwright Chromium
         working-directory: e2e
-        run: npm ci && npx playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium
 
       - name: Run real video-mining e2e
         working-directory: e2e
@@ -448,13 +480,34 @@ jobs:
           go-version: "1.26"
           cache-dependency-path: services/api/go.sum
 
-      - name: Run migrations against test database
+      - name: Run staged upgrade and idempotent migration replay
         working-directory: services/api
         env:
           DATABASE_URL: postgres://carve:carve@localhost:5432/carve?sslmode=disable
         run: |
+          mkdir -p /tmp/carve-old-migrations
+          find ./migrations -maxdepth 1 -name '*.sql' ! -name '015_*' -exec cp {} /tmp/carve-old-migrations/ \;
+          go run ./cmd/migrate --dir /tmp/carve-old-migrations
           go run ./cmd/migrate --dir ./migrations
-          echo "✓ Migrations applied cleanly"
+          go run ./cmd/migrate --dir ./migrations
+          echo "✓ Staged upgrade and replay applied cleanly"
+
+      - name: Prove backup and restore
+        env:
+          PGPASSWORD: carve
+        run: |
+          psql -h localhost -U carve -d carve -v ON_ERROR_STOP=1 \
+            -c "INSERT INTO users (email, display_name) VALUES ('backup-proof@example.com', 'Backup Proof')"
+          pg_dump -h localhost -U carve -d carve --format=custom --file=/tmp/carve.dump
+          psql -h localhost -U carve -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE carve_restore"
+          pg_restore -h localhost -U carve -d carve_restore --exit-on-error /tmp/carve.dump
+          test "$(psql -h localhost -U carve -d carve_restore -Atc \
+            "SELECT count(*) FROM users WHERE email='backup-proof@example.com'")" = "1"
+          test "$(psql -h localhost -U carve -d carve_restore -Atc \
+            "SELECT count(*) FROM schema_migrations")" = \
+            "$(psql -h localhost -U carve -d carve -Atc \
+            "SELECT count(*) FROM schema_migrations")"
+          echo "✓ Logical backup restored with data and complete migration history"
 
   # ── L3 testcontainers integration ─────────────────────────────────────────
   integration-l3:
@@ -510,15 +563,24 @@ jobs:
           echo "API did not become healthy in time"
           exit 1
       - name: Install schemathesis
-        run: pip install schemathesis
+        run: pip install schemathesis==4.4.4
+      - name: Create contract-test identity
+        id: contract-auth
+        run: |
+          token="$(curl -fsS -X POST http://127.0.0.1:8090/v1/auth/register \
+            -H 'Content-Type: application/json' \
+            -d '{"email":"contract@example.com","password":"contract-password-123","display_name":"Contract"}' \
+            | python -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')"
+          test -n "$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
       - name: Run contract fuzz
         run: |
-          # Limit to a reasonable amount of hypothesis examples per endpoint
-          schemathesis run --base-url http://127.0.0.1:8090 \
-                          --max-examples 25 \
-                          --hypothesis-deadline 5000 \
-                          docs/openapi.yaml || \
-          echo "::warning ::schemathesis surfaced findings (non-blocking on first wiring)"
+          schemathesis run docs/openapi.yaml \
+            --url http://127.0.0.1:8090 \
+            --max-examples 25 \
+            --request-timeout 5 \
+            --checks not_a_server_error,status_code_conformance,content_type_conformance \
+            --header "Authorization: Bearer ${{ steps.contract-auth.outputs.token }}"
 
   # ── L5–L9 Playwright matrix (web + a11y + offline) ────────────────────────
   e2e-web:
@@ -527,24 +589,30 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project: [web-chromium, web-firefox, web-webkit]
+        include:
+          - project: web-chromium
+            browser: chromium
+          - project: web-firefox
+            browser: firefox
+          - project: web-webkit
+            browser: webkit
+          - project: web-mobile
+            browser: webkit
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with: { node-version: "22" }
+      - uses: pnpm/action-setup@v4
+        with: { version: "11.5.2" }
       - name: Install web deps
-        working-directory: apps/web
-        run: npm ci
-      - name: Install e2e deps
-        working-directory: e2e
-        run: npm ci
+        run: pnpm install --frozen-lockfile
       - name: Install Playwright browsers
         working-directory: e2e
-        run: npx playwright install --with-deps ${{ matrix.project == 'web-firefox' && 'firefox' || matrix.project == 'web-webkit' && 'webkit' || 'chromium' }}
+        run: pnpm exec playwright install --with-deps ${{ matrix.browser }}
       - name: Run Playwright (${{ matrix.project }})
         working-directory: e2e
         env: { CI: "true" }
-        run: npx playwright test --project=${{ matrix.project }} --grep-invert "extension|visual"
+        run: pnpm exec playwright test --project=${{ matrix.project }} --grep-invert "extension|visual"
       - name: Upload report
         if: failure()
         uses: actions/upload-artifact@v6
@@ -552,93 +620,41 @@ jobs:
           name: playwright-${{ matrix.project }}
           path: e2e/playwright-report/
 
+  visual:
+    name: L7 — Visual regression (Chromium/macOS)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with: { version: "11.5.2" }
+      - uses: actions/setup-node@v5
+        with: { node-version: "22", cache: pnpm, cache-dependency-path: pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+      - name: Install Playwright Chromium
+        working-directory: e2e
+        run: pnpm exec playwright install chromium
+      - name: Compare committed visual baselines
+        working-directory: e2e
+        env: { CI: "true" }
+        run: pnpm exec playwright test visual.spec.ts --project=web-chromium
+      - name: Upload visual diff
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: visual-regression-diff
+          path: e2e/test-results/
+
   # ── L6 extension fixture replay (jsdom) ───────────────────────────────────
   extension-fixtures:
     name: L6 — Extension fixture replay
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with: { version: "11.5.2" }
       - uses: actions/setup-node@v5
-        with: { node-version: "22", cache-dependency-path: apps/extension/package-lock.json }
+        with: { node-version: "22", cache: pnpm, cache-dependency-path: pnpm-lock.yaml }
       - name: Install
-        working-directory: apps/extension
-        run: npm ci
+        run: pnpm install --frozen-lockfile
       - name: Run fixture tests
-        working-directory: apps/extension
-        run: npx vitest run src/content/video/__tests__/platforms.test.ts
-
-  # ── L13 Lighthouse perf budget (PR warning, nightly hard fail) ────────────
-  perf:
-    name: L13 — Lighthouse perf budget
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    needs: [web]
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with: { node-version: "22" }
-      - name: Install lhci
-        run: npm install -g @lhci/cli@0.13.x
-      - name: Web deps
-        working-directory: apps/web
-        run: npm ci
-      - name: Lighthouse CI
-        run: lhci autorun || echo "::warning ::lighthouse missed budget"
-
-  # ── L2 mutation testing (nightly) ─────────────────────────────────────────
-  mutation:
-    name: L2 — Mutation testing
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with: { go-version: "1.26", cache-dependency-path: services/api/go.sum }
-      - uses: actions/setup-python@v6
-        with: { python-version: "3.13", cache: pip }
-      - uses: actions/setup-node@v5
-        with: { node-version: "22" }
-      - name: Install Go mutation tool
-        run: go install github.com/avito-tech/go-mutesting/cmd/go-mutesting@latest
-      - name: Install mutmut
-        run: pip install mutmut
-      - name: Run Go mutation
-        working-directory: services/api
-        run: go-mutesting --threshold 0.65 ./internal/fsrs/... ./internal/importer/... ./internal/output/... ./internal/metrics/... || true
-      - name: Run extension Stryker
-        working-directory: apps/extension
-        run: npm ci && npx stryker run || true
-      - name: Run web Stryker
-        working-directory: apps/web
-        run: npm ci && npx stryker run || true
-
-  # ── L11 streaming canary (hourly via schedule, on-demand via dispatch) ─────
-  streaming-canary:
-    name: L11 — Streaming canary
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with: { node-version: "22" }
-      - name: Build extension
-        working-directory: apps/extension
-        run: npm ci && npm run build:chrome
-      # Playwright's webServer (see e2e/playwright.config.ts) launches `vite` from
-      # apps/web, so its deps must be installed here too — without this the canary
-      # died with `vite: not found` / exit 127 on every scheduled run.
-      - name: Web deps
-        working-directory: apps/web
-        run: npm ci
-      - name: e2e deps
-        working-directory: e2e
-        run: npm ci && npx playwright install --with-deps chromium
-      - name: Run streaming canary
-        working-directory: e2e
-        env: { CI: "true" }
-        # Canary is informational only: never fail the job (see hourly-schedule comment above).
-        # A broken `|| \` line-continuation previously turned the fallback into `\ echo`,
-        # which exited 127 and failed every scheduled run.
-        run: |
-          npx playwright test tests/extension-streaming.spec.ts \
-            || echo "::warning ::canary failed — DOM drift suspected; investigate within the hour"
+        run: pnpm --filter @carve/extension exec vitest run src/content/video/__tests__/platforms.test.ts

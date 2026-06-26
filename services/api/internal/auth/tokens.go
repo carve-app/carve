@@ -61,13 +61,17 @@ func RequireJWTSecret() error {
 
 // IssueAccessToken creates a signed JWT for the given user.
 func IssueAccessToken(userID, email string) (string, time.Time, error) {
-	exp := time.Now().Add(AccessTokenTTL)
+	return issueAccessTokenAt(userID, email, time.Now())
+}
+
+func issueAccessTokenAt(userID, email string, now time.Time) (string, time.Time, error) {
+	exp := now.Add(AccessTokenTTL)
 	claims := Claims{
 		UserID: userID,
 		Email:  email,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   userID,
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(exp),
 			Issuer:    "carve-api",
 		},

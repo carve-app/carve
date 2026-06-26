@@ -5,8 +5,10 @@ services:
     image: caddy:2.8-alpine
     restart: unless-stopped
     depends_on:
-      - api
-      - media
+      api:
+        condition: service_healthy
+      media:
+        condition: service_healthy
     ports:
       - "80:80"
       - "443:443"
@@ -50,6 +52,7 @@ services:
       PORT: "8080"
       DATABASE_URL: ${DATABASE_URL}
       JWT_SECRET: ${JWT_SECRET}
+      METRICS_TOKEN: ${METRICS_TOKEN}
       APP_BASE_URL: ${APP_BASE_URL}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
       NLP_SERVICE_URL: ${NLP_SERVICE_URL:-http://nlp:8001}
@@ -67,8 +70,15 @@ services:
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
     depends_on:
-      - nlp
-      - media
+      nlp:
+        condition: service_healthy
+      media:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health/ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   nlp:
     image: ${IMAGE_REGISTRY:-ghcr.io/carve-app/carve}/nlp:${IMAGE_TAG:-latest}
@@ -79,6 +89,11 @@ services:
       NLP_INTERNAL_SECRET: ${NLP_INTERNAL_SECRET}
       GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
       GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8001/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   media:
     image: ${IMAGE_REGISTRY:-ghcr.io/carve-app/carve}/media:${IMAGE_TAG:-latest}
@@ -95,6 +110,11 @@ services:
       R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
     volumes:
       - media_data:/var/lib/carve-media
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/media", "healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
 
 volumes:
   caddy_data:

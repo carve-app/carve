@@ -347,6 +347,7 @@ export async function getReviewSession(language = 'ja', limit = 20): Promise<{ c
  * Submit a review event to the server.
  */
 export async function submitReviewEvent(params: {
+  event_id: string;
   card_id: string;
   rating: 1 | 2 | 3 | 4;
   time_taken_ms?: number;
@@ -355,6 +356,7 @@ export async function submitReviewEvent(params: {
   const response = await apiFetch('/v1/review/events', {
     method: 'POST',
     body: JSON.stringify({
+      event_id: params.event_id,
       card_id: params.card_id,
       rating: params.rating,
       time_taken_ms: params.time_taken_ms,

@@ -47,3 +47,28 @@ test('user can register and reach the cards page', async ({ page }) => {
   await expect(page).toHaveURL(/\/cards/);
   await expectNoSeriousA11y(page, { label: 'cards', exclude: ['[data-no-a11y]'] });
 });
+
+test('onboarding blocks and reports a failed starter-deck save', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('carve_access_token', 'test-token');
+  });
+  await page.route('http://localhost:8080/v1/onboarding/starter-deck', async route => {
+    await route.fulfill({
+      status: 503,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'Starter deck is temporarily unavailable' }),
+    });
+  });
+
+  await page.goto('/onboarding');
+  await expect(page.getByRole('heading', { name: 'What language are you learning?' })).toBeVisible();
+  await page.waitForTimeout(200);
+  await page.getByRole('button', { name: /continue/i }).click();
+  await expect(page.getByRole('heading', { name: 'Which of these words do you already know?' })).toBeVisible();
+  await page.getByRole('button', { name: /continue/i }).click();
+  await expect(page.getByRole('heading', { name: 'Start with a curated deck' })).toBeVisible();
+  await page.getByRole('button', { name: /continue/i }).click();
+
+  await expect(page.getByRole('alert')).toContainText('Starter deck is temporarily unavailable');
+  await expect(page.getByRole('heading', { name: 'Start with a curated deck' })).toBeVisible();
+});

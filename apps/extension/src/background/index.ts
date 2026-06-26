@@ -132,6 +132,7 @@ async function handleMessage(msg: Message): Promise<MessageResponse> {
 
     case 'QUEUE_REVIEW_EVENT': {
       await queueOfflineReviewEvent({
+        event_id: crypto.randomUUID(),
         card_id: msg.cardId,
         rating: msg.rating,
         time_taken_ms: msg.timeTakenMs,

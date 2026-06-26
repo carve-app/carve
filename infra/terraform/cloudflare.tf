@@ -6,7 +6,7 @@ resource "cloudflare_pages_project" "web" {
   production_branch = var.github_branch
 
   build_config {
-    build_command   = "npm ci && npm run build"
+    build_command   = "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @carve/web build"
     destination_dir = "build"
     root_dir        = "apps/web"
   }

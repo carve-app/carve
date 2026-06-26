@@ -15,6 +15,7 @@
 
 import { request } from 'node:https';
 import { URL } from 'node:url';
+import { randomUUID } from 'node:crypto';
 
 const API = process.env.API_BASE || 'https://api.carve.app';
 const DOMAIN = process.env.USER_DOMAIN || 'synthetic.carve.app';
@@ -78,6 +79,24 @@ function getJSON(url, token) {
   });
 }
 
+function deleteRequest(url, token) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = request(
+      { hostname: u.hostname, port: u.port || 443, path: u.pathname,
+        method: 'DELETE', headers: { Authorization: `Bearer ${token}` } },
+      (res) => {
+        res.resume();
+        res.on('end', () => res.statusCode >= 400
+          ? reject(new Error(`${url} → ${res.statusCode}`))
+          : resolve({}));
+      },
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 async function alert(error) {
   if (!ALERT) {
     console.error(error.stack || error.message);
@@ -106,13 +125,17 @@ async function main() {
   );
 
   await step('submit_review', () =>
-    postJSON(`${API}/v1/review/events`, { card_id: card.id, rating: 3, time_taken_ms: 1500 }, token),
+    postJSON(`${API}/v1/review/events`, {
+      event_id: randomUUID(), card_id: card.id, rating: 3, time_taken_ms: 1500,
+    }, token),
   );
 
   const due = await step('get_due_count', () =>
     getJSON(`${API}/v1/review/due-count?language=en`, token),
   );
   if (typeof due.due_count !== 'number') throw new Error(`due-count missing in ${JSON.stringify(due)}`);
+
+  await step('cleanup_user', () => deleteRequest(`${API}/v1/users/me`, token));
 
   const total = Date.now() - t0;
   console.log(JSON.stringify({ status: 'ok', total_ms: total, timings }));

@@ -35,3 +35,22 @@ func TestHandler_EmitsExpectedFamilies(t *testing.T) {
 		}
 	}
 }
+
+func TestProtectedHandler_RequiresConfiguredToken(t *testing.T) {
+	t.Setenv("METRICS_TOKEN", "metrics-secret")
+
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	w := httptest.NewRecorder()
+	ProtectedHandler(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without token, got %d", w.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Set("Authorization", "Bearer metrics-secret")
+	w = httptest.NewRecorder()
+	ProtectedHandler(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 with token, got %d", w.Code)
+	}
+}

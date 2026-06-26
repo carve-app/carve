@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { markKnownWords, subscribeStarterDeck, ApiError } from '$lib/api';
+  import { markKnownWords, subscribeStarterDeck } from '$lib/api';
 
   let step = 1;
   let language = 'ja';
@@ -201,8 +201,10 @@
         loading = true;
         try {
           await markKnownWords(language, lemmas);
-        } catch {
-          // non-fatal
+        } catch (error) {
+          errorMsg = error instanceof Error ? error.message : 'Could not save your known words. Please try again.';
+          loading = false;
+          return;
         }
         loading = false;
       }
@@ -212,8 +214,10 @@
       loading = true;
       try {
         await subscribeStarterDeck(language);
-      } catch {
-        // non-fatal
+      } catch (error) {
+        errorMsg = error instanceof Error ? error.message : 'Could not subscribe to the starter deck. Please try again.';
+        loading = false;
+        return;
       }
       loading = false;
     }
@@ -388,6 +392,10 @@
         </div>
       {/if}
 
+      {#if errorMsg}
+        <p class="save-error" role="alert">{errorMsg}</p>
+      {/if}
+
     </div>
 
     <div class="wizard-footer">
@@ -487,6 +495,16 @@
     font-size: 0.9rem;
     margin: 0 0 1.5rem;
     line-height: 1.5;
+  }
+
+  .save-error {
+    color: #ef9a9a;
+    background: #2a1719;
+    border: 1px solid #6d2c31;
+    border-radius: 8px;
+    padding: 0.75rem;
+    margin: 1rem 0 0;
+    font-size: 0.85rem;
   }
 
   /* ── Language grid ── */

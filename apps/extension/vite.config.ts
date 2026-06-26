@@ -38,7 +38,6 @@ export default defineConfig({
       output: {
         entryFileNames: outFile,
         format: 'iife',
-        inlineDynamicImports: true,
       },
     },
     target: 'es2022',
@@ -49,12 +48,32 @@ export default defineConfig({
       ? [
           viteStaticCopy({
             targets: [
-              { src: `src/manifest.${BROWSER}.json`, dest: '.', rename: 'manifest.json' },
-              { src: 'src/content/shortcut-bridge.js', dest: 'content' },
-              { src: 'src/icons/*', dest: 'icons' },
-              { src: 'src/popup-page/popup.html', dest: 'popup', rename: 'index.html' },
-              { src: 'src/wasm/ja_tokenizer_bg.wasm', dest: 'wasm' },
-              { src: 'src/wasm/ja_tokenizer.js', dest: 'wasm' },
+              {
+                src: `src/manifest.${BROWSER}.json`,
+                dest: '.',
+                rename: { stripBase: true, name: 'manifest.json' },
+              },
+              {
+                src: 'src/content/shortcut-bridge.js',
+                dest: 'content',
+                rename: { stripBase: true },
+              },
+              { src: 'src/icons/*', dest: 'icons', rename: { stripBase: true } },
+              {
+                src: 'src/popup-page/popup.html',
+                dest: 'popup',
+                rename: { stripBase: true, name: 'index.html' },
+              },
+              {
+                src: 'src/wasm/ja_tokenizer_bg.wasm',
+                dest: 'wasm',
+                rename: { stripBase: true },
+              },
+              {
+                src: 'src/wasm/ja_tokenizer.js',
+                dest: 'wasm',
+                rename: { stripBase: true },
+              },
             ],
           }),
         ]

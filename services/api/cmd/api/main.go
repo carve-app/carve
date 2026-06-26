@@ -35,6 +35,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
@@ -60,14 +61,20 @@ func main() {
 	}
 	defer pool.Close()
 	slog.Info("database connected")
+	r := newRouter(pool)
+	discoverIngester := discover.NewIngester(pool)
+	runServer(pool, r, discoverIngester)
+}
 
+// newRouter owns HTTP composition independently from process startup and
+// background jobs, allowing route/middleware behavior to be tested in-process.
+func newRouter(pool *pgxpool.Pool) chi.Router {
 	r := chi.NewRouter()
 	r.Use(chimw.RealIP)
 	r.Use(chimw.RequestID)
 	r.Use(metrics.HTTPMiddleware)
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
-	r.Use(chimw.Timeout(30 * time.Second))
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   allowedOrigins(),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
@@ -81,14 +88,30 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintln(w, `{"status":"ok","service":"api"}`)
 	})
+	r.Get("/health/live", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"status":"ok","service":"api"}`)
+	})
+	r.Get("/health/ready", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := pool.Ping(ctx); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprintln(w, `{"status":"unavailable","service":"api","dependency":"database"}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintln(w, `{"status":"ready","service":"api"}`)
+	})
 
-	// Prometheus metrics — unauthenticated; intended for scraping inside the
-	// VPC. Add an auth proxy in production.
-	r.Get("/metrics", metrics.Handler)
+	// Prometheus metrics are open in local development and bearer-protected
+	// whenever METRICS_TOKEN is configured (required by production deploys).
+	r.Get("/metrics", metrics.ProtectedHandler)
 
 	// Auth routes (no auth middleware)
 	authHandler := auth.NewHandler(pool)
-	r.Route("/v1/auth", func(r chi.Router) {
+	r.With(chimw.Timeout(30*time.Second)).Route("/v1/auth", func(r chi.Router) {
 		r.Post("/register", authHandler.Register)
 		r.Post("/login", authHandler.Login)
 		r.Post("/refresh", authHandler.Refresh)
@@ -116,11 +139,10 @@ func main() {
 	onboardingHandler := onboarding.NewHandler(pool)
 	syncHandler := syncbridge.NewHandler(pool)
 	discoverHandler := discover.NewHandler(pool)
-	discoverIngester := discover.NewIngester(pool)
 	reportsHandler := reports.NewHandler(pool)
 	grammarHandler := grammar.NewHandler(pool)
 
-	r.Route("/v1", func(r chi.Router) {
+	r.With(chimw.Timeout(30*time.Second)).Route("/v1", func(r chi.Router) {
 		r.Use(auth.Middleware)
 
 		// Users
@@ -229,6 +251,7 @@ func main() {
 	if os.Getenv("STRIPE_SECRET_KEY") != "" {
 		billingHandler := billing.NewHandler(pool)
 		r.Group(func(r chi.Router) {
+			r.Use(chimw.Timeout(30 * time.Second))
 			r.Use(auth.Middleware)
 			r.Get("/v1/billing/subscription", billingHandler.Subscription)
 			r.Post("/v1/billing/checkout", billingHandler.Checkout)
@@ -237,9 +260,9 @@ func main() {
 		r.Post("/v1/billing/webhook", billingHandler.Webhook)
 	}
 
-	// NLP proxy routes get their own subrouter without the global 30s timeout
-	// middleware, since SudachiPy can take up to 2 minutes on first request.
-	r.Route("/v1/nlp", func(r chi.Router) {
+	// NLP proxy routes get a longer deadline because SudachiPy can take up to
+	// two minutes on a cold dictionary/tokenizer start.
+	r.With(chimw.Timeout(125*time.Second)).Route("/v1/nlp", func(r chi.Router) {
 		r.Use(auth.Middleware)
 		r.Post("/tokenize", nlpProxy.Tokenize)
 		r.Post("/lookup", nlpProxy.Lookup)
@@ -251,7 +274,12 @@ func main() {
 		r.Get("/word-audio", nlpExplain.WordAudio)
 		r.Get("/word-image", nlpProxy.WordImage)
 	})
+	return r
+}
 
+// runServer owns lifecycle concerns only: serving, cancellable background jobs,
+// signal handling, and graceful shutdown.
+func runServer(pool *pgxpool.Pool, handler http.Handler, discoverIngester *discover.Ingester) {
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -260,54 +288,14 @@ func main() {
 
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      r,
+		Handler:      handler,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 130 * time.Second, // NLP proxy can take up to 120s on cold start
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Daily word-count snapshot job — runs shortly after midnight UTC.
-	go func() {
-		for {
-			now := time.Now().UTC()
-			next := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 5, 0, 0, time.UTC)
-			time.Sleep(time.Until(next))
-			stats.SnapshotAllUsers(pool)
-		}
-	}()
-
-	// Discover ingest job — refresh NHK Easy every 6 hours, plus once on
-	// startup so a fresh deployment has something to show. Best-effort: errors
-	// are logged inside the ingester and don't propagate.
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer cancel()
-		discoverIngester.IngestAll(ctx, 30)
-
-		ticker := time.NewTicker(6 * time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
-			ictx, icancel := context.WithTimeout(context.Background(), 10*time.Minute)
-			discoverIngester.IngestAll(ictx, 30)
-			icancel()
-		}
-	}()
-
-	// Weekly digest email — Monday 08:00 UTC. No-op if SMTP_HOST is unset.
-	go func() {
-		for {
-			now := time.Now().UTC()
-			daysUntilMon := (8 - int(now.Weekday())) % 7
-			if daysUntilMon == 0 && now.Hour() >= 8 {
-				daysUntilMon = 7
-			}
-			next := time.Date(now.Year(), now.Month(), now.Day()+daysUntilMon, 8, 0, 0, 0, time.UTC)
-			time.Sleep(time.Until(next))
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-			reports.SendWeeklyDigestToAll(ctx, pool)
-			cancel()
-		}
-	}()
+	stopJobs := startBackgroundJobs(context.Background(), pool, discoverIngester)
+	defer stopJobs()
 
 	slog.Info("starting server", "addr", addr)
 	go func() {
@@ -320,6 +308,7 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+	stopJobs()
 
 	slog.Info("shutting down gracefully")
 	shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)

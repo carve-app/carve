@@ -22,18 +22,30 @@ const populateTimeout = 20 * time.Second
 // provider is the single TTS engine (Google Cloud TTS via service account).
 const ttsCacheKey = "google_cloud_tts"
 
+// Synthesizer is the TTS provider boundary. Production uses Google Cloud;
+// tests can inject deterministic timeout, malformed-response, and retry
+// behavior without credentials or network access.
+type Synthesizer interface {
+	WordAudio(context.Context, string, string, string) string
+	Synthesize(context.Context, string, string) string
+}
+
 // Lookup returns a cached or freshly-synthesized word-audio URL for the given
 // lemma in the given language. Returns "" when the engine is unconfigured, the
 // language is unsupported, or synthesis fails. (`reading` is unused — Cloud TTS
 // pronounces the lemma directly.)
 func Lookup(ctx context.Context, db *pgxpool.Pool, language, lemma, reading string) string {
+	return LookupWithSynthesizer(ctx, db, newGoogleTTSProvider(), language, lemma, reading)
+}
+
+func LookupWithSynthesizer(ctx context.Context, db *pgxpool.Pool, synth Synthesizer, language, lemma, reading string) string {
 	if lemma == "" {
 		return ""
 	}
 	if url := cachedURL(ctx, db, language, lemma, ttsCacheKey); url != "" {
 		return url
 	}
-	audioURL := newGoogleTTSProvider().WordAudio(ctx, language, lemma, reading)
+	audioURL := synth.WordAudio(ctx, language, lemma, reading)
 	if audioURL == "" {
 		return ""
 	}
@@ -48,6 +60,10 @@ func Lookup(ctx context.Context, db *pgxpool.Pool, language, lemma, reading stri
 // The cache is keyed on the sentence text in the lemma column with a distinct
 // provider key so it never collides with word-audio rows.
 func SentenceAudio(ctx context.Context, db *pgxpool.Pool, language, sentence string) string {
+	return SentenceAudioWithSynthesizer(ctx, db, newGoogleTTSProvider(), language, sentence)
+}
+
+func SentenceAudioWithSynthesizer(ctx context.Context, db *pgxpool.Pool, synth Synthesizer, language, sentence string) string {
 	if sentence == "" {
 		return ""
 	}
@@ -59,7 +75,7 @@ func SentenceAudio(ctx context.Context, db *pgxpool.Pool, language, sentence str
 	if url := cachedURL(ctx, db, language, sentence, provider); url != "" {
 		return url
 	}
-	audioURL := newGoogleTTSProvider().Synthesize(ctx, language, sentence)
+	audioURL := synth.Synthesize(ctx, language, sentence)
 	if audioURL == "" {
 		return ""
 	}

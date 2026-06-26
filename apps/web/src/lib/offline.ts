@@ -43,54 +43,43 @@ function openDb(): Promise<IDBDatabase> {
 }
 
 export async function queueEvent(payload: Record<string, unknown>): Promise<void> {
-  try {
-    const db = await openDb();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readwrite');
-      tx.objectStore(STORE).add({ payload, queuedAt: Date.now() });
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch {
-    // Fall through silently — best-effort persistence.
-  }
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).add({ payload, queuedAt: Date.now() });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error('Failed to persist offline review'));
+    tx.onabort = () => reject(tx.error ?? new Error('Offline review transaction aborted'));
+  });
 }
 
 export async function listQueued(): Promise<QueuedEvent[]> {
-  try {
-    const db = await openDb();
-    return await new Promise<QueuedEvent[]>((resolve, reject) => {
-      const out: QueuedEvent[] = [];
-      const tx = db.transaction(STORE, 'readonly');
-      const req = tx.objectStore(STORE).openCursor();
-      req.onsuccess = () => {
-        const cursor = req.result;
-        if (cursor) {
-          out.push(cursor.value as QueuedEvent);
-          cursor.continue();
-        } else {
-          resolve(out);
-        }
-      };
-      req.onerror = () => reject(req.error);
-    });
-  } catch {
-    return [];
-  }
+  const db = await openDb();
+  return new Promise<QueuedEvent[]>((resolve, reject) => {
+    const out: QueuedEvent[] = [];
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).openCursor();
+    req.onsuccess = () => {
+      const cursor = req.result;
+      if (cursor) {
+        out.push(cursor.value as QueuedEvent);
+        cursor.continue();
+      } else {
+        resolve(out);
+      }
+    };
+    req.onerror = () => reject(req.error ?? new Error('Failed to read offline reviews'));
+  });
 }
 
 export async function removeQueued(id: number): Promise<void> {
-  try {
-    const db = await openDb();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, 'readwrite');
-      tx.objectStore(STORE).delete(id);
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-  } catch {
-    // ignore
-  }
+  const db = await openDb();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error('Failed to remove offline review'));
+  });
 }
 
 export async function flushQueue(

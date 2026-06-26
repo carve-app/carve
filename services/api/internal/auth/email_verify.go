@@ -6,12 +6,33 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/carve-app/carve/services/api/internal/mailer"
 	"github.com/jackc/pgx/v5"
 )
 
 const verifyTokenTTL = 7 * 24 * time.Hour
+
+func appBaseURL() string {
+	base := strings.TrimRight(os.Getenv("APP_BASE_URL"), "/")
+	if base == "" {
+		base = "http://localhost:5173"
+	}
+	return base
+}
+
+func (h *Handler) sendVerification(ctx context.Context, email, rawToken string) error {
+	if h.mailer == nil {
+		return nil
+	}
+	url := appBaseURL() + "/verify-email?token=" + rawToken
+	return h.mailer.Send(ctx, mailer.Message{
+		To: email, Subject: "Verify your Carve email",
+		Text: "Verify your Carve email by opening this link:\n\n" + url + "\n\nThis link expires in 7 days.",
+	})
+}
 
 // IssueVerificationToken creates a fresh single-use email-verification
 // token for the given user. It returns the *unhashed* raw token (which
@@ -19,14 +40,14 @@ const verifyTokenTTL = 7 * 24 * time.Hour
 //
 // Callers should send the verification link as something like:
 //
-//   https://carve.app/verify-email?token=<raw>
+//	https://carve.app/verify-email?token=<raw>
 func (h *Handler) IssueVerificationToken(ctx context.Context, userID string) (string, error) {
 	raw, _, err := NewRefreshToken()
 	if err != nil {
 		return "", err
 	}
 	hash := HashRefreshToken(raw)
-	exp := time.Now().Add(verifyTokenTTL)
+	exp := h.now().Add(verifyTokenTTL)
 
 	if _, err := h.db.Exec(ctx,
 		`INSERT INTO email_verification_tokens (user_id, token_hash, expires_at)
@@ -75,7 +96,7 @@ func (h *Handler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	if time.Now().After(expiresAt) {
+	if h.now().After(expiresAt) {
 		writeError(w, http.StatusBadRequest, "token expired")
 		return
 	}
@@ -128,13 +149,13 @@ func (h *Handler) ResendVerification(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	verifyURL := os.Getenv("APP_BASE_URL") + "/verify-email?token=" + rawToken
+	verifyURL := appBaseURL() + "/verify-email?token=" + rawToken
 
 	// Returning the raw token in the HTTP body would let anyone who knows a
 	// victim's email bypass the email-ownership check entirely. Only expose it
 	// when an explicit test flag is set (CI/dev) — never in production, where
-	// APP_BASE_URL is always set. In production the link is delivered via the
-	// email worker; here we log it server-side (mirroring password reset).
+	// APP_BASE_URL is always set. Production and local full-stack development
+	// deliver through the configured mailer.
 	if os.Getenv("EXPOSE_VERIFY_TOKENS") == "1" {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"ok":              true,
@@ -143,6 +164,8 @@ func (h *Handler) ResendVerification(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("email verification link issued", "user_id", userID, "url", verifyURL)
+	if err := h.sendVerification(ctx, req.Email, rawToken); err != nil {
+		slog.Error("send email verification", "error", err, "user_id", userID)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

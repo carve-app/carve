@@ -58,6 +58,7 @@ Extension store credentials belong in GitHub secrets, not `.env`:
 |---|---|
 | `DATABASE_URL` | API |
 | `JWT_SECRET` | API |
+| `METRICS_TOKEN` | API metrics scrape |
 | `NLP_INTERNAL_SECRET` | API and NLP |
 | `MEDIA_INTERNAL_TOKEN` | API and media |
 | `ALLOWED_ORIGINS` | API |

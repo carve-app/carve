@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import { get } from 'svelte/store';
   import {
     fetchReviewSession,
@@ -10,6 +10,8 @@
     buryCard,
     type Card,
     type IntervalsResponse,
+    type ReviewEventPayload,
+    ApiError,
   } from '$lib/api';
   import { lang } from '$lib/stores/lang';
   import { toasts } from '$lib/stores/toast';
@@ -24,7 +26,6 @@
   let current: Card | null = null;
   let intervals: IntervalsResponse | null = null;
   let errorMessage = '';
-  let sessionStartTime = 0;
   let cardStartTime = 0;
   let reviewedCount = 0;
   let isLeechNotif = false;
@@ -114,8 +115,7 @@
   async function flushOfflineQueueIfAny() {
     try {
       const { flushed } = await flushQueue(async (payload) => {
-        const { card_id, rating, time_taken_ms } = payload as { card_id: string; rating: 1|2|3|4; time_taken_ms: number };
-        await submitReviewEvent(card_id, rating, time_taken_ms);
+        await submitReviewEvent(payload as unknown as ReviewEventPayload);
       });
       if (flushed > 0) toasts.add(`Synced ${flushed} offline review${flushed === 1 ? '' : 's'}`);
     } catch { /* ignore */ }
@@ -169,7 +169,6 @@
     try {
       const res = await fetchReviewSession(language, REVIEW_SESSION_LIMIT);
       queue = res.cards;
-      sessionStartTime = Date.now();
       advance();
     } catch (err) {
       errorMessage = err instanceof Error ? err.message : 'Unknown error';
@@ -200,26 +199,45 @@
     submitting = true;
     const timeTakenMs = Date.now() - cardStartTime;
     const cardBeforeRate = current;
+    const event: ReviewEventPayload = {
+      event_id: crypto.randomUUID(),
+      card_id: cardBeforeRate.id,
+      rating,
+      time_taken_ms: timeTakenMs,
+      reviewed_at: new Date().toISOString(),
+    };
+    let saved = false;
     try {
-      const result = await submitReviewEvent(current.id, rating, timeTakenMs);
-      reviewedCount++;
-      lastCard = cardBeforeRate;
+      const result = await submitReviewEvent(event);
+      saved = true;
       if (result.is_leech) {
         isLeechNotif = true;
         setTimeout(() => { isLeechNotif = false; }, 4000);
       }
     } catch (err) {
-      // Queue offline if we can't reach the server — works in airplane mode too.
+      // Transport and server failures are ambiguous: the server may have
+      // committed before the response was lost. Queue the same event ID so a
+      // retry is safe. Validation/auth failures must remain on the card.
       const isNetwork = typeof navigator !== 'undefined' && !navigator.onLine;
-      if (isNetwork) {
-        await queueEvent({ card_id: cardBeforeRate.id, rating, time_taken_ms: timeTakenMs });
-        reviewedCount++;
-        lastCard = cardBeforeRate;
-        toasts.add('Saved offline — will sync when reconnected');
+      const retryable = isNetwork || !(err instanceof ApiError) || err.status >= 500;
+      if (retryable) {
+        try {
+          await queueEvent(event);
+          saved = true;
+          toasts.add('Saved offline — will sync when reconnected');
+        } catch {
+          toasts.add('Review was not saved. Storage is unavailable; please retry.');
+        }
       } else {
         toasts.add(err instanceof Error ? err.message : 'Failed to save review');
       }
     }
+    if (!saved) {
+      submitting = false;
+      return;
+    }
+    reviewedCount++;
+    lastCard = cardBeforeRate;
     if (reviewedCount === 1 && typeof localStorage !== 'undefined') {
       localStorage.setItem('carve_reviewed_once', '1');
     }
@@ -346,12 +364,14 @@
       <div class="help-box" on:click|stopPropagation on:keydown={() => {}} role="none">
         <div class="help-title">Keyboard shortcuts</div>
         <table class="help-table">
-          {#each SHORTCUTS as s}
-            <tr>
-              <td class="help-key"><kbd>{s.key}</kbd></td>
-              <td class="help-desc">{s.desc}</td>
-            </tr>
-          {/each}
+          <tbody>
+            {#each SHORTCUTS as s}
+              <tr>
+                <td class="help-key"><kbd>{s.key}</kbd></td>
+                <td class="help-desc">{s.desc}</td>
+              </tr>
+            {/each}
+          </tbody>
         </table>
         <button class="help-close" on:click={() => { showHelp = false; }}>Close</button>
       </div>
@@ -393,6 +413,8 @@
 
     <div
       class="card-wrap"
+      role="group"
+      aria-label="Review card gesture area"
       on:touchstart={onTouchStart}
       on:touchend={onTouchEnd}
     >

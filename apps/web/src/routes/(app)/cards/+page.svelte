@@ -46,7 +46,7 @@
 
   onMount(() => {
     let init = false;
-    const unsub = lang.subscribe(l => { if (init) load(); });
+    const unsub = lang.subscribe(() => { if (init) load(); });
     load();
     init = true;
     return unsub;

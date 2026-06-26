@@ -35,6 +35,7 @@ replace() {
 postgres_password="$(secret)"
 replace "__CHANGE_ME_POSTGRES_PASSWORD__" "$postgres_password"
 replace "__CHANGE_ME_JWT_SECRET__" "$(secret)"
+replace "__CHANGE_ME_METRICS_TOKEN__" "$(secret)"
 replace "__CHANGE_ME_NLP_INTERNAL_SECRET__" "$(secret)"
 replace "__CHANGE_ME_MEDIA_INTERNAL_TOKEN__" "$(secret)"
 

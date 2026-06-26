@@ -108,7 +108,7 @@ func (p *Proxy) fetchWikipediaThumbnail(parent context.Context, word, language s
 	req.Header.Set("User-Agent", "CarveApp/1.0 (language-learning; word-image lookup)")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := p.do(req)
 	if err != nil {
 		slog.Debug("word-image: upstream request failed", "url", reqURL, "error", err)
 		return ""

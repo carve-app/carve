@@ -109,26 +109,6 @@ describe('pitchLabel', () => {
 // ── getSurroundingSentence ────────────────────────────────────────────────────
 
 describe('getSurroundingSentence', () => {
-  function makeTokenEl(text: string, parentTag = 'p', parentText?: string): HTMLElement {
-    const parent = document.createElement(parentTag);
-    const span = document.createElement('span');
-    span.textContent = text;
-    if (parentText) {
-      parent.textContent = parentText;
-      // Replace the token text within parent; crude but works for test setup
-      parent.innerHTML = '';
-      const before = document.createTextNode(parentText.slice(0, parentText.indexOf(text)));
-      const after = document.createTextNode(parentText.slice(parentText.indexOf(text) + text.length));
-      parent.appendChild(before);
-      parent.appendChild(span);
-      parent.appendChild(after);
-    } else {
-      parent.appendChild(span);
-    }
-    document.body.appendChild(parent);
-    return span;
-  }
-
   beforeEach(() => {
     document.body.innerHTML = '';
   });

@@ -80,6 +80,15 @@ export interface ReviewEventResponse {
   is_leech: boolean;
 }
 
+export interface ReviewEventPayload {
+  [key: string]: unknown;
+  event_id: string;
+  card_id: string;
+  rating: 1 | 2 | 3 | 4;
+  time_taken_ms?: number;
+  reviewed_at: string;
+}
+
 export interface IntervalsResponse {
   again: string;
   hard: string;
@@ -398,18 +407,11 @@ export async function fetchReviewSession(language = 'ja', limit = 20): Promise<S
 }
 
 export async function submitReviewEvent(
-  cardId: string,
-  rating: 1 | 2 | 3 | 4,
-  timeTakenMs?: number,
+  event: ReviewEventPayload,
 ): Promise<ReviewEventResponse> {
   return apiFetch<ReviewEventResponse>('/v1/review/events', {
     method: 'POST',
-    body: JSON.stringify({
-      card_id: cardId,
-      rating,
-      time_taken_ms: timeTakenMs,
-      reviewed_at: new Date().toISOString(),
-    }),
+    body: JSON.stringify(event),
   });
 }
 

@@ -1,5 +1,3 @@
-version: "3.9"
-
 # Carve development environment
 # Start everything: docker compose up
 # Start specific service: docker compose up postgres redis
@@ -15,7 +13,7 @@ services:
       POSTGRES_PASSWORD: carve
       POSTGRES_DB: carve
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -27,7 +25,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     command: redis-server --save 60 1 --loglevel warning
@@ -37,11 +35,25 @@ services:
       timeout: 3s
       retries: 5
 
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_HTTP_PORT:-8025}:8025"
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   minio:
     image: minio/minio:latest
     ports:
-      - "9000:9000"
-      - "9001:9001"   # console
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"   # console
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -73,7 +85,7 @@ services:
       context: services/api
       dockerfile: Dockerfile
     ports:
-      - "8080:8080"
+      - "${API_PORT:-8080}:8080"
     environment:
       DATABASE_URL: postgres://carve:carve@postgres:5432/carve?sslmode=disable
       JWT_SECRET: dev-secret-change-in-production-at-least-32-chars
@@ -93,13 +105,18 @@ services:
       # point this at it, e.g.:
       #   volumes: [ "./secrets/gcp-sa.json:/secrets/gcp-sa.json:ro" ]
       GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_FROM: no-reply@carve.local
     depends_on:
       postgres:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      mailpit:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health/ready || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -109,7 +126,7 @@ services:
       context: services/nlp
       dockerfile: Dockerfile
     ports:
-      - "8001:8001"
+      - "${NLP_PORT:-8001}:8001"
     environment:
       DICT_DB_PATH: /app/data/dictionary.db
       NLP_INTERNAL_SECRET: ""   # empty = no auth check in dev
@@ -132,7 +149,7 @@ services:
       context: services/media
       dockerfile: Dockerfile
     ports:
-      - "8002:8002"
+      - "${MEDIA_PORT:-8002}:8002"
     environment:
       PORT: "8002"
       MINIO_ENDPOINT: minio:9000
@@ -142,7 +159,7 @@ services:
       minio:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8002/health || exit 1"]
+      test: ["CMD", "/usr/local/bin/media", "healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 5

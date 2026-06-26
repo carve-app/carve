@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -160,23 +161,22 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	).Scan(&totalEverReviews)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"language_code":    language,
-		"known_cards":      knownCount,
-		"learning_cards":   learningCount,
-		"retention_30d":    retention,
-		"total_reviews":    totalReviews,
-		"streak_days":      streak,
-		"reading_minutes":  readingSec / 60,
-		"listening_minutes": listeningSec / 60,
+		"language_code":      language,
+		"known_cards":        knownCount,
+		"learning_cards":     learningCount,
+		"retention_30d":      retention,
+		"total_reviews":      totalReviews,
+		"streak_days":        streak,
+		"reading_minutes":    readingSec / 60,
+		"listening_minutes":  listeningSec / 60,
 		"total_ever_reviews": totalEverReviews,
-		"word_growth":      snapshots,
+		"word_growth":        snapshots,
 	})
 }
 
 // TakeWordCountSnapshot records a word-count snapshot for a user+language today.
 // Called by the daily background job.
-func TakeWordCountSnapshot(db *pgxpool.Pool, userID, language string) error {
-	ctx := &simpleCtx{}
+func TakeWordCountSnapshot(ctx context.Context, db *pgxpool.Pool, userID, language string) error {
 	today := time.Now().UTC().Truncate(24 * time.Hour)
 
 	var known, mature, learning int
@@ -208,9 +208,7 @@ func TakeWordCountSnapshot(db *pgxpool.Pool, userID, language string) error {
 
 // SnapshotAllUsers writes a daily word-count snapshot for every active user.
 // Designed to be called once per day from a background goroutine.
-func SnapshotAllUsers(db *pgxpool.Pool) {
-	ctx := &simpleCtx{}
-
+func SnapshotAllUsers(ctx context.Context, db *pgxpool.Pool) {
 	rows, err := db.Query(ctx,
 		`SELECT DISTINCT re.user_id, c.language_code
 		 FROM review_events re
@@ -229,7 +227,7 @@ func SnapshotAllUsers(db *pgxpool.Pool) {
 		if err := rows.Scan(&userID, &lang); err != nil {
 			continue
 		}
-		if err := TakeWordCountSnapshot(db, userID, lang); err != nil {
+		if err := TakeWordCountSnapshot(ctx, db, userID, lang); err != nil {
 			slog.Warn("snapshot: failed for user", "user_id", userID, "lang", lang, "error", err)
 		} else {
 			count++
@@ -237,12 +235,3 @@ func SnapshotAllUsers(db *pgxpool.Pool) {
 	}
 	slog.Info("word count snapshots done", "users_snapshotted", count)
 }
-
-// simpleCtx is a minimal context.Context that never cancels — used in background
-// goroutines where we don't have a request context.
-type simpleCtx struct{}
-
-func (*simpleCtx) Deadline() (time.Time, bool) { return time.Time{}, false }
-func (*simpleCtx) Done() <-chan struct{}        { return nil }
-func (*simpleCtx) Err() error                  { return nil }
-func (*simpleCtx) Value(any) any               { return nil }

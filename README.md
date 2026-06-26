@@ -76,8 +76,9 @@ make dev-seed          # also seeds a test user: dev@carve.app / devpassword123
 ```
 
 Surfaces once up: web `http://localhost:5173`, API `:8080`, NLP `:8001`,
-media `:8002`. Load the extension from `apps/extension/dist/chrome` (build it
-with `npm --prefix apps/extension run build:chrome`) via
+media `:8002`, Mailpit `:8025`. Load the extension from
+`apps/extension/dist/chrome` (build it with
+`pnpm --filter @carve/extension build:chrome`) via
 `chrome://extensions → Developer mode → Load unpacked`; it defaults to the
 local API.
 
@@ -87,7 +88,9 @@ make test-api          # Go: vet + race tests
 make test-nlp          # Python: pytest
 make test-extension    # built extension e2e (Playwright, mock backend)
 make test-video-mining # real full-stack video-mining e2e (needs Docker + ffmpeg)
-cd apps/web && npm run check   # svelte-check
+pnpm test:fast         # lint, types, JS tests, web + extension builds
+pnpm test:coverage     # 80% line gate for changed persistence modules
+./scripts/test-real-stack.sh   # isolated real API/NLP/media/Postgres/Mailpit proof
 ```
 
 ---

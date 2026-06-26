@@ -28,6 +28,9 @@ packages/*/node_modules/
 # Build outputs
 apps/*/dist/
 apps/*/build/
+apps/*/coverage/
+apps/*/reports/
+apps/*/.stryker-tmp/
 apps/extension/build/
 apps/extension/wasm-src/*/pkg/
 apps/extension/wasm-src/*/target/
@@ -51,6 +54,7 @@ apps/web/.svelte-kit/
 
 # Playwright
 e2e/test-results/
+e2e/playwright-report/
 
 # Terraform
 infra/terraform/.terraform/

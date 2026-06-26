@@ -296,19 +296,22 @@ components:
       type: object
       required: [card_id, rating]
       properties:
+        event_id:      { $ref: '#/components/schemas/UUID' }
         card_id:       { $ref: '#/components/schemas/UUID' }
         rating:        { type: integer, minimum: 1, maximum: 4 }
         time_taken_ms: { type: integer, minimum: 0, nullable: true }
         reviewed_at:   { type: string, format: date-time }
     ReviewEventResponse:
       type: object
-      required: [next_due, is_leech]
+      required: [state, stability, difficulty, due, reps, lapses, is_leech]
       properties:
-        next_due: { type: string, format: date-time }
-        is_leech: { type: boolean }
-        stability:  { type: number, nullable: true }
-        difficulty: { type: number, nullable: true }
-        state:      { type: string, enum: [new, learning, review, relearning, suspended] }
+        state:      { type: string, enum: [new, learning, review, relearning] }
+        stability:  { type: number }
+        difficulty: { type: number }
+        due:         { type: string, format: date-time }
+        reps:        { type: integer, minimum: 0 }
+        lapses:      { type: integer, minimum: 0 }
+        is_leech:    { type: boolean }
     UndoResponse:
       type: object
       properties:
@@ -745,6 +748,23 @@ paths:
                   service: { type: string }
                   version: { type: string }
 
+  /health/live:
+    get:
+      tags: [system]
+      operationId: getLiveness
+      summary: Process liveness
+      responses:
+        '200': { description: Process is alive }
+
+  /health/ready:
+    get:
+      tags: [system]
+      operationId: getReadiness
+      summary: Database-backed readiness
+      responses:
+        '200': { description: Ready }
+        '503': { description: Database unavailable }
+
   /metrics:
     get:
       tags: [system]
@@ -755,6 +775,7 @@ paths:
           description: Prometheus exposition format
           content:
             text/plain: { schema: { type: string } }
+        '401': { description: Missing or invalid metrics bearer token }
 
   # ── Auth ──────────────────────────────────────────────────────────────
   /v1/auth/login:
@@ -1849,3 +1870,161 @@ paths:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TranslateResponse' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '502': { description: NLP service unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /v1/cards/find-similar:
+    post:
+      tags: [cards]
+      operationId: findSimilarCards
+      summary: Find near-duplicate mined sentences
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '200': { description: Similar cards }
+        '400': { description: Invalid request }
+        '401': { description: Unauthorized }
+
+  /v1/decks/generate:
+    post:
+      tags: [decks]
+      operationId: generateDeck
+      summary: Generate a deck from configured content sources
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '200': { description: Generated deck }
+        '400': { description: Invalid request }
+        '401': { description: Unauthorized }
+        '502': { description: NLP or source unavailable }
+
+  /v1/export/csv:
+    get:
+      tags: [export]
+      operationId: exportCSV
+      summary: Export cards as CSV
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: CSV export, content: { text/csv: { schema: { type: string } } } }
+        '401': { description: Unauthorized }
+
+  /v1/export/apkg:
+    get:
+      tags: [export]
+      operationId: exportAPKG
+      summary: Export cards as an Anki package
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: APKG export, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+        '401': { description: Unauthorized }
+
+  /v1/discover/feed:
+    get:
+      tags: [library]
+      operationId: getDiscoverFeed
+      summary: Recommend content for the current learner
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: Recommended content }
+        '401': { description: Unauthorized }
+
+  /v1/reports/weekly:
+    get:
+      tags: [stats]
+      operationId: getWeeklyReport
+      summary: Get the current user's weekly learning report
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: Weekly report }
+        '401': { description: Unauthorized }
+
+  /v1/grammar/known:
+    get:
+      tags: [settings]
+      operationId: listKnownGrammar
+      summary: List grammar patterns marked known
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: Known patterns }
+        '401': { description: Unauthorized }
+    post:
+      tags: [settings]
+      operationId: markGrammarKnown
+      summary: Mark a grammar pattern known
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '200': { description: Pattern marked known }
+        '401': { description: Unauthorized }
+    delete:
+      tags: [settings]
+      operationId: unmarkGrammarKnown
+      summary: Remove a grammar pattern from known state
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '204': { description: Pattern removed }
+        '401': { description: Unauthorized }
+
+  /v1/nlp/select-sentence:
+    post:
+      tags: [nlp]
+      operationId: selectMiningSentence
+      summary: Rank i+1 mining sentence candidates
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '200': { description: Ranked sentence candidates }
+        '401': { description: Unauthorized }
+        '502': { description: NLP service unavailable }
+
+  /v1/nlp/grammar/patterns:
+    get:
+      tags: [nlp]
+      operationId: listGrammarPatterns
+      summary: List supported grammar patterns
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: Grammar catalog }
+        '401': { description: Unauthorized }
+
+  /v1/nlp/explain:
+    post:
+      tags: [nlp]
+      operationId: explainWord
+      summary: Generate a contextual word explanation
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, additionalProperties: true } } }
+      responses:
+        '200': { description: Explanation or unavailable status }
+        '401': { description: Unauthorized }
+
+  /v1/nlp/word-audio:
+    get:
+      tags: [nlp]
+      operationId: getWordAudio
+      summary: Get or synthesize word audio
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: Audio lookup result }
+        '401': { description: Unauthorized }
+
+  /v1/nlp/word-image:
+    get:
+      tags: [nlp]
+      operationId: getWordImage
+      summary: Find a contextual word image
+      security: [{ bearer: [] }]
+      responses:
+        '200': { description: Image lookup result }
+        '401': { description: Unauthorized }

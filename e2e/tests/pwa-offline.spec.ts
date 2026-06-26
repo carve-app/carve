@@ -44,7 +44,7 @@ test('offline-mode review queues 50 events and flushes on reconnect', async ({ p
   }
 
   // Read the IndexedDB queue depth that lib/offline.ts populates.
-  const queueLen = await page.evaluate(async () => {
+  const queueDepth = async () => page.evaluate(async () => {
     return new Promise<number>((resolve) => {
       const req = indexedDB.open('carve_offline');
       req.onsuccess = () => {
@@ -58,23 +58,19 @@ test('offline-mode review queues 50 events and flushes on reconnect', async ({ p
       req.onerror = () => resolve(-1);
     });
   });
-  expect(queueLen).toBeGreaterThanOrEqual(45);  // some clicks may have raced
+  await expect.poll(queueDepth, { timeout: 10_000 }).toBe(50);
 
   // Reconnect; the page listens for `online` and calls flushQueue.
   await context.setOffline(false);
-  await page.waitForTimeout(2_000);
+  await expect.poll(queueDepth, { timeout: 10_000 }).toBe(0);
 
-  const drained = await page.evaluate(async () => {
-    return new Promise<number>((resolve) => {
-      const req = indexedDB.open('carve_offline');
-      req.onsuccess = () => {
-        const db = req.result;
-        if (!db.objectStoreNames.contains('review_events')) return resolve(0);
-        const tx = db.transaction('review_events', 'readonly');
-        const count = tx.objectStore('review_events').count();
-        count.onsuccess = () => resolve(count.result);
-      };
+  // The mock exposes a test-only count so this acceptance test proves both
+  // durable queue drain and exactly-once server submission.
+  await expect.poll(async () => {
+    const response = await request.get('http://localhost:8080/__test/review-events', {
+      headers: { Authorization: `Bearer ${access_token}` },
     });
-  });
-  expect(drained).toBeLessThanOrEqual(2);  // anything still queued should be a flake, not a regression
+    const body = await response.json() as { count: number; unique_event_ids: number };
+    return body;
+  }, { timeout: 10_000 }).toEqual({ count: 50, unique_event_ids: 50 });
 });

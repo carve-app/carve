@@ -19,6 +19,7 @@ const state = {
   tokens: new Map(),      // token -> userId
   cards: new Map(),       // id -> card row
   reviewEvents: [],       // { user_id, card_id, rating, time_taken_ms, at }
+  reviewEventsById: new Map(),
   passwordResetTokens: new Map(),
 };
 
@@ -75,6 +76,15 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && path === '/metrics') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     return res.end('# mock metrics\n');
+  }
+  if (req.method === 'GET' && path === '/__test/review-events') {
+    const userId = auth(req);
+    if (!userId) return send(res, 401, { error: 'unauthorized' });
+    const events = state.reviewEvents.filter((event) => event.user_id === userId);
+    return send(res, 200, {
+      count: events.length,
+      unique_event_ids: new Set(events.map((event) => event.event_id)).size,
+    });
   }
 
   // ── Auth ───────────────────────────────────────────────────────────────
@@ -186,8 +196,21 @@ const server = http.createServer(async (req, res) => {
     const userId = auth(req);
     if (!userId) return send(res, 401, { error: 'unauthorized' });
     const body = await readBody(req);
+    if (!body.card_id || ![1, 2, 3, 4].includes(body.rating)) {
+      return send(res, 400, { error: 'card_id and rating 1-4 are required' });
+    }
+    const replayKey = body.event_id ? `${userId}:${body.event_id}` : null;
+    if (replayKey && state.reviewEventsById.has(replayKey)) {
+      return send(res, 200, state.reviewEventsById.get(replayKey));
+    }
     state.reviewEvents.push({ ...body, user_id: userId, at: Date.now() });
-    return send(res, 200, { next_due: new Date(Date.now() + 86400000).toISOString(), is_leech: false });
+    const response = {
+      state: 'review', stability: 1, difficulty: 5,
+      due: new Date(Date.now() + 86400000).toISOString(),
+      reps: 1, lapses: 0, is_leech: false,
+    };
+    if (replayKey) state.reviewEventsById.set(replayKey, response);
+    return send(res, 200, response);
   }
   if (req.method === 'GET' && path === '/v1/review/intervals') {
     if (!auth(req)) return send(res, 401, { error: 'unauthorized' });
@@ -240,14 +263,31 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // Stub everything else as 200 / empty, so journey tests don't accidentally
-  // fail on UI side-effect calls we haven't faithfully reproduced.
-  if (req.method === 'GET' && path.startsWith('/v1/')) {
+  // Explicit empty-state contracts used by route/shell journeys. Keeping this
+  // list concrete prevents a new frontend call from silently receiving a fake
+  // success for an endpoint the mock does not implement.
+  const explicitGetStubs = new Map([
+    ['/v1/decks', { decks: [] }],
+    ['/v1/settings/fsrs', {
+      language_code: url.searchParams.get('language') ?? 'ja',
+      weights: Array(19).fill(0), target_retention: 0.9,
+      leech_threshold: 8, daily_new_limit: 20, is_customized: false,
+    }],
+    ['/v1/settings/workload-preview', { target_retention: 0.9, avg_interval_days: 0, total_review_cards: 0 }],
+    ['/v1/library', { items: [] }],
+    ['/v1/output/exercises', { exercises: [] }],
+    ['/v1/output/shadowing', { items: [] }],
+    ['/v1/discover/feed', { items: [] }],
+    ['/v1/review/notifications', { notifications: [] }],
+    ['/v1/grammar/known', { pattern_ids: [] }],
+    ['/v1/nlp/grammar/patterns', { patterns: [] }],
+  ]);
+  if (req.method === 'GET' && explicitGetStubs.has(path)) {
     if (!auth(req)) return send(res, 401, { error: 'unauthorized' });
-    return send(res, 200, {});
+    return send(res, 200, explicitGetStubs.get(path));
   }
 
-  send(res, 404, { error: 'no route' });
+  send(res, 501, { error: `mock route not implemented: ${req.method} ${path}` });
 });
 
 server.listen(PORT, () => {

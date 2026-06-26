@@ -1,6 +1,7 @@
 import { browser } from './browser';
 
 export interface OfflineReviewEvent {
+  event_id: string;
   card_id: string;
   rating: 1 | 2 | 3 | 4;
   time_taken_ms: number;

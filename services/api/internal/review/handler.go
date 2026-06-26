@@ -1,6 +1,7 @@
 package review
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"github.com/carve-app/carve/services/api/internal/fsrs"
 	"github.com/carve-app/carve/services/api/internal/metrics"
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -245,6 +248,37 @@ func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
 
 // ── POST /v1/review/events ────────────────────────────────────────────────────
 
+type eventResponse struct {
+	State      string    `json:"state"`
+	Stability  float64   `json:"stability"`
+	Difficulty float64   `json:"difficulty"`
+	Due        time.Time `json:"due"`
+	Reps       int       `json:"reps"`
+	Lapses     int       `json:"lapses"`
+	IsLeech    bool      `json:"is_leech"`
+}
+
+func existingEvent(ctx context.Context, tx pgx.Tx, userID, clientEventID string) (eventResponse, bool, error) {
+	var out eventResponse
+	var responseJSON []byte
+	err := tx.QueryRow(ctx,
+		`SELECT response_after
+		 FROM review_events
+		 WHERE user_id = $1 AND client_event_id = $2`,
+		userID, clientEventID,
+	).Scan(&responseJSON)
+	if err == pgx.ErrNoRows {
+		return eventResponse{}, false, nil
+	}
+	if err != nil {
+		return eventResponse{}, false, err
+	}
+	if err := json.Unmarshal(responseJSON, &out); err != nil {
+		return eventResponse{}, false, err
+	}
+	return out, true, nil
+}
+
 func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 	claims, ok := auth.ClaimsFromContext(r.Context())
 	if !ok {
@@ -253,10 +287,11 @@ func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		CardID      string `json:"card_id"`
-		Rating      int    `json:"rating"`
-		TimeMS      *int   `json:"time_taken_ms"`
-		ReviewedAt  string `json:"reviewed_at"` // ISO 8601; empty = now
+		EventID    string `json:"event_id"`
+		CardID     string `json:"card_id"`
+		Rating     int    `json:"rating"`
+		TimeMS     *int   `json:"time_taken_ms"`
+		ReviewedAt string `json:"reviewed_at"` // ISO 8601; empty = now
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
@@ -269,6 +304,12 @@ func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 	if req.Rating < 1 || req.Rating > 4 {
 		writeError(w, http.StatusBadRequest, "rating must be 1–4")
 		return
+	}
+	if req.EventID != "" {
+		if _, err := uuid.Parse(req.EventID); err != nil {
+			writeError(w, http.StatusBadRequest, "event_id must be a UUID")
+			return
+		}
 	}
 
 	reviewedAt := time.Now().UTC()
@@ -292,6 +333,19 @@ func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback(ctx)
+
+	// Fast replay path. This runs before card validation so a retry of the event
+	// that suspended a leech still returns its original success response.
+	if req.EventID != "" {
+		if prior, found, err := existingEvent(ctx, tx, claims.UserID, req.EventID); err != nil {
+			slog.Error("lookup review event replay", "error", err)
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		} else if found {
+			writeJSON(w, http.StatusOK, prior)
+			return
+		}
+	}
 
 	var card struct {
 		Stability  *float64
@@ -318,6 +372,19 @@ func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A concurrent request with the same client ID may have committed while we
+	// waited for the card row lock. Re-check after the lock before scheduling.
+	if req.EventID != "" {
+		if prior, found, err := existingEvent(ctx, tx, claims.UserID, req.EventID); err != nil {
+			slog.Error("lookup concurrent review replay", "error", err)
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		} else if found {
+			writeJSON(w, http.StatusOK, prior)
+			return
+		}
+	}
+
 	p := h.loadParamsDB(r, claims.UserID, card.Language)
 
 	cs := fsrs.CardState{
@@ -332,7 +399,16 @@ func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result := fsrs.Schedule(p, cs, fsrs.Rating(req.Rating), reviewedAt)
-	metrics.IncCounter("fsrs_event_total")
+	response := eventResponse{
+		State: string(result.State), Stability: result.Stability,
+		Difficulty: result.Difficulty, Due: result.Due, Reps: result.Reps,
+		Lapses: result.Lapses, IsLeech: result.IsLeech,
+	}
+	responseJSON, err := json.Marshal(response)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
 
 	// Persist updated card state
 	_, err = tx.Exec(ctx,
@@ -366,15 +442,21 @@ func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 	// same tx so its failure rolls back the card update — state and history stay
 	// consistent.
 	eventID := auth.NewID()
+	var clientEventID any
+	if req.EventID != "" {
+		clientEventID = req.EventID
+	}
 	_, err = tx.Exec(ctx,
 		`INSERT INTO review_events
-		   (id, card_id, user_id, reviewed_at, rating, time_taken_ms,
+		   (id, client_event_id, card_id, user_id, reviewed_at, rating, time_taken_ms,
 		    stability_after, difficulty_after, due_after, retrievability_at_review,
+		    state_after, reps_after, lapses_after, is_leech_after, response_after,
 		    prior_fsrs_state, prior_fsrs_stability, prior_fsrs_difficulty,
 		    prior_fsrs_due, prior_fsrs_reps, prior_fsrs_lapses)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
-		eventID, req.CardID, claims.UserID, reviewedAt, req.Rating, req.TimeMS,
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
+		eventID, clientEventID, req.CardID, claims.UserID, reviewedAt, req.Rating, req.TimeMS,
 		result.Stability, result.Difficulty, result.Due, result.Retrievability,
+		string(result.State), result.Reps, result.Lapses, result.IsLeech, responseJSON,
 		card.State, card.Stability, card.Difficulty, card.LastReview, card.Reps, card.Lapses,
 	)
 	if err != nil {
@@ -388,6 +470,7 @@ func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	metrics.IncCounter("fsrs_event_total")
 
 	// Create leech notification
 	if result.IsLeech {
@@ -405,15 +488,7 @@ func (h *Handler) SubmitEvent(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"state":      string(result.State),
-		"stability":  result.Stability,
-		"difficulty": result.Difficulty,
-		"due":        result.Due,
-		"reps":       result.Reps,
-		"lapses":     result.Lapses,
-		"is_leech":   result.IsLeech,
-	})
+	writeJSON(w, http.StatusOK, response)
 }
 
 // ── GET /v1/review/intervals?card_id=xxx ─────────────────────────────────────

@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { goto } from '$app/navigation';
   import { page } from '$app/stores';
 
   const API_BASE: string = import.meta.env.VITE_API_BASE ?? 'http://localhost:8080';
