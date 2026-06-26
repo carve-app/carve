@@ -64,6 +64,11 @@ export interface LoginResponse {
   user: User;
 }
 
+export interface RegisterResponse {
+  verification_required: true;
+  email: string;
+}
+
 export interface SessionResponse {
   cards: Card[];
   total: number;
@@ -223,7 +228,10 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, _retr
     throw new ApiError(res.status, message);
   }
 
-  return res.json() as Promise<T>;
+  if (res.status === 204) return undefined as T;
+  const responseText = await res.text();
+  if (!responseText) return undefined as T;
+  return JSON.parse(responseText) as T;
 }
 
 /**
@@ -255,7 +263,10 @@ export async function postMultipart<T>(path: string, form: FormData, _retried = 
     throw new ApiError(res.status, message);
   }
 
-  return res.json() as Promise<T>;
+  if (res.status === 204) return undefined as T;
+  const responseText = await res.text();
+  if (!responseText) return undefined as T;
+  return JSON.parse(responseText) as T;
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
@@ -277,8 +288,8 @@ export async function login(email: string, password: string): Promise<LoginRespo
   });
 }
 
-export async function register(email: string, password: string, displayName: string): Promise<LoginResponse> {
-  return apiFetch<LoginResponse>('/v1/auth/register', {
+export async function register(email: string, password: string, displayName: string): Promise<RegisterResponse> {
+  return apiFetch<RegisterResponse>('/v1/auth/register', {
     method: 'POST',
     body: JSON.stringify({ email, password, display_name: displayName }),
   });

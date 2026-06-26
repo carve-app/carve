@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/csv"
+	"encoding/json"
 	"io"
 	"os"
 	"strings"
@@ -203,11 +204,16 @@ func TestBuildAPKG_RoundTrip(t *testing.T) {
 	rows := []exportCardRow{
 		{FrontText: "猫", Reading: "ねこ", BackText: "cat", Sentence: "猫が好き",
 			SubtitleTranslation: "I like cats", FsrsState: "review",
-			Stability: fptr(42), Difficulty: fptr(4), Reps: 7, Lapses: 1},
+			Stability: fptr(42), Difficulty: fptr(4), Reps: 7, Lapses: 1,
+			FrontImageName: "carve-image-000.png", FrontAudioName: "carve-audio-001.webm"},
 		{FrontText: "犬", BackText: "dog", FsrsState: "new"},
 	}
+	media := []apkgMedia{
+		{Name: "carve-image-000.png", Data: []byte("png-proof")},
+		{Name: "carve-audio-001.webm", Data: []byte("audio-proof")},
+	}
 
-	apkg, err := buildAPKG(rows, "Carve ja")
+	apkg, err := buildAPKG(rows, "Carve ja", media)
 	if err != nil {
 		t.Fatalf("buildAPKG: %v", err)
 	}
@@ -221,6 +227,7 @@ func TestBuildAPKG_RoundTrip(t *testing.T) {
 		t.Fatalf("apkg is not a valid zip: %v", err)
 	}
 	var collBytes, mediaBytes []byte
+	mediaFiles := make(map[string][]byte)
 	for _, f := range zr.File {
 		rc, _ := f.Open()
 		b, _ := io.ReadAll(rc)
@@ -230,13 +237,22 @@ func TestBuildAPKG_RoundTrip(t *testing.T) {
 			collBytes = b
 		case "media":
 			mediaBytes = b
+		default:
+			mediaFiles[f.Name] = b
 		}
 	}
 	if len(collBytes) == 0 {
 		t.Fatal("collection.anki2 missing from .apkg")
 	}
-	if string(mediaBytes) != "{}" {
-		t.Errorf("media should be empty object, got %q", string(mediaBytes))
+	var mediaMap map[string]string
+	if err := json.Unmarshal(mediaBytes, &mediaMap); err != nil {
+		t.Fatalf("invalid media manifest: %v", err)
+	}
+	if mediaMap["0"] != "carve-image-000.png" || mediaMap["1"] != "carve-audio-001.webm" {
+		t.Fatalf("unexpected media manifest: %#v", mediaMap)
+	}
+	if string(mediaFiles["0"]) != "png-proof" || string(mediaFiles["1"]) != "audio-proof" {
+		t.Fatalf("media payloads not preserved: %#v", mediaFiles)
 	}
 
 	// Write the collection out and open it with the same driver the importer
@@ -289,6 +305,9 @@ func TestBuildAPKG_RoundTrip(t *testing.T) {
 			t.Fatal(err)
 		}
 		notesSeen++
+		if notesSeen == 1 && (!strings.Contains(flds, `<img src="carve-image-000.png">`) || !strings.Contains(flds, `[sound:carve-audio-001.webm]`)) {
+			t.Errorf("first note does not reference packaged media: %q", flds)
+		}
 		parts := strings.Split(flds, "\x1f")
 		if len(parts) != 2 {
 			t.Errorf("note flds should have 2 fields separated by 0x1f, got %d: %q", len(parts), flds)
@@ -362,7 +381,7 @@ func TestBuildAPKG_RoundTrip(t *testing.T) {
 
 func TestBuildAPKG_Empty(t *testing.T) {
 	// No cards: still a valid .apkg (Anki imports an empty deck fine).
-	apkg, err := buildAPKG(nil, "Carve ja")
+	apkg, err := buildAPKG(nil, "Carve ja", nil)
 	if err != nil {
 		t.Fatalf("buildAPKG empty: %v", err)
 	}

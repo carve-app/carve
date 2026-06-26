@@ -3,7 +3,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { get } from 'svelte/store';
-  import { fetchUser, fetchDueCount, logout as revokeSession } from '$lib/api';
+  import { ApiError, fetchUser, fetchDueCount, logout as revokeSession } from '$lib/api';
   import { lang, LANG_LABELS, type LangCode } from '$lib/stores/lang';
   import { currentUser } from '$lib/stores/user';
 
@@ -11,6 +11,7 @@
   let userMenuOpen = false;
   let sidebarOpen = false;
   let ready = false;
+  let active = true;
   let unsubLang: (() => void) | undefined;
 
   const NAV = [
@@ -47,10 +48,18 @@
     }
     try {
       const user = await fetchUser();
+      if (!active) return;
       currentUser.set(user);
-    } catch {
-      localStorage.removeItem('carve_access_token');
-      goto('/login');
+    } catch (error) {
+      if (!active) return;
+      if (error instanceof ApiError && (error.status === 401 || error.status === 403)) {
+        localStorage.removeItem('carve_access_token');
+        goto('/login');
+        return;
+      }
+      // A navigation abort or temporary network failure is not proof that the
+      // session is invalid. Preserve the token so the next route can retry.
+      ready = true;
       return;
     }
     ready = true;
@@ -61,7 +70,10 @@
     init = true;
   });
 
-  onDestroy(() => { unsubLang?.(); });
+  onDestroy(() => {
+    active = false;
+    unsubLang?.();
+  });
 
   function setLang(e: Event) {
     lang.set((e.target as HTMLSelectElement).value as LangCode);

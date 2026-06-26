@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/carve-app/carve/services/api/internal/mailer"
@@ -179,6 +180,14 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "password must be at least 8 characters")
 		return
 	}
+	if len([]byte(req.Password)) > 72 {
+		writeError(w, http.StatusBadRequest, "password must be at most 72 bytes")
+		return
+	}
+	if len(req.Email) > 254 || len(req.DisplayName) > 80 || strings.ContainsRune(req.Email, '\x00') || strings.ContainsRune(req.DisplayName, '\x00') {
+		writeError(w, http.StatusBadRequest, "invalid registration fields")
+		return
+	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
@@ -227,20 +236,26 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Verification delivery is best-effort so a temporary SMTP outage cannot
-	// leave a committed account unable to log in. Resend remains available.
+	// Verification delivery is best-effort; resend remains available if SMTP is
+	// temporarily unavailable. No session is issued until ownership is proven.
+	rawTokenForTest := ""
 	if rawToken, err := h.IssueVerificationToken(ctx, userID); err != nil {
 		slog.Error("issue registration verification", "error", err, "user_id", userID)
-	} else if err := h.sendVerification(ctx, req.Email, rawToken); err != nil {
-		slog.Error("send registration verification", "error", err, "user_id", userID)
+	} else {
+		rawTokenForTest = rawToken
+		if err := h.sendVerification(ctx, req.Email, rawToken); err != nil {
+			slog.Error("send registration verification", "error", err, "user_id", userID)
+		}
 	}
 
-	// Token issuance writes a refresh_tokens row + the HTTP response; run it
-	// after the user-creation tx has committed.
-	if err := h.issueTokenPair(ctx, w, userID, req.Email, req.DisplayName); err != nil {
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
+	response := map[string]any{
+		"verification_required": true,
+		"email":                 req.Email,
 	}
+	if os.Getenv("EXPOSE_VERIFY_TOKENS") == "1" && rawTokenForTest != "" {
+		response["verification_token_test"] = rawTokenForTest
+	}
+	writeJSON(w, http.StatusCreated, response)
 }
 
 // POST /auth/login
@@ -260,14 +275,15 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		userID      string
 		displayName string
 		pwHash      string
+		verifiedAt  *time.Time
 	)
 	err := h.db.QueryRow(ctx,
-		`SELECT u.id, u.display_name, a.password_hash
+		`SELECT u.id, u.display_name, a.password_hash, u.email_verified_at
 		 FROM users u
 		 JOIN user_auth a ON a.user_id = u.id AND a.provider = 'email'
 		 WHERE u.email = $1 AND u.deleted_at IS NULL`,
 		req.Email,
-	).Scan(&userID, &displayName, &pwHash)
+	).Scan(&userID, &displayName, &pwHash, &verifiedAt)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid email or password")
 		return
@@ -275,6 +291,10 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	if err := bcrypt.CompareHashAndPassword([]byte(pwHash), []byte(req.Password)); err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid email or password")
+		return
+	}
+	if verifiedAt == nil {
+		writeError(w, http.StatusForbidden, "email verification required")
 		return
 	}
 

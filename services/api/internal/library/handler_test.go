@@ -16,6 +16,17 @@ import (
 
 func intPtr2(n int) *int { return &n }
 
+func TestAddRejectsUnsupportedLanguageBeforePersistence(t *testing.T) {
+	h := NewHandler(nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/library", strings.NewReader(`{"url":"https://example.com","language":"AAA"}`))
+	req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.Claims{UserID: auth.NewID()}))
+	w := httptest.NewRecorder()
+	h.Add(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // ── parseSRT ──────────────────────────────────────────────────────────────────
 
 func TestParseSRT_StripsSeuqenceNumbers(t *testing.T) {
@@ -215,6 +226,19 @@ func TestImportFile_NoFile(t *testing.T) {
 	}
 }
 
+func TestImportFile_RejectsOversizedRequest(t *testing.T) {
+	h := newLibraryHandler()
+	body, ct := buildMultipartFile("large.txt", strings.Repeat("x", 6<<20), "language", "ja")
+	req := httptest.NewRequest(http.MethodPost, "/v1/library/import", body)
+	req.Header.Set("Content-Type", ct)
+	req = req.WithContext(authedCtx(req.Context()))
+	w := httptest.NewRecorder()
+	h.ImportFile(w, req)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // TestImportFile_TxtType and TestImportFile_SrtType are integration tests
 // that require a real DB. File-type validation is covered by TestImportFile_WrongFileType.
 
@@ -229,13 +253,13 @@ func TestImportFile_NoFile(t *testing.T) {
 // readerToken mirrors the JSON fields the library Read handler plucks from the
 // NLP service response and forwards to the extension. (tokenShape in handler.go)
 type readerToken struct {
-	Surface       string  `json:"surface"`
-	Lemma         string  `json:"lemma"`
-	ReadingHira   string  `json:"reading_hira"`
-	Pos           string  `json:"pos"`
-	IsContentWord bool    `json:"is_content_word"`
-	UserStatus    string  `json:"user_status"`
-	FrequencyRank *int    `json:"frequency_rank"`
+	Surface       string `json:"surface"`
+	Lemma         string `json:"lemma"`
+	ReadingHira   string `json:"reading_hira"`
+	Pos           string `json:"pos"`
+	IsContentWord bool   `json:"is_content_word"`
+	UserStatus    string `json:"user_status"`
+	FrequencyRank *int   `json:"frequency_rank"`
 }
 
 func TestReaderTokenSchema_HasRequiredMiningFields(t *testing.T) {
@@ -281,14 +305,14 @@ func TestReaderTokenSchema_MapsToCardCreateRequest(t *testing.T) {
 		FrequencyRank: intPtr2(1500),
 	}
 	const sourceURL = "https://carve.app/reader/item-123"
-	const sentence  = "私たちの生活を大きく変える。"
-	const langCode  = "ja"
+	const sentence = "私たちの生活を大きく変える。"
+	const langCode = "ja"
 
 	// card Create payload as the extension would send it
 	cardPayload := map[string]any{
 		"language_code": langCode,
-		"lemma":         tok.Lemma,        // front_text
-		"reading":       tok.ReadingHira,  // front_reading
+		"lemma":         tok.Lemma,       // front_text
+		"reading":       tok.ReadingHira, // front_reading
 		"sentence":      sentence,
 		"source_url":    sourceURL,
 	}
@@ -308,12 +332,12 @@ func TestReaderTokenSchema_UnknownStatusOnly_ContentWordsClickable(t *testing.T)
 	// The extension only shows the popup for tokens with data-content="1".
 	// Verify the schema: non-content words are not marked clickable.
 	tokens := []struct {
-		raw     string
-		wantCW  bool
+		raw    string
+		wantCW bool
 	}{
-		{`{"lemma":"猫","is_content_word":true,"user_status":"unknown"}`,  true},
-		{`{"lemma":"は","is_content_word":false,"user_status":"known"}`,   false},
-		{`{"lemma":"を","is_content_word":false,"user_status":"known"}`,   false},
+		{`{"lemma":"猫","is_content_word":true,"user_status":"unknown"}`, true},
+		{`{"lemma":"は","is_content_word":false,"user_status":"known"}`, false},
+		{`{"lemma":"を","is_content_word":false,"user_status":"known"}`, false},
 		{`{"lemma":"走る","is_content_word":true,"user_status":"learning"}`, true},
 	}
 	for _, tc := range tokens {

@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/carve-app/carve/services/api/internal/auth"
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -43,6 +45,20 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+var supportedLanguages = map[string]bool{
+	"ja": true, "zh-cn": true, "zh-tw": true, "ko": true, "en": true,
+	"es": true, "de": true, "fr": true, "it": true, "pt": true, "vi": true,
+}
+
+func validLanguage(language string) bool { return supportedLanguages[language] }
+
+func validUUID(value string) bool {
+	_, err := uuid.Parse(value)
+	return err == nil
+}
+
+func unsafeText(value string) bool { return strings.ContainsRune(value, '\x00') }
+
 // ── GET /v1/decks ─────────────────────────────────────────────────────────────
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -56,6 +72,10 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	language := q.Get("language")
 	if language == "" {
 		language = "ja"
+	}
+	if !validLanguage(language) {
+		writeError(w, http.StatusBadRequest, "unsupported language")
+		return
 	}
 	limit := 20
 	if v := q.Get("limit"); v != "" {
@@ -150,9 +170,9 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"decks":    decks,
-		"limit":    limit,
-		"offset":   offset,
+		"decks":  decks,
+		"limit":  limit,
+		"offset": offset,
 	})
 }
 
@@ -182,6 +202,16 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.LanguageCode == "" {
 		req.LanguageCode = "ja"
+	}
+	if len(req.Name) > 200 || !validLanguage(req.LanguageCode) || unsafeText(req.Name) || unsafeText(req.Description) {
+		writeError(w, http.StatusBadRequest, "invalid deck fields")
+		return
+	}
+	for _, tag := range req.Tags {
+		if unsafeText(tag) {
+			writeError(w, http.StatusBadRequest, "invalid tag")
+			return
+		}
 	}
 	if req.Tags == nil {
 		req.Tags = []string{}
@@ -213,6 +243,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deckID := chi.URLParam(r, "id")
+	if !validUUID(deckID) {
+		writeError(w, http.StatusBadRequest, "deck id must be a UUID")
+		return
+	}
 	var req struct {
 		Name        *string  `json:"name"`
 		Description *string  `json:"description"`
@@ -222,6 +256,17 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
+	}
+	if (req.Name != nil && (len(*req.Name) > 200 || unsafeText(*req.Name))) ||
+		(req.Description != nil && unsafeText(*req.Description)) {
+		writeError(w, http.StatusBadRequest, "invalid deck fields")
+		return
+	}
+	for _, tag := range req.Tags {
+		if unsafeText(tag) {
+			writeError(w, http.StatusBadRequest, "invalid tag")
+			return
+		}
 	}
 
 	ctx := r.Context()
@@ -268,6 +313,10 @@ func (h *Handler) DeleteDeck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deckID := chi.URLParam(r, "id")
+	if !validUUID(deckID) {
+		writeError(w, http.StatusBadRequest, "deck id must be a UUID")
+		return
+	}
 	ctx := r.Context()
 
 	var ownerID *string
@@ -298,6 +347,10 @@ func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deckID := chi.URLParam(r, "id")
+	if !validUUID(deckID) {
+		writeError(w, http.StatusBadRequest, "deck id must be a UUID")
+		return
+	}
 	ctx := r.Context()
 
 	// Verify deck is public (or user is owner)
@@ -316,11 +369,17 @@ func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "deck is not public")
 		return
 	}
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	defer tx.Rollback(ctx)
 
 	// Add subscription record. Track whether a NEW row was actually inserted so
 	// re-subscribes / double-clicks don't inflate download_count below.
 	subID := auth.NewID()
-	subTag, err := h.db.Exec(ctx,
+	subTag, err := tx.Exec(ctx,
 		`INSERT INTO user_deck_subscriptions (id, user_id, deck_id)
 		 VALUES ($1, $2, $3)
 		 ON CONFLICT (user_id, deck_id) DO NOTHING`,
@@ -334,21 +393,27 @@ func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
 	newSubscription := subTag.RowsAffected() == 1
 
 	// Copy all deck cards into user's collection (new FSRS state)
-	_, err = h.db.Exec(ctx,
+	_, err = tx.Exec(ctx,
 		`INSERT INTO cards
 		    (id, user_id, deck_id, language_code, front_text, back_text, sentence, fsrs_state)
 		 SELECT gen_random_uuid(), $1, c.deck_id, c.language_code,
 		        c.front_text, c.back_text, c.sentence, 'new'
 		 FROM cards c
+		 JOIN decks source_deck ON source_deck.id = c.deck_id
 		 WHERE c.deck_id = $2
 		   AND c.deleted_at IS NULL
+		   AND (
+		     (source_deck.owner_id IS NOT NULL AND c.user_id = source_deck.owner_id)
+		     OR (source_deck.is_official AND c.user_id = '00000000-0000-0000-0000-000000000000'::uuid)
+		   )
 		   AND NOT EXISTS (
 		     SELECT 1 FROM cards existing
 		     WHERE existing.user_id = $1
 		       AND existing.deck_id = $2
 		       AND existing.front_text = c.front_text
 		       AND existing.deleted_at IS NULL
-		   )`,
+		   )
+		 ON CONFLICT DO NOTHING`,
 		claims.UserID, deckID,
 	)
 	if err != nil {
@@ -360,10 +425,19 @@ func (h *Handler) Subscribe(w http.ResponseWriter, r *http.Request) {
 	// Increment download count only for a genuinely new subscription, so the
 	// public ranking metric isn't inflated by unsubscribe/re-subscribe churn.
 	if newSubscription {
-		h.db.Exec(ctx,
+		if _, err := tx.Exec(ctx,
 			`UPDATE decks SET download_count = download_count + 1 WHERE id = $1`,
 			deckID,
-		)
+		); err != nil {
+			slog.Error("increment deck downloads", "error", err)
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		slog.Error("commit deck subscription", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"subscribed": true, "deck_id": deckID})
@@ -379,6 +453,10 @@ func (h *Handler) Unsubscribe(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deckID := chi.URLParam(r, "id")
+	if !validUUID(deckID) {
+		writeError(w, http.StatusBadRequest, "deck id must be a UUID")
+		return
+	}
 	h.db.Exec(r.Context(),
 		`DELETE FROM user_deck_subscriptions WHERE user_id = $1 AND deck_id = $2`,
 		claims.UserID, deckID,
@@ -396,6 +474,10 @@ func (h *Handler) Rate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	deckID := chi.URLParam(r, "id")
+	if !validUUID(deckID) {
+		writeError(w, http.StatusBadRequest, "deck id must be a UUID")
+		return
+	}
 	var req struct {
 		Rating int `json:"rating"`
 	}
@@ -405,6 +487,18 @@ func (h *Handler) Rate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	var exists bool
+	if err := h.db.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM decks WHERE id = $1 AND deleted_at IS NULL)`,
+		deckID,
+	).Scan(&exists); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if !exists {
+		writeError(w, http.StatusNotFound, "deck not found")
+		return
+	}
 	ratingID := auth.NewID()
 	_, err := h.db.Exec(ctx,
 		`INSERT INTO deck_ratings (id, deck_id, user_id, rating)

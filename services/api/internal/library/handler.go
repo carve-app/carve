@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/carve-app/carve/services/api/internal/auth"
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -43,6 +45,11 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+var supportedLanguages = map[string]bool{
+	"ja": true, "zh-cn": true, "zh-tw": true, "ko": true, "en": true,
+	"es": true, "de": true, "fr": true, "it": true, "pt": true, "vi": true,
 }
 
 // ── GET /v1/library ───────────────────────────────────────────────────────────
@@ -126,6 +133,10 @@ func (h *Handler) Add(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Language == "" {
 		req.Language = "ja"
+	}
+	if !supportedLanguages[req.Language] {
+		writeError(w, http.StatusBadRequest, "unsupported language")
+		return
 	}
 
 	// Validate URL format.
@@ -218,6 +229,10 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := chi.URLParam(r, "id")
+	if _, err := uuid.Parse(id); err != nil {
+		writeError(w, http.StatusBadRequest, "item id must be a UUID")
+		return
+	}
 	tag, err := h.db.Exec(r.Context(),
 		`DELETE FROM user_library_items WHERE id = $1 AND user_id = $2`,
 		id, claims.UserID,
@@ -248,7 +263,7 @@ func (h *Handler) scoreURL(
 ) (*scoreResult, string, error) {
 	// Fetch page content. The URL is user-supplied, so use the hardened client
 	// that blocks internal/metadata addresses and refuses redirects (SSRF).
-	fetchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	fetchCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	resp, err := fetchUserURL(fetchCtx, pageURL, "Carve/1.0 (+https://carve.app/bot)")
 	if err != nil {
@@ -550,8 +565,14 @@ func (h *Handler) ImportFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid multipart form")
+	r.Body = http.MaxBytesReader(w, r.Body, 6<<20)
+	if err := r.ParseMultipartForm(6 << 20); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) || strings.Contains(err.Error(), "request body too large") {
+			writeError(w, http.StatusRequestEntityTooLarge, "upload too large")
+		} else {
+			writeError(w, http.StatusBadRequest, "invalid multipart form")
+		}
 		return
 	}
 
@@ -567,9 +588,13 @@ func (h *Handler) ImportFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	raw, err := io.ReadAll(io.LimitReader(file, 5<<20))
+	raw, err := io.ReadAll(io.LimitReader(file, (5<<20)+1))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "failed to read file")
+		return
+	}
+	if len(raw) > 5<<20 {
+		writeError(w, http.StatusRequestEntityTooLarge, "upload too large")
 		return
 	}
 

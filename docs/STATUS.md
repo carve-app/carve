@@ -4,7 +4,7 @@ Source of truth for what's actually built and verified, superseding the
 point-in-time `09-roadmap.md` and `10-audit.md` snapshots. The other numbered
 `docs/NN-*.md` files remain accurate as design/architecture reference.
 
-Last updated: 2026-06-26. See `16-full-audit-2026-06-26.md` for evidence,
+Last updated: 2026-06-27. See `16-full-audit-2026-06-26.md` for evidence,
 severity, and live-provider outcomes.
 
 ## Works end-to-end (verified by enforced automated tests)
@@ -32,7 +32,7 @@ severity, and live-provider outcomes.
   real-stack Mailpit journey.
 - **Grammar** known-pattern tracking (JA, 30 JLPT patterns) with web UI.
 - **Import**: Anki `.apkg`, Migaku CSV, Yomitan, JPDB. **Export**: Anki `.apkg`
-  + CSV.
+  + CSV, including APKG image/audio preservation and scheduling round trips.
 - **Immersion tracking**, **comprehension overlay**, **idempotent card create**,
   hardened media service (R2/local), SSRF-guarded fetches.
 - **Packaging**: static Cloudflare-compatible web output; Chrome runtime
@@ -50,10 +50,11 @@ severity, and live-provider outcomes.
   (e.g. leading sense numbers); they back lookups, while *sentence translation*
   uses the v3 LLM.
 - TTS/MT require a Google service account to be configured; cost/quotas apply.
-- **Public live YouTube subtitle canary failed on 2026-06-26**: the packaged
-  overlay mounted, but the anonymous provider environment produced no cue and
-  YouTube reported captions unavailable. Recorded fixtures and local real-video
-  tests pass; this is not recorded as a live pass.
+- **Public live YouTube subtitle canary was inconclusive on 2026-06-27**: the
+  enabled packaged extension mounted its overlay, but YouTube returned its own
+  playback error and reported captions unavailable after playback/pre-roll
+  handling. Recorded fixtures and local exact-video tests pass; neither is
+  recorded as a live-provider pass.
 - Google Translation/TTS and Anthropic explanation were **inconclusive** in the
   audit environment because credentials were absent. Authenticated paid
   streaming providers were inconclusive because no sessions were in scope.

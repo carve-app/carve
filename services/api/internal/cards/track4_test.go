@@ -50,14 +50,14 @@ func TestUpdateRequest_AllEditableFields(t *testing.T) {
 		"deck_id": "00000000-0000-0000-0000-000000000001"
 	}`
 	var req struct {
-		BackText    *string  `json:"back_text"`
-		Sentence    *string  `json:"sentence"`
-		Translation *string  `json:"subtitle_translation"`
-		FrontText   *string  `json:"front_text"`
-		FrontReading *string `json:"front_reading"`
-		Notes       *string  `json:"notes"`
-		Tags        []string `json:"tags"`
-		DeckID      *string  `json:"deck_id"`
+		BackText     *string  `json:"back_text"`
+		Sentence     *string  `json:"sentence"`
+		Translation  *string  `json:"subtitle_translation"`
+		FrontText    *string  `json:"front_text"`
+		FrontReading *string  `json:"front_reading"`
+		Notes        *string  `json:"notes"`
+		Tags         []string `json:"tags"`
+		DeckID       *string  `json:"deck_id"`
 	}
 	if err := json.Unmarshal([]byte(payload), &req); err != nil {
 		t.Fatalf("unmarshal: %v", err)

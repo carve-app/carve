@@ -21,6 +21,8 @@ const state = {
   reviewEvents: [],       // { user_id, card_id, rating, time_taken_ms, at }
   reviewEventsById: new Map(),
   passwordResetTokens: new Map(),
+  verificationTokens: new Map(),
+  starterDeckFailures: new Set(),
 };
 
 function uuid() {
@@ -86,31 +88,59 @@ const server = http.createServer(async (req, res) => {
       unique_event_ids: new Set(events.map((event) => event.event_id)).size,
     });
   }
+  if (req.method === 'GET' && path === '/__test/verification-token') {
+    const email = url.searchParams.get('email');
+    const user = email ? state.users.get(email) : null;
+    if (!user) return send(res, 404, { error: 'user not found' });
+    const entry = [...state.verificationTokens.entries()].find(([, userId]) => userId === user.id);
+    if (!entry) return send(res, 404, { error: 'verification token not found' });
+    return send(res, 200, { token: entry[0] });
+  }
+  if (req.method === 'POST' && path === '/__test/fail-next-starter-deck') {
+    const userId = auth(req);
+    if (!userId) return send(res, 401, { error: 'unauthorized' });
+    state.starterDeckFailures.add(userId);
+    return send(res, 200, { armed: true });
+  }
 
   // ── Auth ───────────────────────────────────────────────────────────────
   if (req.method === 'POST' && path === '/v1/auth/register') {
     const body = await readBody(req);
     if (!body.email || !body.password || !body.display_name) return send(res, 400, { error: 'missing fields' });
     if (state.users.has(body.email)) return send(res, 409, { error: 'email taken' });
-    const user = { id: uuid(), email: body.email, password: body.password, display_name: body.display_name };
+    const user = { id: uuid(), email: body.email, password: body.password, display_name: body.display_name, verified: false };
     state.users.set(body.email, user);
-    const token = uuid();
-    state.tokens.set(token, user.id);
-    return send(res, 200, {
-      access_token: token, refresh_token: uuid(),
-      user: { id: user.id, email: user.email, display_name: user.display_name },
+    const verificationToken = uuid();
+    state.verificationTokens.set(verificationToken, user.id);
+    return send(res, 201, {
+      verification_required: true,
+      email: user.email,
+      verification_token_test: verificationToken,
     });
   }
   if (req.method === 'POST' && path === '/v1/auth/login') {
     const body = await readBody(req);
     const u = state.users.get(body.email);
     if (!u || u.password !== body.password) return send(res, 401, { error: 'invalid' });
+    if (!u.verified) return send(res, 403, { error: 'email verification required' });
     const token = uuid();
     state.tokens.set(token, u.id);
     return send(res, 200, {
       access_token: token, refresh_token: uuid(),
       user: { id: u.id, email: u.email, display_name: u.display_name },
     });
+  }
+  if (req.method === 'POST' && path === '/v1/auth/verify') {
+    const body = await readBody(req);
+    const userId = state.verificationTokens.get(body.token);
+    if (!userId) return send(res, 400, { error: 'invalid or expired token' });
+    const user = [...state.users.values()].find(candidate => candidate.id === userId);
+    if (user) user.verified = true;
+    state.verificationTokens.delete(body.token);
+    return send(res, 200, { verified: true });
+  }
+  if (req.method === 'POST' && path === '/v1/auth/verify/resend') {
+    return send(res, 200, { ok: true });
   }
   if (req.method === 'POST' && path === '/v1/auth/forgot') {
     const body = await readBody(req);
@@ -132,8 +162,12 @@ const server = http.createServer(async (req, res) => {
     return send(res, 200, { marked: 0 });
   }
   if (req.method === 'POST' && path === '/v1/onboarding/starter-deck') {
-    if (!auth(req)) return send(res, 401, { error: 'unauthorized' });
+    const userId = auth(req);
+    if (!userId) return send(res, 401, { error: 'unauthorized' });
     await readBody(req);
+    if (state.starterDeckFailures.delete(userId)) {
+      return send(res, 503, { error: 'Starter deck is temporarily unavailable' });
+    }
     return send(res, 200, { status: 'no_deck' });
   }
 

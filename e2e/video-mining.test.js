@@ -225,6 +225,7 @@ async function main() {
       JWT_SECRET: 'video-mining-e2e-secret-at-least-32-chars-long',
       MEDIA_SERVICE_URL: `http://localhost:${mediaPort}`,
       NLP_SERVICE_URL: `http://localhost:${nlpPort}`,
+      EXPOSE_VERIFY_TOKENS: '1',
     },
     stdio: 'ignore',
   });
@@ -244,8 +245,21 @@ async function main() {
     body: JSON.stringify({ email, password: 'alphapassword123', display_name: 'Vid Mine' }),
   });
   assert(reg.ok, `register failed: ${reg.status}`);
-  const token = (await reg.json()).access_token;
-  assert(token, 'no access token from register');
+  const registration = await reg.json();
+  const verified = await fetch(`${API}/v1/auth/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: registration.verification_token_test }),
+  });
+  assert(verified.ok, `verify failed: ${verified.status}`);
+  const login = await fetch(`${API}/v1/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password: 'alphapassword123' }),
+  });
+  assert(login.ok, `login failed: ${login.status}`);
+  const token = (await login.json()).access_token;
+  assert(token, 'no access token from verified login');
 
   // ── 5. Launch real Chromium with the built extension ──────────────────────────
   userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'carve-vidmine-profile-'));

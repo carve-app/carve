@@ -1,15 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { expectNoSeriousA11y } from './a11y';
-import { TEST_PASSWORD, uniqueEmail } from './helpers';
+import { TEST_PASSWORD, registerTestUser } from './helpers';
 
 test('login → auth guard → logout', async ({ page, request }) => {
-  const apiBase = process.env.API_BASE ?? 'http://localhost:8080';
-  const email = uniqueEmail('login');
-
-  const reg = await request.post(`${apiBase}/v1/auth/register`, {
-    data: { email, password: TEST_PASSWORD, display_name: 'Login Tester' },
-  });
-  expect(reg.ok(), `register ${email}`).toBe(true);
+  const { email } = await registerTestUser(request, 'login', 'Login Tester');
 
   // Guard: hitting /cards without a token redirects to /login.
   await page.context().clearCookies();

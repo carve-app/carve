@@ -35,6 +35,11 @@ var validSessionTypes = map[string]bool{
 	"writing":   true,
 }
 
+var supportedLanguages = map[string]bool{
+	"ja": true, "zh-cn": true, "zh-tw": true, "ko": true, "en": true,
+	"es": true, "de": true, "fr": true, "it": true, "pt": true, "vi": true,
+}
+
 // POST /v1/immersion
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	claims, ok := auth.ClaimsFromContext(r.Context())
@@ -55,8 +60,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.LanguageCode == "" {
-		writeError(w, http.StatusBadRequest, "language_code is required")
+	if !supportedLanguages[req.LanguageCode] {
+		writeError(w, http.StatusBadRequest, "unsupported language_code")
 		return
 	}
 	if !validSessionTypes[req.SessionType] {

@@ -15,7 +15,9 @@ func (h *Handler) loadCardRows(ctx context.Context, userID, language string) ([]
 	const cols = `
 		front_text, COALESCE(front_reading,''), COALESCE(back_text,''),
 		COALESCE(sentence,''), COALESCE(subtitle_translation,''),
-		COALESCE(source_url,''),
+		COALESCE(source_url,''), COALESCE(front_audio_url,''),
+		COALESCE(front_image_url,''), COALESCE(back_audio_url,''),
+		COALESCE(sentence_audio_url,''),
 		fsrs_state, fsrs_stability, fsrs_difficulty, fsrs_reps, fsrs_lapses`
 
 	var (
@@ -51,6 +53,7 @@ func (h *Handler) loadCardRows(ctx context.Context, userID, language string) ([]
 		if err := rows.Scan(
 			&front, &c.Reading, &c.BackText,
 			&c.Sentence, &c.SubtitleTranslation, &c.SourceURL,
+			&c.FrontAudioURL, &c.FrontImageURL, &c.BackAudioURL, &c.SentenceAudioURL,
 			&c.FsrsState, &c.Stability, &c.Difficulty, &c.Reps, &c.Lapses,
 		); err != nil {
 			return nil, err

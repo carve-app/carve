@@ -19,15 +19,23 @@ reg=$(curl -fsS -X POST "$API/v1/auth/register" \
   -H 'Content-Type: application/json' \
   -d "{\"email\":\"$EMAIL\",\"password\":\"$PASS\",\"display_name\":\"Dev User\"}" 2>/dev/null || true)
 TOKEN=$(printf '%s' "$reg" | python3 -c "import sys,json;print(json.load(sys.stdin).get('access_token',''))" 2>/dev/null || true)
+VERIFY_TOKEN=$(printf '%s' "$reg" | python3 -c "import sys,json;print(json.load(sys.stdin).get('verification_token_test',''))" 2>/dev/null || true)
+
+if [ -n "$VERIFY_TOKEN" ]; then
+  curl -fsS -o /dev/null -X POST "$API/v1/auth/verify" \
+    -H 'Content-Type: application/json' \
+    -d "{\"token\":\"$VERIFY_TOKEN\"}"
+  say "registered and verified $EMAIL"
+fi
 
 if [ -z "$TOKEN" ]; then
   login=$(curl -fsS -X POST "$API/v1/auth/login" \
     -H 'Content-Type: application/json' \
     -d "{\"email\":\"$EMAIL\",\"password\":\"$PASS\"}")
   TOKEN=$(printf '%s' "$login" | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
-  say "logged in existing user $EMAIL"
-else
-  say "registered $EMAIL"
+  if [ -z "$VERIFY_TOKEN" ]; then
+    say "logged in existing user $EMAIL"
+  fi
 fi
 [ -n "$TOKEN" ] || { echo "✗ could not obtain token"; exit 1; }
 

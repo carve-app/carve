@@ -30,6 +30,19 @@ jobs:
   nightly-proof:
     if: github.event_name == 'workflow_dispatch' || github.event.schedule == '30 2 * * *'
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: carve
+          POSTGRES_PASSWORD: carve
+          POSTGRES_DB: carve
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U carve -d carve"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -62,3 +75,32 @@ jobs:
         run: go-mutesting --threshold 0.65 ./internal/fsrs/... ./internal/importer/... ./internal/output/... ./internal/metrics/...
       - run: npm install -g @lhci/cli@0.13.x
       - run: lhci autorun
+      - name: Start isolated API for authenticated load proof
+        env:
+          DATABASE_URL: postgres://carve:carve@127.0.0.1:5432/carve?sslmode=disable
+          JWT_SECRET: nightly-performance-secret-at-least-32-bytes
+          EXPOSE_VERIFY_TOKENS: "1"
+        run: |
+          (cd services/api && go run ./cmd/migrate --dir ./migrations)
+          (cd services/api && go build -o /tmp/carve-api ./cmd/api)
+          /tmp/carve-api >/tmp/carve-api.log 2>&1 &
+          echo $! >/tmp/carve-api.pid
+          for attempt in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8080/health/ready && break
+            if [ "$attempt" -eq 30 ]; then
+              cat /tmp/carve-api.log
+              exit 1
+            fi
+            sleep 1
+          done
+      - name: Run authenticated semantic load gate
+        run: >-
+          docker run --rm --add-host=host.docker.internal:host-gateway
+          -v "$PWD/tests/perf:/scripts:ro"
+          grafana/k6:2.0.0 run /scripts/load.js
+          -e API_BASE=http://host.docker.internal:8080
+      - name: Stop load-test API
+        if: always()
+        run: |
+          test ! -f /tmp/carve-api.pid || kill "$(cat /tmp/carve-api.pid)" || true
+          if [ "${{ job.status }}" != "success" ]; then cat /tmp/carve-api.log || true; fi

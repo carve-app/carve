@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -145,6 +146,19 @@ func TestImportAnki_ZipWithNoCollection(t *testing.T) {
 	h.ImportAnki(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected 400 when no collection.anki2 in zip, got %d", w.Code)
+	}
+}
+
+func TestImportJPDBCSV_RejectsOversizedRequest(t *testing.T) {
+	h := newImporterHandler()
+	body, ct := buildFile("words.csv", strings.Repeat("x", int(maxJPDBRequestBytes)), "language", "ja")
+	req := httptest.NewRequest(http.MethodPost, "/v1/import/jpdb-csv", body)
+	req.Header.Set("Content-Type", ct)
+	req = authedCtx(req)
+	w := httptest.NewRecorder()
+	h.ImportJPDBCSV(w, req)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -393,6 +407,62 @@ func TestParseAnkiPackage_RoundtripBasic(t *testing.T) {
 	}
 	if got[0].Sentence != "猫がいる。" {
 		t.Errorf("expected '猫がいる。', got '%s'", got[0].Sentence)
+	}
+}
+
+func TestParseAnkiPackage_PreservesReferencedMedia(t *testing.T) {
+	base, err := buildAnkiPackage([]ankiNote{{
+		Front: `<img src="picture.png">猫[sound:front.webm]`,
+		Back:  `cat[sound:back.mp3]`,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseZip, err := zip.NewReader(bytes.NewReader(base), int64(len(base)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var collection []byte
+	for _, entry := range baseZip.File {
+		if entry.Name == "collection.anki2" {
+			rc, _ := entry.Open()
+			collection, _ = io.ReadAll(rc)
+			rc.Close()
+		}
+	}
+	var archive bytes.Buffer
+	zw := zip.NewWriter(&archive)
+	for name, data := range map[string][]byte{
+		"collection.anki2": collection,
+		"0":                []byte("png-data"),
+		"1":                []byte("front-audio"),
+		"2":                []byte("back-audio"),
+		"media":            []byte(`{"0":"picture.png","1":"front.webm","2":"back.mp3"}`),
+	} {
+		entry, _ := zw.Create(name)
+		_, _ = entry.Write(data)
+	}
+	_ = zw.Close()
+
+	notes, err := parseAnkiPackage(archive.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 1 {
+		t.Fatalf("notes=%d, want 1", len(notes))
+	}
+	note := notes[0]
+	if note.Front != "猫" || note.Back != "cat" {
+		t.Fatalf("media markup leaked into text: front=%q back=%q", note.Front, note.Back)
+	}
+	if note.FrontImage == nil || string(note.FrontImage.Data) != "png-data" || note.FrontImage.ContentType != "image/png" {
+		t.Fatalf("front image not preserved: %#v", note.FrontImage)
+	}
+	if note.FrontAudio == nil || string(note.FrontAudio.Data) != "front-audio" {
+		t.Fatalf("front audio not preserved: %#v", note.FrontAudio)
+	}
+	if note.BackAudio == nil || string(note.BackAudio.Data) != "back-audio" {
+		t.Fatalf("back audio not preserved: %#v", note.BackAudio)
 	}
 }
 

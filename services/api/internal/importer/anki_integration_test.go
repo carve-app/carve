@@ -55,7 +55,7 @@ func TestImportAnki_PreservesSchedulingFields(t *testing.T) {
 	apkg, err := buildFixtureAPKG(t, collectionCreated, []fixtureCard{
 		{Front: "猫", Back: "cat", Type: 2, Queue: 2, IVL: 42, Factor: 2500, Reps: 7, Lapses: 1, Due: 100},
 		{Front: "犬", Back: "dog", Type: 2, Queue: 2, IVL: 5, Factor: 1800, Reps: 12, Lapses: 4, Due: 5},
-		{Front: "鳥", Back: "bird", Type: 0, Queue: 0},                     // new
+		{Front: "鳥", Back: "bird", Type: 0, Queue: 0},                         // new
 		{Front: "魚", Back: "fish", Type: 2, Queue: -1, IVL: 10, Factor: 2500}, // suspended
 	})
 	if err != nil {
@@ -100,11 +100,11 @@ func TestImportAnki_PreservesSchedulingFields(t *testing.T) {
 	defer rows.Close()
 
 	type got struct {
-		front       string
-		state       string
-		stability   *float64
-		difficulty  *float64
-		due         *time.Time
+		front        string
+		state        string
+		stability    *float64
+		difficulty   *float64
+		due          *time.Time
 		reps, lapses int
 	}
 	var imported []got

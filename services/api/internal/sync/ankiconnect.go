@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"time"
@@ -50,6 +51,28 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+// validateAnkiConnectURL deliberately permits only loopback HTTP endpoints.
+// AnkiConnect is a desktop-local bridge; accepting arbitrary URLs would turn
+// the authenticated API into a server-side request forgery primitive.
+func validateAnkiConnectURL(raw string) error {
+	u, err := url.ParseRequestURI(raw)
+	if err != nil {
+		return fmt.Errorf("invalid url: %w", err)
+	}
+	if u.Scheme != "http" || u.Host == "" || u.User != nil {
+		return fmt.Errorf("url must be an http loopback address")
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("url must be an http loopback address")
+	}
+	return nil
+}
+
 // ── AnkiConnect protocol primitives ──────────────────────────────────────────
 
 type ankiRequest struct {
@@ -64,8 +87,8 @@ type ankiResponse struct {
 }
 
 func (h *Handler) anki(ctx context.Context, baseURL, action string, params any) (json.RawMessage, error) {
-	if _, err := url.ParseRequestURI(baseURL); err != nil {
-		return nil, fmt.Errorf("invalid url: %w", err)
+	if err := validateAnkiConnectURL(baseURL); err != nil {
+		return nil, err
 	}
 	req := ankiRequest{Action: action, Version: 6, Params: params}
 	body, err := json.Marshal(req)
@@ -106,9 +129,15 @@ func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	var req struct{ URL string `json:"url"` }
+	var req struct {
+		URL string `json:"url"`
+	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
 		writeError(w, http.StatusBadRequest, "url required")
+		return
+	}
+	if err := validateAnkiConnectURL(req.URL); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	out, err := h.anki(r.Context(), req.URL, "deckNames", nil)
@@ -140,6 +169,10 @@ func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "url required")
 		return
 	}
+	if err := validateAnkiConnectURL(req.URL); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if req.Deck == "" {
 		req.Deck = "Carve"
 	}
@@ -169,7 +202,7 @@ func (h *Handler) Sync(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type row struct {
-		ID    string
+		ID                    string
 		Front, Back, Sentence string
 	}
 	var pending []row

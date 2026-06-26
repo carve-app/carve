@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/carve-app/carve/services/api/internal/auth"
@@ -61,6 +62,34 @@ func (p *Proxy) do(req *http.Request) (*http.Response, error) {
 
 const nlpTimeout = 120 * time.Second
 
+const nlpMaxResponseBytes = 10 << 20
+
+func writeUpstreamResponse(w http.ResponseWriter, resp *http.Response) {
+	body, err := io.ReadAll(io.LimitReader(resp.Body, nlpMaxResponseBytes+1))
+	if err != nil {
+		slog.Error("nlp proxy: read response body", "error", err)
+		http.Error(w, `{"error":"invalid nlp service response"}`, http.StatusBadGateway)
+		return
+	}
+	if len(body) > nlpMaxResponseBytes {
+		http.Error(w, `{"error":"nlp service response too large"}`, http.StatusBadGateway)
+		return
+	}
+	if strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") && !json.Valid(body) {
+		http.Error(w, `{"error":"invalid nlp service response"}`, http.StatusBadGateway)
+		return
+	}
+	for k, vals := range resp.Header {
+		for _, v := range vals {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	if _, err := w.Write(body); err != nil {
+		slog.Error("nlp proxy: write response body", "error", err)
+	}
+}
+
 // forward proxies the incoming request body to the given upstream path,
 // copies all response headers and the body back to the client.
 func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, upstreamPath string) {
@@ -96,17 +125,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, upstreamPath str
 	}
 	defer resp.Body.Close()
 
-	// Copy response headers (e.g. Content-Type).
-	for k, vals := range resp.Header {
-		for _, v := range vals {
-			w.Header().Add(k, v)
-		}
-	}
-	w.WriteHeader(resp.StatusCode)
-
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		slog.Error("nlp proxy: copy response body", "error", err)
-	}
+	writeUpstreamResponse(w, resp)
 }
 
 // POST /v1/nlp/tokenize
@@ -278,13 +297,5 @@ func (p *Proxy) forwardGET(w http.ResponseWriter, r *http.Request, upstreamPath 
 		return
 	}
 	defer resp.Body.Close()
-	for k, vals := range resp.Header {
-		for _, v := range vals {
-			w.Header().Add(k, v)
-		}
-	}
-	w.WriteHeader(resp.StatusCode)
-	if _, err := io.Copy(w, resp.Body); err != nil {
-		slog.Error("nlp proxy GET: copy body", "error", err)
-	}
+	writeUpstreamResponse(w, resp)
 }

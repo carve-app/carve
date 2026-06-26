@@ -4,15 +4,21 @@
   import Card from '$lib/design/Card.svelte';
   import Button from '$lib/design/Button.svelte';
 
-  let state: 'idle' | 'verifying' | 'verified' | 'error' = 'idle';
+  let state: 'idle' | 'sent' | 'verifying' | 'verified' | 'error' = 'idle';
   let message = '';
 
   onMount(async () => {
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token');
     if (!token) {
-      state = 'error';
-      message = 'No verification token in the URL. Check your inbox for the latest email.';
+      resendEmail = params.get('email') ?? '';
+      if (resendEmail) {
+        state = 'sent';
+        message = `We sent a verification link to ${resendEmail}.`;
+      } else {
+        state = 'error';
+        message = 'No verification token in the URL. Check your inbox for the latest email.';
+      }
       return;
     }
     state = 'verifying';
@@ -57,7 +63,7 @@
       <p class="muted">Your email is verified. Sign in to continue.</p>
       <Button href="/login">Go to login</Button>
     {:else}
-      <h1>We couldn't verify that link</h1>
+      <h1>{state === 'sent' ? 'Check your inbox' : "We couldn't verify that link"}</h1>
       <p class="muted">{message}</p>
       <form on:submit|preventDefault={resend}>
         <input

@@ -31,7 +31,7 @@ export default defineConfig({
   webServer: useRealServices
     ? [
         {
-          command: `VITE_API_BASE=${realAPIBase} ${pnpmCommand} --dir ../apps/web exec vite dev --host 127.0.0.1 --port 5173 --strictPort`,
+          command: `VITE_API_BASE=${realAPIBase} ${pnpmCommand} --dir ../apps/web build && ${pnpmCommand} --dir ../apps/web exec vite preview --host 127.0.0.1 --port 5173 --strictPort`,
           url: 'http://127.0.0.1:5173',
           reuseExistingServer: false,
           timeout: 60_000,
@@ -45,7 +45,7 @@ export default defineConfig({
           timeout: 30_000,
         },
         {
-          command: `VITE_API_BASE=http://localhost:8080 ${pnpmCommand} --dir ../apps/web exec vite dev --host 127.0.0.1 --port 5173 --strictPort`,
+          command: `VITE_API_BASE=http://localhost:8080 ${pnpmCommand} --dir ../apps/web build && ${pnpmCommand} --dir ../apps/web exec vite preview --host 127.0.0.1 --port 5173 --strictPort`,
           port: 5173,
           reuseExistingServer: !process.env.CI,
           timeout: 60_000,

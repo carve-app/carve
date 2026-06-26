@@ -26,11 +26,15 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
+func writeError(w http.ResponseWriter, status int, message string) {
+	writeJSON(w, status, map[string]string{"error": message})
+}
+
 // GET /users/me
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	claims, ok := auth.ClaimsFromContext(r.Context())
 	if !ok {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -53,12 +57,12 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		claims.UserID,
 	).Scan(&user.ID, &user.Email, &user.DisplayName, &user.AvatarURL, &user.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
-		http.Error(w, `{"error":"user not found"}`, http.StatusNotFound)
+		writeError(w, http.StatusNotFound, "user not found")
 		return
 	}
 	if err != nil {
 		slog.Error("users.Me query", "error", err)
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -69,7 +73,7 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	claims, ok := auth.ClaimsFromContext(r.Context())
 	if !ok {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -79,7 +83,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		claims.UserID,
 	)
 	if err != nil {
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -95,7 +99,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	claims, ok := auth.ClaimsFromContext(r.Context())
 	if !ok {
-		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
@@ -104,7 +108,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		AvatarURL   *string `json:"avatar_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
 

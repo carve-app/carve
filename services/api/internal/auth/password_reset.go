@@ -87,8 +87,8 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	if req.Token == "" || len(req.Password) < 8 {
-		writeError(w, http.StatusBadRequest, "token and password (min 8 chars) are required")
+	if req.Token == "" || len(req.Password) < 8 || len([]byte(req.Password)) > 72 {
+		writeError(w, http.StatusBadRequest, "token and password (8-72 bytes) are required")
 		return
 	}
 

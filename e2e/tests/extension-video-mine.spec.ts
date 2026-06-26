@@ -60,7 +60,18 @@ test.describe('extension — video mining media path', () => {
       body: JSON.stringify({ email, password: 'alphapassword123', display_name: 'Vid Mine' }),
     });
     expect(reg.ok, `register failed: ${reg.status}`).toBeTruthy();
-    const token = (await reg.json()).access_token as string;
+    const registration = await reg.json() as { verification_token_test: string };
+    const verified = await fetch(`${API}/v1/auth/verify`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: registration.verification_token_test }),
+    });
+    expect(verified.ok).toBeTruthy();
+    const login = await fetch(`${API}/v1/auth/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: 'alphapassword123' }),
+    });
+    expect(login.ok).toBeTruthy();
+    const token = (await login.json()).access_token as string;
     expect(token).toBeTruthy();
 
     // 2. Launch a real browser with the built extension loaded.

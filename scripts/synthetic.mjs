@@ -3,14 +3,16 @@
  * L15 — production synthetic monitoring.
  *
  * Runs every minute (a small cron worker, Datadog synthetic, or k8s
- * CronJob). Registers a throwaway user, mines a card on a fixture URL,
- * submits a review, asserts the review took. On failure, posts to
+ * CronJob). Logs into a dedicated verified synthetic account, mines a card on
+ * a fixture URL, submits a review, asserts the review took, then removes the
+ * card. On failure, posts to
  * $ALERT_WEBHOOK (Slack/PagerDuty/SNS).
  *
  * Required env:
  *   API_BASE       — production API base URL
  *   ALERT_WEBHOOK  — incoming-webhook URL for failure pages
- *   USER_DOMAIN    — domain to use in throwaway emails (default: synthetic.carve.app)
+ *   SYNTHETIC_EMAIL    — pre-provisioned, verified synthetic user
+ *   SYNTHETIC_PASSWORD — password for the synthetic user
  */
 
 import { request } from 'node:https';
@@ -18,8 +20,9 @@ import { URL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
 const API = process.env.API_BASE || 'https://api.carve.app';
-const DOMAIN = process.env.USER_DOMAIN || 'synthetic.carve.app';
 const ALERT = process.env.ALERT_WEBHOOK;
+const SYNTHETIC_EMAIL = process.env.SYNTHETIC_EMAIL;
+const SYNTHETIC_PASSWORD = process.env.SYNTHETIC_PASSWORD;
 
 const t0 = Date.now();
 const timings = {};
@@ -109,16 +112,14 @@ async function alert(error) {
 }
 
 async function main() {
-  const email = `synthetic+${Date.now()}@${DOMAIN}`;
-
-  const reg = await step('register', () =>
-    postJSON(`${API}/v1/auth/register`, {
-      email, password: 'synthetic-supersecret-123', display_name: 'Synthetic',
-    }),
+  if (!SYNTHETIC_EMAIL || !SYNTHETIC_PASSWORD) {
+    throw new Error('SYNTHETIC_EMAIL and SYNTHETIC_PASSWORD are required');
+  }
+  const session = await step('login', () =>
+    postJSON(`${API}/v1/auth/login`, { email: SYNTHETIC_EMAIL, password: SYNTHETIC_PASSWORD }),
   );
-
-  const token = reg.access_token;
-  if (!token) throw new Error('register: no access_token');
+  const token = session.access_token;
+  if (!token) throw new Error('login: no access_token');
 
   const card = await step('create_card', () =>
     postJSON(`${API}/v1/cards`, { front_text: 'synthetic', back_text: 'monitor', language_code: 'en' }, token),
@@ -135,7 +136,7 @@ async function main() {
   );
   if (typeof due.due_count !== 'number') throw new Error(`due-count missing in ${JSON.stringify(due)}`);
 
-  await step('cleanup_user', () => deleteRequest(`${API}/v1/users/me`, token));
+  await step('cleanup_card', () => deleteRequest(`${API}/v1/cards/${card.id}`, token));
 
   const total = Date.now() - t0;
   console.log(JSON.stringify({ status: 'ok', total_ms: total, timings }));

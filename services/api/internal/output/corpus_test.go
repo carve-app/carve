@@ -64,16 +64,16 @@ func TestCorpus_DiffAndWERMatchGolden(t *testing.T) {
 func TestCorpus_DiffOpClassification(t *testing.T) {
 	// For each golden case, verify the diff classifies each edit correctly.
 	cases := []struct {
-		name         string
-		ref, hyp     string
-		hasSub       bool
-		hasInsert    bool
-		hasDelete    bool
+		name      string
+		ref, hyp  string
+		hasSub    bool
+		hasInsert bool
+		hasDelete bool
 	}{
-		{"sub_only",    "the cat sat", "the dog sat",       true,  false, false},
-		{"insert_only", "the cat sat", "the big cat sat",   false, true,  false},
-		{"delete_only", "the big cat", "the cat",           false, false, true},
-		{"mixed",       "a b c d",     "a x c",             true,  false, true},
+		{"sub_only", "the cat sat", "the dog sat", true, false, false},
+		{"insert_only", "the cat sat", "the big cat sat", false, true, false},
+		{"delete_only", "the big cat", "the cat", false, false, true},
+		{"mixed", "a b c d", "a x c", true, false, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -81,14 +81,23 @@ func TestCorpus_DiffOpClassification(t *testing.T) {
 			var hasSub, hasIns, hasDel bool
 			for _, e := range diff {
 				switch e.Op {
-				case "sub":    hasSub = true
-				case "insert": hasIns = true
-				case "delete": hasDel = true
+				case "sub":
+					hasSub = true
+				case "insert":
+					hasIns = true
+				case "delete":
+					hasDel = true
 				}
 			}
-			if hasSub != c.hasSub { t.Errorf("sub: got %v want %v in %+v", hasSub, c.hasSub, diff) }
-			if hasIns != c.hasInsert { t.Errorf("insert: got %v want %v in %+v", hasIns, c.hasInsert, diff) }
-			if hasDel != c.hasDelete { t.Errorf("delete: got %v want %v in %+v", hasDel, c.hasDelete, diff) }
+			if hasSub != c.hasSub {
+				t.Errorf("sub: got %v want %v in %+v", hasSub, c.hasSub, diff)
+			}
+			if hasIns != c.hasInsert {
+				t.Errorf("insert: got %v want %v in %+v", hasIns, c.hasInsert, diff)
+			}
+			if hasDel != c.hasDelete {
+				t.Errorf("delete: got %v want %v in %+v", hasDel, c.hasDelete, diff)
+			}
 		})
 	}
 }

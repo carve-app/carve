@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"hash/crc32"
 	"html"
@@ -29,9 +30,8 @@ import (
 //   - media            : a JSON map "0":"file0",... of packaged media files.
 //
 // We ship a minimal, single-model ("Carve Basic", Front/Back) collection with
-// one deck. Media (audio/images) is intentionally OUT of v1 — the high-value
-// core is front/back text + sentence + translation. The `media` file is the
-// empty object "{}".
+// one deck. User-stored image/audio objects are copied into numeric ZIP members
+// and declared in Anki's `media` manifest.
 //
 // FSRS → Anki scheduling is approximate. Anki will reschedule on first sync,
 // so we only need values that are internally consistent and won't surprise the
@@ -70,6 +70,16 @@ func renderNote(c exportCardRow) ankiNote {
 		front.WriteString(html.EscapeString(c.Reading))
 		front.WriteString(`</span>`)
 	}
+	if c.FrontImageName != "" {
+		front.WriteString(`<br><img src="`)
+		front.WriteString(html.EscapeString(c.FrontImageName))
+		front.WriteString(`">`)
+	}
+	if c.FrontAudioName != "" {
+		front.WriteString(`<br>[sound:`)
+		front.WriteString(c.FrontAudioName)
+		front.WriteString(`]`)
+	}
 
 	var back strings.Builder
 	back.WriteString(html.EscapeString(c.BackText))
@@ -82,6 +92,16 @@ func renderNote(c exportCardRow) ankiNote {
 		back.WriteString(`<br><div class="translation">`)
 		back.WriteString(html.EscapeString(c.SubtitleTranslation))
 		back.WriteString(`</div>`)
+	}
+	if c.BackAudioName != "" {
+		back.WriteString(`<br>[sound:`)
+		back.WriteString(c.BackAudioName)
+		back.WriteString(`]`)
+	}
+	if c.SentenceAudioName != "" {
+		back.WriteString(`<br>[sound:`)
+		back.WriteString(c.SentenceAudioName)
+		back.WriteString(`]`)
 	}
 
 	return ankiNote{Front: front.String(), Back: back.String()}
@@ -381,9 +401,9 @@ func ankiGUID(noteID int64) string {
 }
 
 // buildAPKG assembles the full .apkg archive in memory: it writes the
-// collection DB to a temp file, reads it back, and zips it together with an
-// empty `media` map. Returns the .apkg bytes.
-func buildAPKG(rows []exportCardRow, deckName string) ([]byte, error) {
+// collection DB to a temp file, reads it back, and zips it together with media
+// objects and Anki's numeric-name manifest.
+func buildAPKG(rows []exportCardRow, deckName string, media []apkgMedia) ([]byte, error) {
 	now := time.Now().UTC()
 	// Collection epoch at local midnight (Anki convention); UTC is fine here
 	// because the importer treats crt as a plain unix second anyway.
@@ -414,13 +434,27 @@ func buildAPKG(rows []exportCardRow, deckName string) ([]byte, error) {
 		return nil, fmt.Errorf("write collection: %w", err)
 	}
 
-	// media — empty mapping. Media (audio/images) is intentionally excluded
-	// from v1; the empty object is required for a valid .apkg.
+	mediaMap := make(map[string]string, len(media))
+	for i, object := range media {
+		archiveName := strconv.Itoa(i)
+		entry, err := zw.Create(archiveName)
+		if err != nil {
+			return nil, fmt.Errorf("zip media object %s: %w", object.Name, err)
+		}
+		if _, err := entry.Write(object.Data); err != nil {
+			return nil, fmt.Errorf("write media object %s: %w", object.Name, err)
+		}
+		mediaMap[archiveName] = object.Name
+	}
+	mediaJSON, err := json.Marshal(mediaMap)
+	if err != nil {
+		return nil, fmt.Errorf("encode media map: %w", err)
+	}
 	mf, err := zw.Create("media")
 	if err != nil {
 		return nil, fmt.Errorf("zip media: %w", err)
 	}
-	if _, err := mf.Write([]byte("{}")); err != nil {
+	if _, err := mf.Write(mediaJSON); err != nil {
 		return nil, fmt.Errorf("write media: %w", err)
 	}
 
@@ -456,7 +490,14 @@ func (h *Handler) ExportAPKG(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := buildAPKG(rows, deckNameFor(language))
+	rows, media, err := h.prepareAPKGMedia(r.Context(), rows)
+	if err != nil {
+		slog.Error("export apkg: collect media", "error", err)
+		writeError(w, http.StatusBadGateway, "could not read attached media")
+		return
+	}
+
+	data, err := buildAPKG(rows, deckNameFor(language), media)
 	if err != nil {
 		slog.Error("export apkg: build", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal error")

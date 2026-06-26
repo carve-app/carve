@@ -10,7 +10,7 @@ nonexistent specs.
 
 | Flow | Status | Enforced evidence |
 |---|---|---|
-| Landing, registration, onboarding | Covered with mock UI and real API persistence | `e2e/tests/journey-register-onboard.spec.ts`, `e2e/tests/real-stack-core.spec.ts` |
+| Landing, registration, required verification, onboarding | Covered with mock UI, real Mailpit delivery, and real API persistence | `e2e/tests/journey-register-onboard.spec.ts`, `e2e/tests/real-stack-core.spec.ts` |
 | Login, auth guard, refresh rotation, logout | Covered with mock UI and isolated real stack | `e2e/tests/journey-login.spec.ts`, `e2e/tests/real-stack-core.spec.ts` |
 | Forgot/reset password UI | Covered with mock API | `e2e/tests/journey-password-reset.spec.ts` |
 | Email verification error/resend UI | Covered with mock API | `e2e/tests/journey-email-verify.spec.ts` |
@@ -24,11 +24,12 @@ nonexistent specs.
 | Primary navigation under one token | Covered with mock API | `e2e/tests/journey-shell-nav.spec.ts` |
 | Language selection persists | Covered with mock API | `e2e/tests/journey-language-switch.spec.ts` |
 | Cards list and detail form accessibility | Covered with mock API | `e2e/tests/journey-cards.spec.ts` |
-| Card edits, duplicate detection, media, bulk, suspend/bury/unbury | Covered against the real API; full UI mutation journey remains backlog | `e2e/tests/real-stack-core.spec.ts` |
+| Card edits, duplicate detection, media, bulk, suspend/bury/unbury | Covered through the built web UI and real API; lower-level media/duplicate cases are also asserted | `e2e/tests/real-stack-core.spec.ts` |
 | Keyboard review journey | Covered with mock API | `e2e/tests/journey-mine-review.spec.ts` |
 | Daily limits, scheduling, exact undo, leech and notifications | Covered at service level and against the real stack | `services/api/internal/review/handler_test.go`, `e2e/tests/real-stack-core.spec.ts` |
 | Retry-safe review event | Covered against real Postgres | `services/api/internal/review/idempotency_integration_test.go` |
 | Fifty offline reviews and exact queue drain after a committed/lost response | Covered in a real browser against the real API | `e2e/tests/real-stack-core.spec.ts` |
+| Retry replay after API process restart | Covered against the isolated real stack | `e2e/tests/real-stack-restart.spec.ts` |
 | Stats route and visual primitives | Covered with mock UI and real API state | `e2e/tests/journey-stats.spec.ts`, `e2e/tests/real-stack-core.spec.ts` |
 | Settings tab accessibility | Covered with mock API | `e2e/tests/journey-settings-tabs.spec.ts` |
 | Output landing, exercises, submission and empty states | Covered with mock UI and real API submission | `e2e/tests/journey-output.spec.ts`, `e2e/tests/real-stack-core.spec.ts` |
@@ -40,10 +41,11 @@ nonexistent specs.
 | Import UI tabs and format selection | Covered with mock API | `e2e/tests/journey-import.spec.ts` |
 | Anki scheduling and Unicode round trip | Covered against real Postgres/API | `services/api/internal/importer/anki_integration_test.go`, `e2e/tests/real-stack-core.spec.ts` |
 | Anki/Migaku/Yomitan/JPDB import and malformed archive rejection | Covered at service and real-stack levels | `services/api/internal/importer/handler_test.go`, `e2e/tests/real-stack-core.spec.ts` |
-| JSON/CSV/APKG export structure and scheduling | Covered at service and real-stack levels; APKG media remains unshipped | `services/api/internal/export/export_test.go`, `e2e/tests/real-stack-core.spec.ts` |
+| JSON/CSV/APKG export structure, scheduling, Unicode, and exact media round trip | Covered at service and real-stack levels | `services/api/internal/export/export_test.go`, `services/api/internal/export/media_test.go`, `e2e/tests/real-stack-core.spec.ts` |
+| Oversized card/import/library/transcription uploads | Covered with explicit total-body limits and 413 responses | `services/api/internal/cards/media_limits_integration_test.go`, `services/api/internal/importer/handler_test.go`, `services/api/internal/library/handler_test.go`, `services/api/internal/output/transcribe_backend_test.go` |
 | URL reader and TXT/SRT import | Covered at service and real-stack levels | `services/api/internal/library/handler_test.go`, `e2e/tests/real-stack-core.spec.ts` |
 | EPUB import | Unverified: not shipped; API explicitly accepts only TXT/SRT |
-| AnkiConnect push/pull | Partial: transport behavior covered, no real Anki process in CI | `services/api/internal/sync/ankiconnect_test.go` |
+| AnkiConnect push/pull | Partial: loopback-only transport/SSRF boundary covered, no real Anki process in CI | `services/api/internal/sync/ankiconnect_test.go` |
 
 ## Extension, video, and PWA
 
@@ -52,7 +54,7 @@ nonexistent specs.
 | Page annotation, popup lookup, mining save | Covered in packaged Chromium with mock API | `e2e/extension.test.js` |
 | Recorded streaming DOM hooks | Covered for six platforms | `apps/extension/src/content/video/__tests__/platforms.test.ts` |
 | Real-stack video media mining | Covered in Chromium | `e2e/video-mining.test.js` |
-| Public live YouTube subtitle cue | Failed on 2026-06-26: overlay mounted, but anonymous YouTube exposed no caption cue; hourly canary remains blocking | `e2e/tests/live-youtube-canary.spec.ts` |
+| Public live YouTube subtitle cue | Inconclusive on 2026-06-27: the enabled package mounted its overlay, but YouTube returned its own playback error and captions-unavailable state; hourly canary remains blocking | `e2e/tests/live-youtube-canary.spec.ts` |
 | PWA manifest and service-worker registration | Covered | `e2e/tests/pwa-manifest.spec.ts` |
 | Chrome package/runtime | Covered |
 | Firefox package/runtime | Covered with real Firefox + `web-ext` | `e2e/firefox-extension-smoke.cjs` |

@@ -2,6 +2,7 @@ package onboarding
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/carve-app/carve/services/api/internal/auth"
@@ -126,6 +127,7 @@ func (h *Handler) StarterDeck(w http.ResponseWriter, r *http.Request) {
 		 ON CONFLICT (user_id, deck_id) DO NOTHING`,
 		claims.UserID, deckID,
 	); err != nil {
+		slog.Error("subscribe starter deck", "error", err, "user_id", claims.UserID, "deck_id", deckID)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -136,6 +138,7 @@ func (h *Handler) StarterDeck(w http.ResponseWriter, r *http.Request) {
 		        c.front_text, c.back_text, c.sentence, 'new'
 		 FROM cards c
 		 WHERE c.deck_id = $2
+		   AND c.user_id = '00000000-0000-0000-0000-000000000000'::uuid
 		   AND c.deleted_at IS NULL
 		   AND NOT EXISTS (
 		     SELECT 1 FROM cards existing
@@ -143,13 +146,16 @@ func (h *Handler) StarterDeck(w http.ResponseWriter, r *http.Request) {
 		       AND existing.deck_id = $2
 		       AND existing.front_text = c.front_text
 		       AND existing.deleted_at IS NULL
-		   )`,
+		   )
+		 ON CONFLICT DO NOTHING`,
 		claims.UserID, deckID,
 	); err != nil {
+		slog.Error("copy starter deck", "error", err, "user_id", claims.UserID, "deck_id", deckID)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
+		slog.Error("commit starter deck", "error", err, "user_id", claims.UserID, "deck_id", deckID)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}

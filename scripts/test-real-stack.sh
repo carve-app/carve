@@ -17,6 +17,7 @@ export API_PORT="${API_PORT:-18080}"
 export NLP_PORT="${NLP_PORT:-18001}"
 export MEDIA_PORT="${MEDIA_PORT:-18002}"
 export MEDIA_PUBLIC_BASE="${MEDIA_PUBLIC_BASE:-http://127.0.0.1:${MEDIA_PORT}}"
+export EXPOSE_VERIFY_TOKENS=1
 
 if command -v pnpm >/dev/null 2>&1; then
   PNPM=(pnpm)
@@ -57,7 +58,7 @@ for attempt in $(seq 1 60); do
   sleep 2
 done
 
-PLAYWRIGHT_ARGS=(tests/real-stack-core.spec.ts --project=web-chromium)
+PLAYWRIGHT_ARGS=(tests/real-stack-core.spec.ts tests/real-stack-restart.spec.ts --project=web-chromium --workers=1)
 if [ -n "${REAL_STACK_GREP:-}" ]; then
   PLAYWRIGHT_ARGS+=(--grep "$REAL_STACK_GREP")
 fi

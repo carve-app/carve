@@ -17,6 +17,7 @@ import (
 	"github.com/carve-app/carve/services/api/internal/audio"
 	"github.com/carve-app/carve/services/api/internal/auth"
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -129,6 +130,22 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
+var supportedLanguages = map[string]bool{
+	"ja": true, "zh-cn": true, "zh-tw": true, "ko": true, "en": true,
+	"es": true, "de": true, "fr": true, "it": true, "pt": true, "vi": true,
+}
+
+func validLanguage(language string) bool { return supportedLanguages[language] }
+
+func validUUID(value string) bool {
+	_, err := uuid.Parse(value)
+	return err == nil
+}
+
+func unsafeText(value string) bool { return strings.ContainsRune(value, '\x00') }
+
+func unsafeOptionalText(value *string) bool { return value != nil && unsafeText(*value) }
+
 // POST /v1/cards
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	claims, ok := auth.ClaimsFromContext(r.Context())
@@ -153,6 +170,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.LanguageCode == "" || req.Lemma == "" {
 		writeError(w, http.StatusBadRequest, "language_code and lemma are required")
+		return
+	}
+	if !validLanguage(req.LanguageCode) || len(req.Lemma) > 500 || unsafeText(req.Lemma) || unsafeText(req.Reading) ||
+		unsafeOptionalText(req.BackText) || unsafeOptionalText(req.SubtitleTranslation) || unsafeOptionalText(req.Sentence) || unsafeOptionalText(req.SourceURL) {
+		writeError(w, http.StatusBadRequest, "invalid card fields")
 		return
 	}
 
@@ -266,15 +288,19 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if language == "" {
 		language = "ja"
 	}
+	if !validLanguage(language) {
+		writeError(w, http.StatusBadRequest, "unsupported language")
+		return
+	}
 
 	limit := 50
 	if v := q.Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			if n > 200 {
-				n = 200
-			}
-			limit = n
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 200 {
+			writeError(w, http.StatusBadRequest, "limit must be between 1 and 200")
+			return
 		}
+		limit = n
 	}
 
 	offset := 0
@@ -285,7 +311,18 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	search := q.Get("search")
+	if search == "" {
+		search = q.Get("q")
+	}
+	if unsafeText(search) {
+		writeError(w, http.StatusBadRequest, "invalid search")
+		return
+	}
 	stateFilter := q.Get("state")
+	if stateFilter != "" && stateFilter != "new" && stateFilter != "learning" && stateFilter != "review" && stateFilter != "relearning" && stateFilter != "suspended" {
+		writeError(w, http.StatusBadRequest, "invalid state")
+		return
+	}
 	suspendedFilter := q.Get("suspended") // "true" | "false" | ""
 	isLeechFilter := q.Get("is_leech")    // "true" | "false" | ""
 	sortBy := q.Get("sort")               // created | due | lapses | alpha
@@ -417,6 +454,10 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cardID := chi.URLParam(r, "id")
+	if !validUUID(cardID) {
+		writeError(w, http.StatusBadRequest, "card id must be a UUID")
+		return
+	}
 
 	var c struct {
 		ID              string     `json:"id"`
@@ -481,6 +522,10 @@ func (h *Handler) AttachMedia(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cardID := chi.URLParam(r, "id")
+	if !validUUID(cardID) {
+		writeError(w, http.StatusBadRequest, "card id must be a UUID")
+		return
+	}
 
 	// Verify ownership
 	var exists bool
@@ -492,8 +537,14 @@ func (h *Handler) AttachMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := r.ParseMultipartForm(20 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid multipart form")
+	r.Body = http.MaxBytesReader(w, r.Body, 26<<20)
+	if err := r.ParseMultipartForm(26 << 20); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) || strings.Contains(err.Error(), "request body too large") {
+			writeError(w, http.StatusRequestEntityTooLarge, "media upload too large")
+		} else {
+			writeError(w, http.StatusBadRequest, "invalid multipart form")
+		}
 		return
 	}
 
@@ -611,6 +662,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cardID := chi.URLParam(r, "id")
+	if !validUUID(cardID) {
+		writeError(w, http.StatusBadRequest, "card id must be a UUID")
+		return
+	}
 
 	var req struct {
 		BackText     *string  `json:"back_text"`
@@ -625,6 +680,23 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
+	}
+	if unsafeOptionalText(req.BackText) || unsafeOptionalText(req.Sentence) || unsafeOptionalText(req.Translation) ||
+		unsafeOptionalText(req.FrontText) || unsafeOptionalText(req.FrontReading) || unsafeOptionalText(req.Notes) {
+		writeError(w, http.StatusBadRequest, "invalid card fields")
+		return
+	}
+	for _, tag := range req.Tags {
+		if unsafeText(tag) {
+			writeError(w, http.StatusBadRequest, "invalid tag")
+			return
+		}
+	}
+	if req.DeckID != nil {
+		if _, err := uuid.Parse(*req.DeckID); err != nil {
+			writeError(w, http.StatusBadRequest, "deck_id must be a UUID")
+			return
+		}
 	}
 
 	tag, err := h.db.Exec(r.Context(),
@@ -693,6 +765,10 @@ func (h *Handler) setLifecycleFlag(w http.ResponseWriter, r *http.Request, col s
 	}
 
 	cardID := chi.URLParam(r, "id")
+	if !validUUID(cardID) {
+		writeError(w, http.StatusBadRequest, "card id must be a UUID")
+		return
+	}
 
 	var query string
 	switch col {
@@ -752,7 +828,6 @@ func (h *Handler) Bulk(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "too many ids (max 500)")
 		return
 	}
-
 	var query string
 	switch req.Action {
 	case "suspend":
@@ -768,6 +843,12 @@ func (h *Handler) Bulk(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusBadRequest, "unknown action")
 		return
+	}
+	for _, id := range req.IDs {
+		if !validUUID(id) {
+			writeError(w, http.StatusBadRequest, "every id must be a UUID")
+			return
+		}
 	}
 
 	tag, err := h.db.Exec(r.Context(), query, claims.UserID, req.IDs)
@@ -896,6 +977,10 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cardID := chi.URLParam(r, "id")
+	if !validUUID(cardID) {
+		writeError(w, http.StatusBadRequest, "card id must be a UUID")
+		return
+	}
 
 	tag, err := h.db.Exec(r.Context(),
 		`UPDATE cards SET deleted_at = now()

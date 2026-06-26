@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // TestCloudTTSLangCode covers the Carve→BCP-47 mapping used by Cloud TTS.
@@ -93,6 +94,15 @@ func TestSynthesizeErrorPaths(t *testing.T) {
 				t.Errorf("err = %v, wantErr = %v", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestSynthesizeHonorsContextDeadline(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	_, err := newGoogleTTSProvider().synthesize(ctx, "t", "es-ES", "gato")
+	if err == nil {
+		t.Fatal("expected an expired context to cancel Cloud TTS")
 	}
 }
 

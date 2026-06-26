@@ -1,6 +1,6 @@
 # Testing Strategy
 
-Last verified: 2026-06-26. This document describes tests that exist and are
+Last verified: 2026-06-27. This document describes tests that exist and are
 enforced. Planned work is labelled; filenames are checked by
 `pnpm test:flow-docs`.
 
@@ -33,6 +33,8 @@ pnpm install --frozen-lockfile
 pnpm lint
 pnpm typecheck
 pnpm test:coverage
+pnpm --filter @carve/web exec stryker run
+pnpm --filter @carve/extension exec stryker run
 pnpm build
 pnpm test:flow-docs
 pnpm audit --audit-level moderate
@@ -46,6 +48,18 @@ pnpm audit --audit-level moderate
 
 # Docker, real API/NLP/media/Postgres/Mailpit, and Chromium
 ./scripts/test-real-stack.sh
+
+# Authenticated OpenAPI conformance (requires an isolated running API and token)
+schemathesis run docs/openapi.yaml --url http://127.0.0.1:8080 \
+  --phases coverage,fuzzing --max-examples 25 \
+  --exclude-path-regex '^/v1/billing/' --exclude-operation-id deleteMe \
+  --checks status_code_conformance,content_type_conformance \
+  --header "Authorization: Bearer $ACCESS_TOKEN"
+
+# Authenticated semantic load proof (API must expose test verification tokens)
+docker run --rm --add-host=host.docker.internal:host-gateway \
+  -v "$PWD/tests/perf:/scripts:ro" grafana/k6:latest run /scripts/load.js \
+  -e API_BASE=http://host.docker.internal:8080
 ```
 
 The fast browser suite uses `e2e/mock-server.cjs`. That server rejects unknown
@@ -60,12 +74,15 @@ the integration proof and uses isolated volumes and non-default host ports.
 - `apps/web/src/lib/__tests__/offline*.test.ts` and
   `e2e/tests/pwa-offline.spec.ts`: IndexedDB failure is visible, persisted
   events replay, and a 50-event queue drains exactly once.
-- `e2e/tests/real-stack-core.spec.ts`: five proof journeys against the actual
-  services: verification/login/refresh/logout/reset mail; persisted knowledge,
-  lookup and tokenization for all eleven API language codes; starter-deck and
-  grammar persistence; cards/media/bulk/bury/review/undo/leech/output/stats;
-  import/export/readers; and 50 real browser IndexedDB reviews with a committed
-  response deliberately lost before retry.
+- `e2e/tests/real-stack-core.spec.ts`: six proof journeys against the actual
+  services: verification/login/refresh/logout/reset mail; real built-UI
+  onboarding/cards/review/bulk/reader behavior; persisted knowledge, lookup and
+  tokenization for all eleven API language codes; starter-deck and grammar
+  persistence; cards/media/bulk/bury/review/undo/leech/output/stats;
+  media-preserving import/export/readers; and 50 real browser IndexedDB reviews
+  with a committed response deliberately lost before retry.
+- `e2e/tests/real-stack-restart.spec.ts`: a committed event replays byte-for-byte
+  and remains exactly once after the real API process restarts.
 - `e2e/extension.test.js`: packaged Chrome annotation, ruby preservation,
   lookup and mining.
 - `e2e/firefox-extension-smoke.cjs`: a built Firefox package is installed by
@@ -100,9 +117,8 @@ The dated audit report records the environment and reason.
   claimed pass.
 - Real AnkiConnect requires an Anki process and remains a manual/full-gate
   integration; transport behavior is automated.
-- APKG export currently preserves text and scheduling but intentionally omits
-  attached audio/images. JSON/CSV/APKG structure and scheduling round trips are
-  automated; a media-preserving APKG round trip is not claimed.
+- APKG import/export preserves attached image/audio bytes, Unicode, and
+  scheduling. EPUB remains explicitly unshipped.
 - Official starter decks are currently seeded only for Japanese and English.
   Onboarding explicitly reports the unavailable case for the other selectable
   languages and no longer claims that a deck was subscribed.

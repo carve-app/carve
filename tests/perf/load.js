@@ -34,8 +34,18 @@ export function setup() {
   const register = http.post(`${API}/v1/auth/register`, JSON.stringify({
     email, password: 'k6-performance-password', display_name: 'k6',
   }), { headers: { 'Content-Type': 'application/json' } });
-  if (register.status !== 200) throw new Error(`register failed: ${register.status} ${register.body}`);
-  const token = register.json('access_token');
+  if (register.status !== 201) throw new Error(`register failed: ${register.status} ${register.body}`);
+  const verificationToken = register.json('verification_token_test');
+  if (!verificationToken) throw new Error('API must run with EXPOSE_VERIFY_TOKENS=1 for isolated load setup');
+  const verify = http.post(`${API}/v1/auth/verify`, JSON.stringify({ token: verificationToken }), {
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (verify.status !== 200) throw new Error(`verify failed: ${verify.status} ${verify.body}`);
+  const login = http.post(`${API}/v1/auth/login`, JSON.stringify({
+    email, password: 'k6-performance-password',
+  }), { headers: { 'Content-Type': 'application/json' } });
+  if (login.status !== 200) throw new Error(`login failed: ${login.status} ${login.body}`);
+  const token = login.json('access_token');
   const card = http.post(`${API}/v1/cards`, JSON.stringify({
     language_code: 'en', lemma: `performance-${uuid()}`, back_text: 'load test',
   }), { headers: headers(token) });

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -23,11 +24,38 @@ import (
 )
 
 type Handler struct {
-	db *pgxpool.Pool
+	db    *pgxpool.Pool
+	media MediaUploader
 }
 
 func NewHandler(db *pgxpool.Pool) *Handler {
-	return &Handler{db: db}
+	return NewHandlerWithMedia(db, newHTTPMediaUploader())
+}
+
+func NewHandlerWithMedia(db *pgxpool.Pool, media MediaUploader) *Handler {
+	return &Handler{db: db, media: media}
+}
+
+const (
+	maxAnkiRequestBytes    int64 = 101 << 20
+	maxMigakuRequestBytes  int64 = 21 << 20
+	maxYomitanRequestBytes int64 = 51 << 20
+	maxJPDBRequestBytes    int64 = 11 << 20
+)
+
+func parseMultipartLimited(w http.ResponseWriter, r *http.Request, maxBytes int64) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+	err := r.ParseMultipartForm(32 << 20)
+	if err == nil {
+		return nil
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) || strings.Contains(err.Error(), "request body too large") {
+		writeError(w, http.StatusRequestEntityTooLarge, "upload too large")
+		return err
+	}
+	writeError(w, http.StatusBadRequest, "invalid multipart form")
+	return err
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -50,8 +78,7 @@ func (h *Handler) ImportAnki(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := r.ParseMultipartForm(100 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid multipart form")
+	if err := parseMultipartLimited(w, r, maxAnkiRequestBytes); err != nil {
 		return
 	}
 
@@ -72,15 +99,21 @@ func (h *Handler) ImportAnki(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := io.ReadAll(io.LimitReader(file, 200<<20))
+	data, err := io.ReadAll(io.LimitReader(file, (100<<20)+1))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "failed to read file")
+		return
+	}
+	if len(data) > 100<<20 {
+		writeError(w, http.StatusRequestEntityTooLarge, "upload too large")
 		return
 	}
 
 	notes, err := parseAnkiPackage(data)
 	if err != nil {
-		if strings.Contains(err.Error(), "invalid .apkg") {
+		if strings.Contains(err.Error(), "size limit") || strings.Contains(err.Error(), "exceeds") {
+			writeError(w, http.StatusRequestEntityTooLarge, "Anki package too large")
+		} else if strings.Contains(err.Error(), "invalid .apkg") || strings.Contains(err.Error(), "media manifest") {
 			writeError(w, http.StatusBadRequest, "invalid .apkg archive")
 		} else if strings.Contains(err.Error(), "no collection") {
 			writeError(w, http.StatusBadRequest, "could not find collection database in .apkg")
@@ -91,11 +124,55 @@ func (h *Handler) ImportAnki(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	type preparedNote struct {
+		note                                             ankiNote
+		frontAudio, frontImage, backAudio, sentenceAudio *string
+	}
+	prepared := make([]preparedNote, 0, len(notes))
+	uploadedMedia := make(map[string]string)
+	for _, note := range notes {
+		item := preparedNote{note: note}
+		for _, media := range []struct {
+			object *ankiMedia
+			path   string
+			dest   **string
+		}{
+			{note.FrontAudio, "/audio", &item.frontAudio},
+			{note.FrontImage, "/screenshots", &item.frontImage},
+			{note.BackAudio, "/audio", &item.backAudio},
+			{note.SentenceAudio, "/audio", &item.sentenceAudio},
+		} {
+			if media.object == nil {
+				continue
+			}
+			if existingURL, ok := uploadedMedia[media.object.Name]; ok {
+				*media.dest = &existingURL
+				continue
+			}
+			url, err := h.mediaUploader().Upload(ctx, media.path, media.object.Data, media.object.ContentType)
+			if err != nil {
+				slog.Warn("anki import: media upload", "error", err, "name", media.object.Name)
+				writeError(w, http.StatusBadGateway, "could not store Anki media")
+				return
+			}
+			uploadedMedia[media.object.Name] = url
+			*media.dest = &url
+		}
+		prepared = append(prepared, item)
+	}
+
+	tx, err := h.db.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	defer tx.Rollback(ctx)
 	imported := 0
 	skipped := 0
 
 	now := time.Now()
-	for _, note := range notes {
+	for _, item := range prepared {
+		note := item.note
 		var backPtr *string
 		if note.Back != "" {
 			backPtr = &note.Back
@@ -108,14 +185,16 @@ func (h *Handler) ImportAnki(w http.ResponseWriter, r *http.Request) {
 		sched := Map(note.Sched, note.CollectionCreated, now)
 
 		id := auth.NewID()
-		_, err := h.db.Exec(ctx,
+		result, err := tx.Exec(ctx,
 			`INSERT INTO cards
 			    (id, user_id, language_code, front_text, back_text, sentence,
+			     front_audio_url, front_image_url, back_audio_url, sentence_audio_url,
 			     fsrs_state, fsrs_stability, fsrs_difficulty, fsrs_due,
 			     fsrs_reps, fsrs_lapses)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 			 ON CONFLICT DO NOTHING`,
 			id, claims.UserID, language, note.Front, backPtr, sentencePtr,
+			item.frontAudio, item.frontImage, item.backAudio, item.sentenceAudio,
 			sched.State, sched.Stability, sched.Difficulty, sched.Due,
 			sched.Reps, sched.Lapses,
 		)
@@ -124,7 +203,15 @@ func (h *Handler) ImportAnki(w http.ResponseWriter, r *http.Request) {
 			skipped++
 			continue
 		}
-		imported++
+		if result.RowsAffected() == 0 {
+			skipped++
+		} else {
+			imported++
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -144,8 +231,7 @@ func (h *Handler) ImportMigakuCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := r.ParseMultipartForm(20 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid multipart form")
+	if err := parseMultipartLimited(w, r, maxMigakuRequestBytes); err != nil {
 		return
 	}
 
@@ -161,7 +247,16 @@ func (h *Handler) ImportMigakuCSV(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	cr := csv.NewReader(io.LimitReader(file, 20<<20))
+	csvData, err := io.ReadAll(io.LimitReader(file, (20<<20)+1))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read file")
+		return
+	}
+	if len(csvData) > 20<<20 {
+		writeError(w, http.StatusRequestEntityTooLarge, "upload too large")
+		return
+	}
+	cr := csv.NewReader(bytes.NewReader(csvData))
 	cr.LazyQuotes = true
 	cr.FieldsPerRecord = -1 // variable fields
 
@@ -232,8 +327,7 @@ func (h *Handler) ImportYomitan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := r.ParseMultipartForm(50 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid multipart form")
+	if err := parseMultipartLimited(w, r, maxYomitanRequestBytes); err != nil {
 		return
 	}
 
@@ -250,9 +344,13 @@ func (h *Handler) ImportYomitan(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	// Yomitan exports as a zip file containing term_bank_*.json files.
-	data, err := io.ReadAll(io.LimitReader(file, 50<<20))
+	data, err := io.ReadAll(io.LimitReader(file, (50<<20)+1))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "failed to read file")
+		return
+	}
+	if len(data) > 50<<20 {
+		writeError(w, http.StatusRequestEntityTooLarge, "upload too large")
 		return
 	}
 
@@ -266,21 +364,35 @@ func (h *Handler) ImportYomitan(w http.ResponseWriter, r *http.Request) {
 	imported := 0
 	skipped := 0
 
+	var uncompressedTermBytes uint64
 	for _, f := range zr.File {
 		if !strings.HasPrefix(filepath.Base(f.Name), "term_bank_") {
 			continue
+		}
+		if f.UncompressedSize64 > 50<<20 {
+			writeError(w, http.StatusRequestEntityTooLarge, "archive entry too large")
+			return
+		}
+		uncompressedTermBytes += f.UncompressedSize64
+		if uncompressedTermBytes > 50<<20 {
+			writeError(w, http.StatusRequestEntityTooLarge, "archive contents too large")
+			return
 		}
 		rc, err := f.Open()
 		if err != nil {
 			continue
 		}
 
+		entryData, readErr := io.ReadAll(io.LimitReader(rc, (50<<20)+1))
+		rc.Close()
+		if readErr != nil || len(entryData) > 50<<20 {
+			writeError(w, http.StatusRequestEntityTooLarge, "archive entry too large")
+			return
+		}
 		var entries [][]json.RawMessage
-		if err := json.NewDecoder(rc).Decode(&entries); err != nil {
-			rc.Close()
+		if err := json.Unmarshal(entryData, &entries); err != nil {
 			continue
 		}
-		rc.Close()
 
 		for _, entry := range entries {
 			if len(entry) < 2 {
@@ -328,8 +440,7 @@ func (h *Handler) ImportJPDBCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := r.ParseMultipartForm(10 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid multipart form")
+	if err := parseMultipartLimited(w, r, maxJPDBRequestBytes); err != nil {
 		return
 	}
 
@@ -345,7 +456,16 @@ func (h *Handler) ImportJPDBCSV(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	cr := csv.NewReader(io.LimitReader(file, 10<<20))
+	csvData, err := io.ReadAll(io.LimitReader(file, (10<<20)+1))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "failed to read file")
+		return
+	}
+	if len(csvData) > 10<<20 {
+		writeError(w, http.StatusRequestEntityTooLarge, "upload too large")
+		return
+	}
+	cr := csv.NewReader(bytes.NewReader(csvData))
 	cr.LazyQuotes = true
 	cr.FieldsPerRecord = -1
 
@@ -450,9 +570,13 @@ func (h *Handler) upsertKnowledge(
 // fields preserved: type, queue, ivl, factor, reps, lapses, due. Together
 // they reconstruct the FSRS state via anki_sched.Map.
 type ankiNote struct {
-	Front    string
-	Back     string
-	Sentence string
+	Front         string
+	Back          string
+	Sentence      string
+	FrontAudio    *ankiMedia
+	FrontImage    *ankiMedia
+	BackAudio     *ankiMedia
+	SentenceAudio *ankiMedia
 
 	// Scheduling fields from the most-progressed sibling card (max(type)).
 	// Zero values mean "new card / no review history."
@@ -469,19 +593,44 @@ func parseAnkiPackage(data []byte) ([]ankiNote, error) {
 	}
 
 	var dbData []byte
+	var mediaManifest []byte
+	archiveEntries := make(map[string]*zip.File)
 	for _, f := range zr.File {
+		archiveEntries[f.Name] = f
 		if f.Name == "collection.anki2" || f.Name == "collection.anki21" {
+			if f.UncompressedSize64 > 100<<20 {
+				return nil, fmt.Errorf("collection database exceeds size limit")
+			}
 			rc, err := f.Open()
 			if err != nil {
 				continue
 			}
-			dbData, _ = io.ReadAll(rc)
+			dbData, _ = io.ReadAll(io.LimitReader(rc, (100<<20)+1))
 			rc.Close()
-			break
+		}
+		if f.Name == "media" {
+			if f.UncompressedSize64 > 1<<20 {
+				return nil, fmt.Errorf("media manifest exceeds size limit")
+			}
+			rc, err := f.Open()
+			if err == nil {
+				mediaManifest, _ = io.ReadAll(io.LimitReader(rc, (1<<20)+1))
+				rc.Close()
+			}
 		}
 	}
 	if len(dbData) == 0 {
 		return nil, fmt.Errorf("no collection database found in .apkg")
+	}
+	if len(dbData) > 100<<20 {
+		return nil, fmt.Errorf("collection database exceeds size limit")
+	}
+	if len(mediaManifest) > 1<<20 {
+		return nil, fmt.Errorf("media manifest exceeds size limit")
+	}
+	mediaByName, err := readAnkiMedia(archiveEntries, mediaManifest)
+	if err != nil {
+		return nil, err
 	}
 
 	tmpFile := fmt.Sprintf("/tmp/anki_parse_%d.db", time.Now().UnixNano())
@@ -555,18 +704,23 @@ func parseAnkiPackage(data []byte) ([]ankiNote, error) {
 		if len(fields) == 0 {
 			continue
 		}
-		front := stripHTMLSimple(fields[0])
+		frontHTML := fields[0]
+		front := stripHTMLSimple(stripSoundMarkup(frontHTML))
 		if front == "" {
 			continue
 		}
 		var back, sentence string
+		backHTML := ""
 		if len(fields) > 1 {
-			back = stripHTMLSimple(fields[1])
+			backHTML = fields[1]
+			back = stripHTMLSimple(stripSoundMarkup(backHTML))
 		}
 		if len(fields) > 2 {
 			sentence = stripHTMLSimple(fields[2])
 		}
-		notes = append(notes, ankiNote{
+		frontSounds := soundNames(frontHTML)
+		backSounds := soundNames(backHTML)
+		note := ankiNote{
 			Front:    front,
 			Back:     back,
 			Sentence: sentence,
@@ -577,7 +731,20 @@ func parseAnkiPackage(data []byte) ([]ankiNote, error) {
 				Due: cDue,
 			},
 			CollectionCreated: collectionCreated,
-		})
+		}
+		if name := imageName(frontHTML); name != "" {
+			note.FrontImage = mediaByName[name]
+		}
+		if len(frontSounds) > 0 {
+			note.FrontAudio = mediaByName[frontSounds[0]]
+		}
+		if len(backSounds) > 0 {
+			note.BackAudio = mediaByName[backSounds[0]]
+		}
+		if len(backSounds) > 1 {
+			note.SentenceAudio = mediaByName[backSounds[1]]
+		}
+		notes = append(notes, note)
 	}
 	return notes, rows.Err()
 }

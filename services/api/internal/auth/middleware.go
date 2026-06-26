@@ -16,18 +16,24 @@ func Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			writeAuthError(w, "unauthorized")
 			return
 		}
 		token := strings.TrimPrefix(authHeader, "Bearer ")
 		claims, err := ParseAccessToken(token)
 		if err != nil {
-			http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+			writeAuthError(w, "invalid token")
 			return
 		}
 		ctx := context.WithValue(r.Context(), claimsKey, claims)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func writeAuthError(w http.ResponseWriter, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	_, _ = w.Write([]byte(`{"error":"` + message + `"}`))
 }
 
 // ClaimsFromContext retrieves auth claims injected by Middleware.

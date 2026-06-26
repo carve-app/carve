@@ -1,14 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { expectNoSeriousA11y } from './a11y';
-import { uniqueEmail } from './helpers';
+import { registerTestUser } from './helpers';
 
 test('forgot → reset password flow', async ({ page, request }) => {
-  const apiBase = process.env.API_BASE ?? 'http://localhost:8080';
-  const email = uniqueEmail('reset');
-  const reg = await request.post(`${apiBase}/v1/auth/register`, {
-    data: { email, password: 'old-password-123', display_name: 'Reset Tester' },
-  });
-  expect(reg.ok(), `register ${email}`).toBe(true);
+  const { email } = await registerTestUser(request, 'reset', 'Reset Tester', 'old-password-123');
 
   await page.goto('/forgot-password');
   await expectNoSeriousA11y(page, { label: 'forgot-password' });

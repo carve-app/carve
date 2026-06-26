@@ -53,6 +53,41 @@ func TestTest_BadRequestOnMissingURL(t *testing.T) {
 	}
 }
 
+func TestValidateAnkiConnectURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		{name: "localhost", url: "http://localhost:8765"},
+		{name: "ipv4 loopback", url: "http://127.0.0.1:8765"},
+		{name: "ipv6 loopback", url: "http://[::1]:8765"},
+		{name: "remote host", url: "https://example.com", wantErr: true},
+		{name: "metadata endpoint", url: "http://169.254.169.254/latest/meta-data", wantErr: true},
+		{name: "loopback https", url: "https://localhost:8765", wantErr: true},
+		{name: "credentials", url: "http://user:pass@localhost:8765", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateAnkiConnectURL(tt.url)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateAnkiConnectURL(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestTest_RejectsRemoteURL(t *testing.T) {
+	h := NewHandler(nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/sync/anki-connect/test", strings.NewReader(`{"url":"http://169.254.169.254/latest/meta-data"}`))
+	req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.Claims{UserID: "u"}))
+	w := httptest.NewRecorder()
+	h.Test(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestTest_ReportsDeckNames(t *testing.T) {
 	stub := stubAnki(map[string]any{"deckNames": []string{"Default", "JLPT N5"}})
 	defer stub.Close()

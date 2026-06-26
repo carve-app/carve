@@ -8,7 +8,7 @@ import {
 } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { strToU8, zipSync } from 'fflate';
-import { createTestCard, registerTestUser, seedAuthenticatedPage } from './helpers';
+import { createTestCard, registerTestUser, seedAuthenticatedPage, TEST_PASSWORD, uniqueEmail } from './helpers';
 
 const API = process.env.API_BASE ?? 'http://127.0.0.1:8080';
 const MAILPIT = process.env.MAILPIT_BASE ?? 'http://127.0.0.1:8025';
@@ -81,7 +81,20 @@ async function offlineQueueLength(page: Page): Promise<number> {
 
 test('register, verification, login, concurrent refresh, logout, and password reset', async ({ request }) => {
   await request.delete(`${MAILPIT}/api/v1/messages`);
-  const account = await registerTestUser(request, 'auth-proof', 'Auth Proof');
+  const email = uniqueEmail('auth-proof');
+  const registerResponse = await request.post(`${API}/v1/auth/register`, {
+    data: { email, password: TEST_PASSWORD, display_name: 'Auth Proof' },
+  });
+  expect(registerResponse.status()).toBe(201);
+  const registration = await registerResponse.json() as Record<string, unknown>;
+  expect(registration).toMatchObject({ verification_required: true, email });
+  expect(registration).not.toHaveProperty('access_token');
+  expect(registration).not.toHaveProperty('refresh_token');
+
+  const beforeVerification = await request.post(`${API}/v1/auth/login`, {
+    data: { email, password: TEST_PASSWORD },
+  });
+  expect(beforeVerification.status()).toBe(403);
 
   const verification = await latestMailText(request, 'Verify your Carve email');
   const verifyToken = verification.match(/verify-email\?token=([A-Za-z0-9_-]+)/)?.[1];
@@ -91,12 +104,12 @@ test('register, verification, login, concurrent refresh, logout, and password re
   }), 'verify email');
 
   const badLogin = await request.post(`${API}/v1/auth/login`, {
-    data: { email: account.email, password: 'incorrect-password' },
+    data: { email, password: 'incorrect-password' },
   });
   expect(badLogin.status()).toBe(401);
-  await jsonOK(await request.post(`${API}/v1/auth/login`, {
-    data: { email: account.email, password: account.password },
-  }), 'valid login');
+  const account = await jsonOK(await request.post(`${API}/v1/auth/login`, {
+    data: { email, password: TEST_PASSWORD },
+  }), 'valid login') as { access_token: string; refresh_token: string };
 
   // Two callers rotate the same token concurrently. Exactly one wins, and the
   // winning replacement remains usable (the loser must not revoke it).
@@ -131,7 +144,7 @@ test('register, verification, login, concurrent refresh, logout, and password re
 
   await request.delete(`${MAILPIT}/api/v1/messages`);
   await jsonOK(await request.post(`${API}/v1/auth/forgot`, {
-    data: { email: account.email },
+    data: { email },
   }), 'request password reset');
   const resetMail = await latestMailText(request, 'Reset your Carve password');
   const resetToken = resetMail.match(/reset-password\?token=([A-Za-z0-9_-]+)/)?.[1];
@@ -141,8 +154,103 @@ test('register, verification, login, concurrent refresh, logout, and password re
     data: { token: resetToken, password: newPassword },
   }), 'reset password');
   await jsonOK(await request.post(`${API}/v1/auth/login`, {
-    data: { email: account.email, password: newPassword },
+    data: { email, password: newPassword },
   }), 'login with reset password');
+});
+
+test('real browser completes verification, onboarding, cards, review, bulk, and reader UI', async ({ page, request }) => {
+  test.setTimeout(120_000);
+  await request.delete(`${MAILPIT}/api/v1/messages`);
+  const email = uniqueEmail('browser-core');
+
+  await page.goto('/register');
+  await page.waitForLoadState('networkidle');
+  await page.getByLabel('Name').fill('Browser Core');
+  await page.getByLabel('Email').fill(email);
+  await page.getByLabel('Password').fill(TEST_PASSWORD);
+  await Promise.all([
+    page.waitForURL(/\/verify-email\?email=/),
+    page.getByRole('button', { name: 'Create account' }).click(),
+  ]);
+  await expect(page.getByRole('heading', { name: 'Check your inbox' })).toBeVisible();
+
+  const verification = await latestMailText(request, 'Verify your Carve email');
+  const verifyToken = verification.match(/verify-email\?token=([A-Za-z0-9_-]+)/)?.[1];
+  expect(verifyToken).toBeTruthy();
+  await page.goto(`/verify-email?token=${verifyToken}`);
+  await expect(page.getByRole('heading', { name: "You're all set" })).toBeVisible();
+  await page.getByRole('link', { name: 'Go to login' }).click();
+  await page.getByLabel('Email').fill(email);
+  await page.getByLabel('Password').fill(TEST_PASSWORD);
+  await Promise.all([
+    page.waitForURL(/\/review/),
+    page.getByRole('button', { name: 'Log in' }).click(),
+  ]);
+
+  await page.goto('/onboarding');
+  // SvelteKit attaches this live region during client hydration. Waiting for
+  // it prevents clicks from landing on actionable SSR markup before handlers
+  // have been installed.
+  await page.locator('#svelte-announcer').waitFor({ state: 'attached' });
+  const englishOption = page.getByRole('button', { name: /English \(intermediate\+\)/ });
+  const japaneseOption = page.getByRole('button', { name: /Japanese/ });
+  await englishOption.click();
+  await expect(englishOption).toHaveClass(/selected/);
+  await japaneseOption.click();
+  await expect(japaneseOption).toHaveClass(/selected/);
+  await page.getByRole('button', { name: /continue/i }).click();
+  await expect(page.getByRole('heading', { name: 'Which of these words do you already know?' })).toBeVisible();
+  await page.locator('.group-card').first().click();
+  await page.getByRole('button', { name: /continue/i }).click();
+  await expect(page.getByRole('heading', { name: 'Start with a curated deck' })).toBeVisible();
+  await page.getByRole('button', { name: /continue/i }).click();
+  await expect(page.getByRole('heading', { name: 'Install the browser extension' })).toBeVisible();
+  await page.getByRole('button', { name: /continue/i }).click();
+  await expect(page.getByRole('heading', { name: "You're all set!" })).toBeVisible();
+  await Promise.all([
+    page.waitForURL(/\/cards/),
+    page.getByRole('button', { name: /go to my cards/i }).click(),
+  ]);
+
+  const cardLinks = page.locator('a.card-link');
+  await expect(cardLinks.first()).toBeVisible();
+  expect(await cardLinks.count()).toBeGreaterThan(2);
+  await cardLinks.first().click();
+  await page.getByRole('button', { name: 'Edit' }).click();
+  const updatedDefinition = `updated through real browser ${randomUUID()}`;
+  await page.locator('#ed-def').fill(updatedDefinition);
+  await page.getByRole('button', { name: 'Save' }).click();
+  await expect(page.getByText(updatedDefinition)).toBeVisible();
+  await page.getByRole('button', { name: 'Suspend' }).click();
+  await expect(page.getByText('Suspended', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Unsuspend' }).click();
+  await expect(page.getByText('Suspended', { exact: true })).toHaveCount(0);
+
+  await page.goto('/cards');
+  const cardCheckboxes = page.locator('input[aria-label^="Select card"]');
+  await cardCheckboxes.nth(0).check();
+  await cardCheckboxes.nth(1).check();
+  await page.locator('.bulk-bar select').selectOption('suspend');
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect(page.getByText(/2 cards suspended/i)).toBeVisible();
+
+  await page.goto('/review');
+  await expect(page.locator('.show-btn')).toBeVisible();
+  await page.locator('.show-btn').click();
+  await page.getByRole('button', { name: /Good/ }).click();
+  await expect(page.getByRole('button', { name: /Undo/ })).toBeVisible();
+
+  await page.goto('/import');
+  await page.locator('input[type="file"]').first().setInputFiles({
+    name: 'browser-reader.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('猫と犬について日本語で読む。'),
+  });
+  await Promise.all([
+    page.waitForURL(/\/library\//),
+    page.getByRole('button', { name: /import and open reader/i }).click(),
+  ]);
+  await expect(page.getByText(/猫|犬/).first()).toBeVisible();
 });
 
 test('onboarding knowledge affects every tokenizer, lookup is shaped, starter deck is idempotent, and grammar persists', async ({ request }) => {
@@ -390,6 +498,16 @@ test('Anki/Migaku/Yomitan/JPDB imports, JSON/CSV/APKG exports, reader imports, a
     backText: 'Japanese language, coffee',
     sentence: '日本語と café を勉強する。',
   });
+
+  const sourceMedia = await jsonOK(await request.post(`${API}/v1/cards/${source.id}/media`, {
+    headers: producerHeaders,
+    multipart: {
+      image: { name: 'roundtrip.png', mimeType: 'image/png', buffer: Buffer.from('roundtrip-image-bytes') },
+      audio: { name: 'roundtrip.webm', mimeType: 'audio/webm', buffer: Buffer.from('roundtrip-audio-bytes') },
+    },
+  }), 'attach export media');
+  expect((await request.get(sourceMedia.image_url)).ok()).toBe(true);
+  expect((await request.get(sourceMedia.audio_url)).ok()).toBe(true);
   await submitReview(request, producer.access_token, source.id, 3, new Date().toISOString());
 
   const jsonExportResponse = await request.get(`${API}/v1/export`, { headers: producerHeaders });
@@ -486,6 +604,17 @@ test('Anki/Migaku/Yomitan/JPDB imports, JSON/CSV/APKG exports, reader imports, a
     },
   });
   expect(invalidYomitan.status()).toBe(400);
+  const oversizedJPDB = await request.post(`${API}/v1/import/jpdb-csv`, {
+    headers,
+    multipart: {
+      language: 'ja',
+      file: {
+        name: 'oversized.csv', mimeType: 'text/csv',
+        buffer: Buffer.alloc(12 << 20, 'x'),
+      },
+    },
+  });
+  expect(oversizedJPDB.status()).toBe(413);
 
   for (const fixture of [
     {
@@ -526,6 +655,17 @@ test('Anki/Migaku/Yomitan/JPDB imports, JSON/CSV/APKG exports, reader imports, a
     },
   });
   expect(epub.status()).toBe(400);
+
+  const roundTripped = importedCards.cards.find((card: { front_text: string }) => card.front_text === '日本語 café');
+  expect(roundTripped).toBeTruthy();
+  const roundTrippedDetail = await jsonOK(
+    await request.get(`${API}/v1/cards/${roundTripped.id}`, { headers }),
+    'round-tripped card media',
+  );
+  expect(roundTrippedDetail.image_url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/screenshots\//);
+  expect(roundTrippedDetail.audio_url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/audio\//);
+  expect(await (await request.get(roundTrippedDetail.image_url)).text()).toBe('roundtrip-image-bytes');
+  expect(await (await request.get(roundTrippedDetail.audio_url)).text()).toBe('roundtrip-audio-bytes');
 });
 
 test('50 browser-offline reviews survive a lost response and drain exactly once', async ({ page, request }) => {

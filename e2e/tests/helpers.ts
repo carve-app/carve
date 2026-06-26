@@ -20,8 +20,37 @@ export async function registerTestUser(
   });
   expect(reg.ok(), `register ${email}`).toBe(true);
   const body = await reg.json();
-  expect(body.access_token, `register ${email} should return access_token`).toBeTruthy();
-  expect(body.refresh_token, `register ${email} should return refresh_token`).toBeTruthy();
+
+  if (!body.access_token) {
+    let verificationToken = body.verification_token_test as string | undefined;
+    const mailpitBase = process.env.MAILPIT_BASE;
+    if (!verificationToken && mailpitBase) {
+      await expect.poll(async () => {
+        const list = await request.get(`${mailpitBase}/api/v1/messages`);
+        if (!list.ok()) return false;
+        const payload = await list.json() as { messages?: Array<{ ID: string; Subject: string; To?: Array<{ Address: string }> }> };
+        const candidate = payload.messages?.find(message =>
+          message.Subject === 'Verify your Carve email' &&
+          (!message.To || message.To.some(recipient => recipient.Address === email))
+        );
+        if (!candidate) return false;
+        const detail = await request.get(`${mailpitBase}/api/v1/message/${candidate.ID}`);
+        if (!detail.ok()) return false;
+        const message = await detail.json() as { Text?: string; HTML?: string };
+        verificationToken = (message.Text ?? message.HTML ?? '').match(/verify-email\?token=([A-Za-z0-9_-]+)/)?.[1];
+        return Boolean(verificationToken);
+      }, { timeout: 10_000 }).toBe(true);
+    }
+    expect(verificationToken, `register ${email} should deliver a verification token`).toBeTruthy();
+    const verify = await request.post(`${apiBase}/v1/auth/verify`, { data: { token: verificationToken } });
+    expect(verify.ok(), `verify ${email}`).toBe(true);
+    const login = await request.post(`${apiBase}/v1/auth/login`, { data: { email, password } });
+    expect(login.ok(), `login ${email} after verification`).toBe(true);
+    Object.assign(body, await login.json());
+  }
+
+  expect(body.access_token, `login ${email} should return access_token`).toBeTruthy();
+  expect(body.refresh_token, `login ${email} should return refresh_token`).toBeTruthy();
   return {
     apiBase,
     email,

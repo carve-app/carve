@@ -78,6 +78,32 @@ func TestProxyReportsProviderFailure(t *testing.T) {
 	}
 }
 
+func TestProxyRejectsMalformedOrOversizedProviderResponse(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "malformed json", body: `{"tokens":`},
+		{name: "oversized", body: strings.Repeat("x", nlpMaxResponseBytes+1)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := NewProxyWithClient("http://nlp.test", "", doerFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(tc.body)),
+				}, nil
+			}))
+			w := httptest.NewRecorder()
+			p.Lookup(w, httptest.NewRequest(http.MethodPost, "/v1/nlp/lookup", strings.NewReader(`{}`)))
+			if w.Code != http.StatusBadGateway {
+				t.Fatalf("expected 502, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestMergeStringsDeduplicatesAndExcludesKnown(t *testing.T) {
 	got := mergeStrings(
 		[]any{"existing", "known", "existing", 42},

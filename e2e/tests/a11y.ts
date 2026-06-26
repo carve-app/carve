@@ -26,7 +26,13 @@ export async function expectNoSeriousA11y(
       .map((v) => {
         const nodes = v.nodes
           .slice(0, 3)
-          .map((n) => `      • ${n.target.join(' ')} — ${n.failureSummary?.split('\n')[0] ?? ''}`)
+          .map((n) => {
+            const detail = [...n.any, ...n.all, ...n.none]
+              .map((check) => check.message)
+              .filter(Boolean)
+              .join('; ');
+            return `      • ${n.target.join(' ')} (${n.html}) — ${detail || n.failureSummary?.split('\n')[0] || ''}`;
+          })
           .join('\n');
         return `  ${v.id} (${v.impact}): ${v.help}\n${nodes}`;
       })

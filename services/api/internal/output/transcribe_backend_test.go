@@ -111,6 +111,17 @@ func TestTranscribe_NoBackendConfigured(t *testing.T) {
 	}
 }
 
+func TestTranscribe_RejectsOversizedAudio(t *testing.T) {
+	h := &Handler{}
+	req := buildTranscribeRequest(t, "expected", "hypothesis", "en", bytes.Repeat([]byte("x"), 21<<20))
+	req = req.WithContext(auth.ContextWithClaims(req.Context(), &auth.Claims{UserID: "user-004"}))
+	w := httptest.NewRecorder()
+	h.Transcribe(w, req)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // ── helpers ────────────────────────────────────────────────────────────────
 
 func buildTranscribeRequest(t *testing.T, expected, hypothesis, language string, audio []byte) *http.Request {

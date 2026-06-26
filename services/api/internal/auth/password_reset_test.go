@@ -75,6 +75,17 @@ func TestResetPassword_ShortPassword(t *testing.T) {
 	}
 }
 
+func TestResetPassword_RejectsBcryptOversizedPassword(t *testing.T) {
+	h := &Handler{}
+	body, _ := json.Marshal(map[string]string{"token": "token", "password": strings.Repeat("x", 73)})
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/reset", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	h.ResetPassword(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestResetPassword_InvalidToken_ReachesDB(t *testing.T) {
 	// Validation passes → handler reaches DB call.
 	// DB-dependent paths are covered by integration tests.

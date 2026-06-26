@@ -57,7 +57,7 @@ components:
       format: uuid
     LanguageCode:
       type: string
-      enum: [ja, zh-cn, zh-tw, zh, ko, en]
+      enum: [ja, zh-cn, zh-tw, ko, en, es, de, fr, it, pt, vi]
 
     # ── Auth ──────────────────────────────────────────────────────────────
     AuthLoginRequest:
@@ -65,13 +65,13 @@ components:
       required: [email, password]
       properties:
         email:    { type: string, format: email, minLength: 3, maxLength: 254 }
-        password: { type: string, minLength: 8, maxLength: 100 }
+        password: { type: string, minLength: 8, maxLength: 72 }
     AuthRegisterRequest:
       type: object
       required: [email, password, display_name]
       properties:
-        email:        { type: string, format: email }
-        password:     { type: string, minLength: 8, maxLength: 100 }
+        email:        { type: string, format: email, minLength: 3, maxLength: 254 }
+        password:     { type: string, minLength: 8, maxLength: 72 }
         display_name: { type: string, minLength: 1, maxLength: 80 }
     AuthTokenResponse:
       type: object
@@ -80,6 +80,12 @@ components:
         access_token: { type: string }
         expires_in:   { type: integer, description: "Lifetime of access_token in seconds" }
         user:         { $ref: '#/components/schemas/AuthUser' }
+    AuthRegisterResponse:
+      type: object
+      required: [verification_required, email]
+      properties:
+        verification_required: { type: boolean, enum: [true] }
+        email: { type: string, format: email }
     AuthUser:
       type: object
       required: [id, email, display_name]
@@ -97,7 +103,7 @@ components:
       required: [token, password]
       properties:
         token:    { type: string, minLength: 16, maxLength: 200 }
-        password: { type: string, minLength: 8, maxLength: 100 }
+        password: { type: string, minLength: 8, maxLength: 72 }
     VerifyEmailRequest:
       type: object
       required: [token]
@@ -232,7 +238,7 @@ components:
         sentence:             { type: string, nullable: true }
         subtitle_translation: { type: string, nullable: true }
         notes:                { type: string, nullable: true }
-        deck_id:              { type: string, nullable: true }
+        deck_id:              { type: string, format: uuid, nullable: true }
         tags:
           type: array
           items: { type: string }
@@ -638,7 +644,10 @@ components:
       type: object
       required: [url]
       properties:
-        url: { type: string, format: uri }
+        url:
+          type: string
+          format: uri
+          pattern: '^http://(localhost|127(?:\.[0-9]{1,3}){3}|\[::1\])(?::[0-9]+)?(?:/.*)?$'
     AnkiConnectTestResponse:
       type: object
       required: [ok]
@@ -652,7 +661,10 @@ components:
       type: object
       required: [url]
       properties:
-        url:  { type: string, format: uri }
+        url:
+          type: string
+          format: uri
+          pattern: '^http://(localhost|127(?:\.[0-9]{1,3}){3}|\[::1\])(?::[0-9]+)?(?:/.*)?$'
         deck: { type: string }
     AnkiConnectSyncResponse:
       type: object
@@ -791,6 +803,7 @@ paths:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuthTokenResponse' } } } }
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '403': { description: Email verification required, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/auth/register:
     post:
@@ -802,7 +815,7 @@ paths:
         content:
           application/json: { schema: { $ref: '#/components/schemas/AuthRegisterRequest' } }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuthTokenResponse' } } } }
+        '201': { description: Verification required, content: { application/json: { schema: { $ref: '#/components/schemas/AuthRegisterResponse' } } } }
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '409': { description: Email taken, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
@@ -833,8 +846,7 @@ paths:
         content:
           application/json: { schema: { $ref: '#/components/schemas/ForgotPasswordRequest' } }
       responses:
-        '200': { description: Always 200 to prevent email enumeration, content: { application/json: { schema: { $ref: '#/components/schemas/Ok' } } } }
-        '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '204': { description: Always empty to prevent email enumeration }
 
   /v1/auth/reset:
     post:
@@ -846,8 +858,9 @@ paths:
         content:
           application/json: { schema: { $ref: '#/components/schemas/ResetPasswordRequest' } }
       responses:
-        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Ok' } } } }
-        '400': { description: Bad / expired token, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '204': { description: Password changed }
+        '400': { description: Invalid request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Bad / expired token, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/auth/verify:
     post:
@@ -910,6 +923,7 @@ paths:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: User no longer exists, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     delete:
       tags: [users]
       operationId: deleteMe
@@ -963,7 +977,7 @@ paths:
           schema: { $ref: '#/components/schemas/LanguageCode' }
         - in: query
           name: limit
-          schema: { type: integer, minimum: 1, maximum: 500 }
+          schema: { type: integer, minimum: 1, maximum: 200 }
         - in: query
           name: state
           schema: { type: string, enum: [new, learning, review, relearning, suspended] }
@@ -972,6 +986,7 @@ paths:
           schema: { type: string }
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CardListResponse' } } } }
+        '400': { description: Invalid filters, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     post:
       tags: [cards]
@@ -1021,6 +1036,7 @@ paths:
       security: [{ bearer: [] }]
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Card' } } } }
+        '400': { description: Invalid card id, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     patch:
@@ -1044,6 +1060,7 @@ paths:
       security: [{ bearer: [] }]
       responses:
         '204': { description: Deleted }
+        '400': { description: Invalid card id, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
@@ -1089,6 +1106,7 @@ paths:
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Card not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { description: Media upload too large, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '502': { description: A supplied media part failed to store, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/cards/{id}/suspend:
@@ -1104,6 +1122,7 @@ paths:
       security: [{ bearer: [] }]
       responses:
         '200': { description: Suspended }
+        '400': { description: Invalid card id, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
@@ -1120,6 +1139,7 @@ paths:
       security: [{ bearer: [] }]
       responses:
         '200': { description: Unsuspended }
+        '400': { description: Invalid card id, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
@@ -1136,6 +1156,7 @@ paths:
       security: [{ bearer: [] }]
       responses:
         '200': { description: Buried until tomorrow }
+        '400': { description: Invalid card id, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
@@ -1152,6 +1173,7 @@ paths:
       security: [{ bearer: [] }]
       responses:
         '200': { description: Unburied }
+        '400': { description: Invalid card id, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
@@ -1290,6 +1312,7 @@ paths:
           schema: { $ref: '#/components/schemas/LanguageCode' }
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DeckListResponse' } } } }
+        '400': { description: Invalid filters, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     post:
       tags: [decks]
@@ -1340,6 +1363,7 @@ paths:
       security: [{ bearer: [] }]
       responses:
         '204': { description: Deleted }
+        '400': { description: Invalid deck id, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '403': { description: Not your deck, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -1365,6 +1389,7 @@ paths:
                 properties:
                   subscribed: { type: boolean }
                   deck_id:    { $ref: '#/components/schemas/UUID' }
+        '400': { description: Invalid deck id, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '403': { description: Deck is not public, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -1375,6 +1400,7 @@ paths:
       security: [{ bearer: [] }]
       responses:
         '204': { description: Unsubscribed }
+        '400': { description: Invalid deck id, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/decks/{id}/rate:
@@ -1403,6 +1429,7 @@ paths:
                   rated: { type: boolean }
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: Deck not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   # ── Export ────────────────────────────────────────────────────────────
   /v1/export:
@@ -1583,6 +1610,7 @@ paths:
       security: [{ bearer: [] }]
       responses:
         '204': { description: Deleted }
+        '400': { description: Invalid item id, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
@@ -1607,7 +1635,7 @@ paths:
     post:
       tags: [library]
       operationId: importLibraryFile
-      summary: Import a .txt, .srt, or .epub file into the library
+      summary: Import a .txt or .srt file into the library
       security: [{ bearer: [] }]
       requestBody:
         required: true
@@ -1624,6 +1652,7 @@ paths:
         '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/LibraryAddResponse' } } } }
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { description: Upload too large, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   # ── Import ────────────────────────────────────────────────────────────
   /v1/import/anki:
@@ -1647,6 +1676,8 @@ paths:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ImportResultResponse' } } } }
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { description: Upload too large, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '502': { description: Anki media storage unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/import/migaku-csv:
     post:
@@ -1669,6 +1700,7 @@ paths:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ImportResultResponse' } } } }
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { description: Upload too large, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/import/yomitan:
     post:
@@ -1690,6 +1722,7 @@ paths:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ImportResultResponse' } } } }
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { description: Upload too large, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/import/jpdb-csv:
     post:
@@ -1710,6 +1743,7 @@ paths:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ImportResultResponse' } } } }
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { description: Upload too large, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   # ── Output ────────────────────────────────────────────────────────────
   /v1/output/exercises:
@@ -1792,6 +1826,7 @@ paths:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TranscribeResponse' } } } }
         '400': { description: Bad request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '413': { description: Audio upload too large, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   # ── Sync (AnkiConnect bridge) ─────────────────────────────────────────
   /v1/sync/anki-connect/test:
@@ -1855,6 +1890,7 @@ paths:
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/LookupResponse' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: Unsupported language or invalid request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '502': { description: NLP service unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/nlp/score-content:
@@ -1870,6 +1906,7 @@ paths:
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ScoreContentResponse' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: Unsupported language or invalid request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '502': { description: NLP service unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/nlp/translate:
@@ -1885,6 +1922,7 @@ paths:
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TranslateResponse' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: Unsupported language or invalid request, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '502': { description: NLP service unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/cards/find-similar:
@@ -1914,6 +1952,7 @@ paths:
         '200': { description: Generated deck }
         '400': { description: Invalid request }
         '401': { description: Unauthorized }
+        '422': { description: No suitable source content }
         '502': { description: NLP or source unavailable }
 
   /v1/export/csv:
@@ -1935,6 +1974,7 @@ paths:
       responses:
         '200': { description: APKG export, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
         '401': { description: Unauthorized }
+        '502': { description: Attached media unavailable }
 
   /v1/discover/feed:
     get:
@@ -1975,6 +2015,7 @@ paths:
         content: { application/json: { schema: { type: object, additionalProperties: true } } }
       responses:
         '200': { description: Pattern marked known }
+        '400': { description: Invalid request }
         '401': { description: Unauthorized }
     delete:
       tags: [settings]
@@ -1986,6 +2027,7 @@ paths:
         content: { application/json: { schema: { type: object, additionalProperties: true } } }
       responses:
         '204': { description: Pattern removed }
+        '400': { description: Invalid request }
         '401': { description: Unauthorized }
 
   /v1/nlp/select-sentence:
@@ -2000,6 +2042,7 @@ paths:
       responses:
         '200': { description: Ranked sentence candidates }
         '401': { description: Unauthorized }
+        '422': { description: Unsupported language or invalid request }
         '502': { description: NLP service unavailable }
 
   /v1/nlp/grammar/patterns:
@@ -2023,6 +2066,7 @@ paths:
         content: { application/json: { schema: { type: object, additionalProperties: true } } }
       responses:
         '200': { description: Explanation or unavailable status }
+        '400': { description: Word is required }
         '401': { description: Unauthorized }
 
   /v1/nlp/word-audio:

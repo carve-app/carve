@@ -19,6 +19,17 @@ type exportCardRow struct {
 	Sentence            string
 	SubtitleTranslation string
 	SourceURL           string
+	FrontAudioURL       string
+	FrontImageURL       string
+	BackAudioURL        string
+	SentenceAudioURL    string
+
+	// Generated archive names used only by the APKG renderer. Keeping URLs and
+	// names separate lets CSV remain text-only while APKG embeds stored media.
+	FrontAudioName    string
+	FrontImageName    string
+	BackAudioName     string
+	SentenceAudioName string
 
 	// Scheduling (used by .apkg only; CSV ignores it). Pointers so "never
 	// reviewed" stays distinct from "reviewed, value is zero".

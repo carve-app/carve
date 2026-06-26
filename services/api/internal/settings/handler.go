@@ -139,6 +139,11 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+var supportedLanguages = map[string]bool{
+	"ja": true, "zh-cn": true, "zh-tw": true, "ko": true, "en": true,
+	"es": true, "de": true, "fr": true, "it": true, "pt": true, "vi": true,
+}
+
 // ── GET /v1/settings/fsrs ─────────────────────────────────────────────────────
 
 func (h *Handler) GetFSRS(w http.ResponseWriter, r *http.Request) {
@@ -219,6 +224,10 @@ func (h *Handler) PutFSRS(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Language == "" {
 		req.Language = "ja"
+	}
+	if !supportedLanguages[req.Language] {
+		writeError(w, http.StatusBadRequest, "unsupported language")
+		return
 	}
 
 	defaults := fsrs.DefaultParams()

@@ -13,9 +13,8 @@
     loading = true;
 
     try {
-      const res = await register(email, password, displayName);
-      localStorage.setItem('carve_access_token', res.access_token);
-      window.location.href = '/onboarding';
+      await register(email, password, displayName);
+      window.location.href = `/verify-email?email=${encodeURIComponent(email)}`;
     } catch (err) {
       if (err instanceof ApiError) {
         errorMessage =

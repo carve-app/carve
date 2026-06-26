@@ -12,11 +12,16 @@ import (
 )
 
 type Handler struct {
-	db *pgxpool.Pool
+	db    *pgxpool.Pool
+	media MediaFetcher
 }
 
 func NewHandler(db *pgxpool.Pool) *Handler {
-	return &Handler{db: db}
+	return NewHandlerWithMedia(db, newHTTPMediaFetcher())
+}
+
+func NewHandlerWithMedia(db *pgxpool.Pool, media MediaFetcher) *Handler {
+	return &Handler{db: db, media: media}
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
@@ -52,7 +57,9 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	// ── Cards ─────────────────────────────────────────────────────────────────
 	cardRows, err := h.db.Query(ctx,
 		`SELECT id, language_code, front_text, COALESCE(back_text,''), sentence,
-		        source_url, source_timestamp, fsrs_state,
+		        source_url, source_timestamp,
+		        front_audio_url, front_image_url, back_audio_url, sentence_audio_url,
+		        fsrs_state,
 		        fsrs_stability, fsrs_difficulty, fsrs_due,
 		        fsrs_last_review, fsrs_reps, fsrs_lapses,
 		        suspended, buried, created_at, updated_at
@@ -69,24 +76,28 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	defer cardRows.Close()
 
 	type exportCard struct {
-		ID           string     `json:"id"`
-		LanguageCode string     `json:"language_code"`
-		FrontText    string     `json:"front_text"`
-		BackText     string     `json:"back_text"`
-		Sentence     *string    `json:"sentence"`
-		SourceURL    *string    `json:"source_url"`
-		SourceTS     *float64   `json:"source_timestamp"`
-		FsrsState    string     `json:"fsrs_state"`
-		Stability    *float64   `json:"stability"`
-		Difficulty   *float64   `json:"difficulty"`
-		Due          *time.Time `json:"due"`
-		LastReview   *time.Time `json:"last_review"`
-		Reps         int        `json:"reps"`
-		Lapses       int        `json:"lapses"`
-		Suspended    bool       `json:"suspended"`
-		Buried       bool       `json:"buried"`
-		CreatedAt    time.Time  `json:"created_at"`
-		UpdatedAt    time.Time  `json:"updated_at"`
+		ID            string     `json:"id"`
+		LanguageCode  string     `json:"language_code"`
+		FrontText     string     `json:"front_text"`
+		BackText      string     `json:"back_text"`
+		Sentence      *string    `json:"sentence"`
+		SourceURL     *string    `json:"source_url"`
+		SourceTS      *float64   `json:"source_timestamp"`
+		FrontAudio    *string    `json:"front_audio_url"`
+		FrontImage    *string    `json:"front_image_url"`
+		BackAudio     *string    `json:"back_audio_url"`
+		SentenceAudio *string    `json:"sentence_audio_url"`
+		FsrsState     string     `json:"fsrs_state"`
+		Stability     *float64   `json:"stability"`
+		Difficulty    *float64   `json:"difficulty"`
+		Due           *time.Time `json:"due"`
+		LastReview    *time.Time `json:"last_review"`
+		Reps          int        `json:"reps"`
+		Lapses        int        `json:"lapses"`
+		Suspended     bool       `json:"suspended"`
+		Buried        bool       `json:"buried"`
+		CreatedAt     time.Time  `json:"created_at"`
+		UpdatedAt     time.Time  `json:"updated_at"`
 	}
 	var cards []exportCard
 	for cardRows.Next() {
@@ -94,6 +105,7 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 		if err := cardRows.Scan(
 			&c.ID, &c.LanguageCode, &c.FrontText, &c.BackText,
 			&c.Sentence, &c.SourceURL, &c.SourceTS,
+			&c.FrontAudio, &c.FrontImage, &c.BackAudio, &c.SentenceAudio,
 			&c.FsrsState, &c.Stability, &c.Difficulty, &c.Due, &c.LastReview,
 			&c.Reps, &c.Lapses, &c.Suspended, &c.Buried,
 			&c.CreatedAt, &c.UpdatedAt,
@@ -183,12 +195,12 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	}
 
 	export := map[string]any{
-		"version":          "1",
-		"exported_at":      time.Now().UTC(),
-		"user":             profile,
-		"cards":            cards,
-		"review_events":    events,
-		"immersion":        immersion,
+		"version":       "1",
+		"exported_at":   time.Now().UTC(),
+		"user":          profile,
+		"cards":         cards,
+		"review_events": events,
+		"immersion":     immersion,
 	}
 
 	filename := fmt.Sprintf("carve-export-%s.json", time.Now().Format("2006-01-02"))

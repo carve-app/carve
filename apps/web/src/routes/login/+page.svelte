@@ -20,6 +20,8 @@
         errorMessage =
           err.status === 401
             ? 'Invalid email or password.'
+            : err.status === 403
+            ? 'Verify your email before signing in.'
             : `Login failed: ${err.message}`;
       } else {
         errorMessage = 'Could not reach the server. Is it running?';
@@ -162,7 +164,7 @@
   }
 
   button:hover:not(:disabled) {
-    background: #388e3c;
+    background: #1b5e20;
   }
 
   button:disabled {

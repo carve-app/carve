@@ -3,6 +3,7 @@ package output
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -109,8 +110,14 @@ func (h *Handler) Transcribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := r.ParseMultipartForm(20 << 20); err != nil { // 20 MB cap
-		writeError(w, http.StatusBadRequest, "invalid multipart payload")
+	r.Body = http.MaxBytesReader(w, r.Body, 21<<20)
+	if err := r.ParseMultipartForm(21 << 20); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) || strings.Contains(err.Error(), "request body too large") {
+			writeError(w, http.StatusRequestEntityTooLarge, "audio upload too large")
+		} else {
+			writeError(w, http.StatusBadRequest, "invalid multipart payload")
+		}
 		return
 	}
 
@@ -129,7 +136,15 @@ func (h *Handler) Transcribe(w http.ResponseWriter, r *http.Request) {
 	backendUsed := false
 	if file, header, err := r.FormFile("audio"); err == nil {
 		defer file.Close()
-		audio, _ := io.ReadAll(io.LimitReader(file, 20<<20))
+		audio, readErr := io.ReadAll(io.LimitReader(file, (20<<20)+1))
+		if readErr != nil {
+			writeError(w, http.StatusBadRequest, "could not read audio")
+			return
+		}
+		if len(audio) > 20<<20 {
+			writeError(w, http.StatusRequestEntityTooLarge, "audio upload too large")
+			return
+		}
 		backendURL := os.Getenv("STT_BACKEND_URL")
 		mime := ""
 		if header != nil {
@@ -200,8 +215,8 @@ func computeDiff(ref, hyp string) ([]diffEntry, float64) {
 			if r[i-1] == h[j-1] {
 				cost = 0
 			}
-			a := dp[i-1][j] + 1   // delete from ref
-			b := dp[i][j-1] + 1   // insert into ref
+			a := dp[i-1][j] + 1 // delete from ref
+			b := dp[i][j-1] + 1 // insert into ref
 			c := dp[i-1][j-1] + cost
 			dp[i][j] = min3(a, b, c)
 		}

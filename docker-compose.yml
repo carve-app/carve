@@ -109,6 +109,9 @@ services:
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
       SMTP_FROM: no-reply@carve.local
+      # Test-only escape hatch. Never enable in production: it includes the raw
+      # verification token in the registration response for isolated automation.
+      EXPOSE_VERIFY_TOKENS: ${EXPOSE_VERIFY_TOKENS:-1}
     depends_on:
       postgres:
         condition: service_healthy
