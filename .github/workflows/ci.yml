@@ -348,13 +348,13 @@ jobs:
           go-version: "1.26"
           cache-dependency-path: services/api/go.sum
 
+      - uses: pnpm/action-setup@v4
+        with: { version: "11.5.2" }
+
       - name: Set up Node
         uses: actions/setup-node@v5
         with:
           node-version: "22"
-
-      - uses: pnpm/action-setup@v4
-        with: { version: "11.5.2" }
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
