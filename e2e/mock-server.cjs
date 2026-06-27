@@ -25,6 +25,13 @@ const state = {
   starterDeckFailures: new Set(),
 };
 
+const placementItems = Array.from({ length: 30 }, (_, index) => ({
+  id: `en-mock-${index + 1}`,
+  word: ['reason', 'choose', 'affect', 'outcome', 'acquire'][index % 5],
+  prompt: 'Choose the closest meaning in this example sentence.',
+  options: ['the intended meaning', 'an unrelated action', 'a place', 'a measurement'],
+}));
+
 function uuid() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0;
@@ -156,6 +163,32 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ── Onboarding ─────────────────────────────────────────────────────────
+  if (req.method === 'GET' && path === '/v1/onboarding/placement-test') {
+    if (!auth(req)) return send(res, 401, { error: 'unauthorized' });
+    if ((url.searchParams.get('language') ?? 'en') !== 'en') {
+      return send(res, 400, { error: 'placement test is currently available for English only' });
+    }
+    return send(res, 200, {
+      language: 'en', version: 'en-receptive-v1', estimated_minutes: 4, items: placementItems,
+    });
+  }
+  if (req.method === 'POST' && path === '/v1/onboarding/placement-test') {
+    if (!auth(req)) return send(res, 401, { error: 'unauthorized' });
+    const body = await readBody(req);
+    if (body.language !== 'en' || body.version !== 'en-receptive-v1' || body.answers?.length !== 30) {
+      return send(res, 400, { error: 'invalid placement attempt' });
+    }
+    const correct = body.answers.filter(answer => answer.selected_index === 0).length;
+    return send(res, 200, {
+      attempt_id: uuid(), language: 'en', version: 'en-receptive-v1',
+      correct, total: 30, verified_known: correct,
+      estimated_known: correct * 400,
+      estimate_lower: Math.max(0, correct * 400 - 1500),
+      estimate_upper: Math.min(12000, correct * 400 + 1500),
+      result_label: correct >= 20 ? 'Advanced' : correct >= 13 ? 'Strong' : 'Developing',
+      band_scores: [],
+    });
+  }
   if (req.method === 'POST' && path === '/v1/onboarding/known-words') {
     if (!auth(req)) return send(res, 401, { error: 'unauthorized' });
     await readBody(req);

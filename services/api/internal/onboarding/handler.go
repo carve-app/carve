@@ -141,6 +141,15 @@ func (h *Handler) StarterDeck(w http.ResponseWriter, r *http.Request) {
 		   AND c.user_id = '00000000-0000-0000-0000-000000000000'::uuid
 		   AND c.deleted_at IS NULL
 		   AND NOT EXISTS (
+		     SELECT 1
+		     FROM user_word_knowledge uwk
+		     JOIN words w ON w.id = uwk.word_id
+		     WHERE uwk.user_id = $1
+		       AND uwk.status = 'known'
+		       AND w.language_code = c.language_code
+		       AND lower(w.lemma) = lower(c.front_text)
+		   )
+		   AND NOT EXISTS (
 		     SELECT 1 FROM cards existing
 		     WHERE existing.user_id = $1
 		       AND existing.deck_id = $2

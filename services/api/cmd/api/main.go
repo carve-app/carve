@@ -151,6 +151,8 @@ func newRouter(pool *pgxpool.Pool) chi.Router {
 		r.Delete("/users/me", userHandler.Delete)
 
 		// Onboarding
+		r.Get("/onboarding/placement-test", onboardingHandler.PlacementTest)
+		r.Post("/onboarding/placement-test", onboardingHandler.SubmitPlacementTest)
 		r.Post("/onboarding/known-words", onboardingHandler.KnownWords)
 		r.Post("/onboarding/starter-deck", onboardingHandler.StarterDeck)
 

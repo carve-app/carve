@@ -22,6 +22,7 @@ nonexistent specs.
 | Flow | Status | Enforced evidence |
 |---|---|---|
 | Primary navigation under one token | Covered with mock API | `e2e/tests/journey-shell-nav.spec.ts` |
+| English receptive-vocabulary placement, persisted estimate, exact known-word seeding, and starter-card filtering | Covered with mock browser UI and real Postgres integration | `e2e/tests/journey-register-onboard.spec.ts`, `services/api/internal/onboarding/placement_integration_test.go` |
 | Language selection persists | Covered with mock API | `e2e/tests/journey-language-switch.spec.ts` |
 | Cards list and detail form accessibility | Covered with mock API | `e2e/tests/journey-cards.spec.ts` |
 | Card edits, duplicate detection, media, bulk, suspend/bury/unbury | Covered through the built web UI and real API; lower-level media/duplicate cases are also asserted | `e2e/tests/real-stack-core.spec.ts` |

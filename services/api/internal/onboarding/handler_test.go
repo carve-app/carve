@@ -41,6 +41,72 @@ func TestStarterDeck_NoAuth(t *testing.T) {
 	}
 }
 
+func TestPlacementTest_NoAuth(t *testing.T) {
+	h := newOnboardingHandler()
+	req := httptest.NewRequest(http.MethodGet, "/v1/onboarding/placement-test?language=en", nil)
+	w := httptest.NewRecorder()
+	h.PlacementTest(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestSubmitPlacementTest_NoAuth(t *testing.T) {
+	h := newOnboardingHandler()
+	req := httptest.NewRequest(http.MethodPost, "/v1/onboarding/placement-test", nil)
+	w := httptest.NewRecorder()
+	h.SubmitPlacementTest(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestPlacementTest_ReturnsEnglishItems(t *testing.T) {
+	h := newOnboardingHandler()
+	req := authedCtx(httptest.NewRequest(http.MethodGet, "/v1/onboarding/placement-test?language=en", nil))
+	w := httptest.NewRecorder()
+	h.PlacementTest(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var payload placementTestPayload
+	if err := json.NewDecoder(w.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Language != "en" || payload.Version != englishPlacementVersion || len(payload.Items) != 30 {
+		t.Fatalf("unexpected placement payload: language=%q version=%q items=%d", payload.Language, payload.Version, len(payload.Items))
+	}
+}
+
+func TestPlacementTest_RejectsUnsupportedLanguage(t *testing.T) {
+	h := newOnboardingHandler()
+	req := authedCtx(httptest.NewRequest(http.MethodGet, "/v1/onboarding/placement-test?language=ja", nil))
+	w := httptest.NewRecorder()
+	h.PlacementTest(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestSubmitPlacementTest_ValidatesBeforeDatabase(t *testing.T) {
+	h := newOnboardingHandler()
+	for name, body := range map[string]string{
+		"invalid json":      "{bad",
+		"unsupported":       `{"language":"ja","version":"en-receptive-v1","answers":[]}`,
+		"missing version":   `{"language":"en","answers":[]}`,
+		"missing questions": `{"language":"en","version":"en-receptive-v1","answers":[]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := authedCtx(httptest.NewRequest(http.MethodPost, "/v1/onboarding/placement-test", strings.NewReader(body)))
+			w := httptest.NewRecorder()
+			h.SubmitPlacementTest(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 // ── KnownWords validation ──────────────────────────────────────────────────────
 
 func TestKnownWords_InvalidJSON(t *testing.T) {

@@ -306,6 +306,61 @@ export async function deleteAccount(): Promise<void> {
   await apiFetch('/v1/users/me', { method: 'DELETE' });
 }
 
+export interface PlacementTestItem {
+  id: string;
+  word: string;
+  prompt: string;
+  options: string[];
+}
+
+export interface PlacementTest {
+  language: 'en';
+  version: string;
+  estimated_minutes: number;
+  items: PlacementTestItem[];
+}
+
+export interface PlacementAnswer {
+  item_id: string;
+  selected_index: number;
+}
+
+export interface PlacementBandScore {
+  label: string;
+  correct: number;
+  total: number;
+  estimated_known: number;
+}
+
+export interface PlacementResult {
+  attempt_id: string;
+  language: 'en';
+  version: string;
+  correct: number;
+  total: number;
+  verified_known: number;
+  estimated_known: number;
+  estimate_lower: number;
+  estimate_upper: number;
+  result_label: 'Foundation' | 'Developing' | 'Independent' | 'Strong' | 'Advanced';
+  band_scores: PlacementBandScore[];
+}
+
+export async function fetchPlacementTest(language = 'en'): Promise<PlacementTest> {
+  return apiFetch(`/v1/onboarding/placement-test?language=${encodeURIComponent(language)}`);
+}
+
+export async function submitPlacementTest(
+  language: 'en',
+  version: string,
+  answers: PlacementAnswer[],
+): Promise<PlacementResult> {
+  return apiFetch('/v1/onboarding/placement-test', {
+    method: 'POST',
+    body: JSON.stringify({ language, version, answers }),
+  });
+}
+
 export async function markKnownWords(language: string, lemmas: string[]): Promise<{ marked: number }> {
   return apiFetch('/v1/onboarding/known-words', {
     method: 'POST',

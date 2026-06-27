@@ -6,7 +6,7 @@ info:
     every `/v1` endpoint; the TypeScript client in `apps/web/src/lib/api.ts`
     is regenerated from it and schemathesis runs property-based HTTP fuzz
     against it as part of the L4 testing layer.
-  version: 0.3.0
+  version: 0.4.0
 servers:
   - url: http://localhost:8080
     description: Local development
@@ -132,6 +132,71 @@ components:
         avatar_url:   { type: string, nullable: true }
 
     # ── Onboarding ────────────────────────────────────────────────────────
+    PlacementTestItem:
+      type: object
+      required: [id, word, prompt, options]
+      properties:
+        id:     { type: string }
+        word:   { type: string }
+        prompt: { type: string }
+        options:
+          type: array
+          minItems: 4
+          maxItems: 4
+          items: { type: string }
+    PlacementTestResponse:
+      type: object
+      required: [language, version, estimated_minutes, items]
+      properties:
+        language:          { type: string, enum: [en] }
+        version:           { type: string }
+        estimated_minutes: { type: integer, minimum: 1 }
+        items:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/PlacementTestItem' }
+    PlacementAnswer:
+      type: object
+      required: [item_id, selected_index]
+      properties:
+        item_id:        { type: string }
+        selected_index: { type: integer, minimum: -1, maximum: 3, description: "-1 means I don't know" }
+    PlacementSubmitRequest:
+      type: object
+      required: [language, version, answers]
+      properties:
+        language: { type: string, enum: [en] }
+        version:  { type: string }
+        answers:
+          type: array
+          minItems: 30
+          maxItems: 30
+          items: { $ref: '#/components/schemas/PlacementAnswer' }
+    PlacementBandScore:
+      type: object
+      required: [label, correct, total, estimated_known]
+      properties:
+        label:           { type: string }
+        correct:         { type: integer, minimum: 0 }
+        total:           { type: integer, minimum: 1 }
+        estimated_known: { type: integer, minimum: 0 }
+    PlacementResultResponse:
+      type: object
+      required: [attempt_id, language, version, correct, total, verified_known, estimated_known, estimate_lower, estimate_upper, result_label, band_scores]
+      properties:
+        attempt_id:      { $ref: '#/components/schemas/UUID' }
+        language:        { type: string, enum: [en] }
+        version:         { type: string }
+        correct:         { type: integer, minimum: 0 }
+        total:           { type: integer, minimum: 1 }
+        verified_known:  { type: integer, minimum: 0 }
+        estimated_known: { type: integer, minimum: 0, maximum: 12000 }
+        estimate_lower:  { type: integer, minimum: 0, maximum: 12000 }
+        estimate_upper:  { type: integer, minimum: 0, maximum: 12000 }
+        result_label:    { type: string, enum: [Foundation, Developing, Independent, Strong, Advanced] }
+        band_scores:
+          type: array
+          items: { $ref: '#/components/schemas/PlacementBandScore' }
     OnboardingKnownWordsRequest:
       type: object
       required: [language, lemmas]
@@ -934,6 +999,34 @@ paths:
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   # ── Onboarding ────────────────────────────────────────────────────────
+  /v1/onboarding/placement-test:
+    get:
+      tags: [onboarding]
+      operationId: getOnboardingPlacementTest
+      summary: Get the current English receptive-vocabulary placement test
+      security: [{ bearer: [] }]
+      parameters:
+        - in: query
+          name: language
+          schema: { type: string, enum: [en], default: en }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/PlacementTestResponse' } } } }
+        '400': { description: Unsupported target language, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+    post:
+      tags: [onboarding]
+      operationId: submitOnboardingPlacementTest
+      summary: Score and persist an English receptive-vocabulary placement attempt
+      security: [{ bearer: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json: { schema: { $ref: '#/components/schemas/PlacementSubmitRequest' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/PlacementResultResponse' } } } }
+        '400': { description: Invalid or incomplete attempt, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /v1/onboarding/known-words:
     post:
       tags: [onboarding]

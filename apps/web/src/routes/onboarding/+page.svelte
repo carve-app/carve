@@ -1,7 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { markKnownWords, subscribeStarterDeck } from '$lib/api';
+  import {
+    fetchPlacementTest,
+    markKnownWords,
+    submitPlacementTest,
+    subscribeStarterDeck,
+    type PlacementResult,
+    type PlacementTest,
+  } from '$lib/api';
 
   let step = 1;
   let language = 'ja';
@@ -9,6 +16,11 @@
   let loading = false;
   let errorMsg = '';
   let starterDeckStatus: 'subscribed' | 'unavailable' | null = null;
+  let placementPhase: 'intro' | 'testing' | 'result' = 'intro';
+  let placementTest: PlacementTest | null = null;
+  let placementResult: PlacementResult | null = null;
+  let placementIndex = 0;
+  let placementAnswers: Record<string, number> = {};
 
   const TOTAL_STEPS = 5;
 
@@ -184,6 +196,91 @@
   function selectLanguage(code: string) {
     language = code;
     starterDeckStatus = null;
+    knownGroups = new Set();
+    resetPlacement();
+  }
+
+  function resetPlacement() {
+    placementPhase = 'intro';
+    placementTest = null;
+    placementResult = null;
+    placementIndex = 0;
+    placementAnswers = {};
+    errorMsg = '';
+  }
+
+  async function startPlacement() {
+    loading = true;
+    errorMsg = '';
+    try {
+      placementTest = await fetchPlacementTest('en');
+      placementIndex = 0;
+      placementAnswers = {};
+      placementPhase = 'testing';
+    } catch (error) {
+      errorMsg = error instanceof Error ? error.message : 'Could not load the placement test. Please try again.';
+    } finally {
+      loading = false;
+    }
+  }
+
+  function choosePlacementAnswer(selectedIndex: number) {
+    const item = placementTest?.items[placementIndex];
+    if (!item) return;
+    placementAnswers = { ...placementAnswers, [item.id]: selectedIndex };
+  }
+
+  async function advancePlacement() {
+    if (!placementTest) return;
+    const item = placementTest.items[placementIndex];
+    if (!item || placementAnswers[item.id] === undefined) return;
+
+    if (placementIndex < placementTest.items.length - 1) {
+      placementIndex += 1;
+      return;
+    }
+
+    loading = true;
+    errorMsg = '';
+    try {
+      const answers = placementTest.items.map((testItem) => ({
+        item_id: testItem.id,
+        selected_index: placementAnswers[testItem.id],
+      }));
+      placementResult = await submitPlacementTest('en', placementTest.version, answers);
+      placementPhase = 'result';
+    } catch (error) {
+      errorMsg = error instanceof Error ? error.message : 'Could not save your placement result. Please try again.';
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function primaryAction() {
+    if (step === 2 && language === 'en') {
+      if (placementPhase === 'intro') {
+        await startPlacement();
+      } else if (placementPhase === 'testing') {
+        await advancePlacement();
+      } else {
+        step += 1;
+      }
+      return;
+    }
+    await next();
+  }
+
+  function back() {
+    errorMsg = '';
+    if (step === 2 && language === 'en' && placementPhase === 'testing') {
+      if (placementIndex > 0) {
+        placementIndex -= 1;
+      } else {
+        placementPhase = 'intro';
+      }
+      return;
+    }
+    step -= 1;
   }
 
   function detectBrowser(): 'chrome' | 'firefox' | 'safari' | 'other' {
@@ -197,7 +294,7 @@
   async function next() {
     errorMsg = '';
 
-    if (step === 2) {
+    if (step === 2 && language !== 'en') {
       const groups = WORD_GROUPS[language] ?? [];
       const lemmas: string[] = [];
       knownGroups.forEach(idx => {
@@ -238,11 +335,13 @@
 
   function finish() {
     localStorage.setItem('carve_onboarding_done', '1');
+    localStorage.setItem('carve_lang', language);
     goto('/cards');
   }
 
   function skip() {
     localStorage.setItem('carve_onboarding_done', '1');
+    localStorage.setItem('carve_lang', language);
     goto('/cards');
   }
 
@@ -254,6 +353,25 @@
 
   $: currentGroups = WORD_GROUPS[language] ?? [];
   $: browser = typeof navigator !== 'undefined' ? detectBrowser() : 'chrome';
+  $: placementItem = placementTest?.items[placementIndex] ?? null;
+  $: placementSelection = placementItem ? placementAnswers[placementItem.id] : undefined;
+  $: placementProgress = placementTest ? ((placementIndex + 1) / placementTest.items.length) * 100 : 0;
+  $: primaryDisabled = loading || (
+    step === 2 && language === 'en' && placementPhase === 'testing' && placementSelection === undefined
+  );
+  $: primaryLabel = loading
+    ? (placementPhase === 'testing' ? 'Calculating…' : 'Loading…')
+    : step === TOTAL_STEPS
+      ? 'Go to my cards →'
+      : step === 2 && language === 'en'
+        ? placementPhase === 'intro'
+          ? 'Start the test →'
+          : placementPhase === 'testing'
+            ? placementTest && placementIndex === placementTest.items.length - 1
+              ? 'See my result →'
+              : 'Next question →'
+            : 'Continue →'
+        : 'Continue →';
 </script>
 
 <main>
@@ -293,26 +411,109 @@
         </div>
 
       {:else if step === 2}
-        <h2>Which of these words do you already know?</h2>
-        <p class="sub">Select the groups you're comfortable with. This helps us skip cards you don't need.</p>
-        <div class="group-list">
-          {#each currentGroups as group, i}
-            <button
-              class="group-card"
-              class:selected={knownGroups.has(i)}
-              on:click={() => toggleGroup(i)}
-            >
-              <div class="group-header">
-                <span class="group-label">{group.label}</span>
-                <span class="group-check">{knownGroups.has(i) ? '✓' : ''}</span>
+        {#if language === 'en'}
+          {#if placementPhase === 'intro'}
+            <span class="eyebrow">English placement</span>
+            <h2>Find your vocabulary starting point</h2>
+            <p class="sub">
+              Choose the closest meaning of 30 words in context. The questions move from
+              frequent everyday words to less common vocabulary.
+            </p>
+            <div class="placement-intro">
+              <div class="placement-stat"><strong>30</strong><span>questions</span></div>
+              <div class="placement-stat"><strong>~4</strong><span>minutes</span></div>
+              <div class="placement-stat"><strong>1</strong><span>honest estimate</span></div>
+            </div>
+            <p class="method-note">
+              This measures receptive vocabulary, not overall English proficiency. Choose
+              “I don’t know” instead of guessing; Carve will keep refining the result as you read.
+            </p>
+          {:else if placementPhase === 'testing' && placementItem && placementTest}
+            <div class="question-meta">
+              <span>Question {placementIndex + 1} of {placementTest.items.length}</span>
+              <span>{Math.round(placementProgress)}%</span>
+            </div>
+            <div class="question-progress" aria-hidden="true">
+              <div class="question-progress-fill" style={`width: ${placementProgress}%`}></div>
+            </div>
+            <h2>What does <span class="tested-word">“{placementItem.word}”</span> mean here?</h2>
+            <p class="question-prompt">{placementItem.prompt}</p>
+            <div class="answer-list" role="radiogroup" aria-label={`Meaning of ${placementItem.word}`}>
+              {#each placementItem.options as option, i}
+                <button
+                  class="answer-option"
+                  class:selected={placementSelection === i}
+                  role="radio"
+                  aria-checked={placementSelection === i}
+                  on:click={() => choosePlacementAnswer(i)}
+                >
+                  <span class="answer-letter">{String.fromCharCode(65 + i)}</span>
+                  <span>{option}</span>
+                </button>
+              {/each}
+              <button
+                class="answer-option unknown-option"
+                class:selected={placementSelection === -1}
+                role="radio"
+                aria-checked={placementSelection === -1}
+                on:click={() => choosePlacementAnswer(-1)}
+              >
+                <span class="answer-letter">?</span>
+                <span>I don’t know this word</span>
+              </button>
+            </div>
+          {:else if placementPhase === 'result' && placementResult}
+            <span class="eyebrow">Your starting point</span>
+            <h2>{placementResult.result_label} receptive vocabulary</h2>
+            <div class="placement-result">
+              <div class="estimate-label">Estimated vocabulary</div>
+              <div class="estimate-value">~{placementResult.estimated_known.toLocaleString()}</div>
+              <div class="estimate-unit">high-frequency English words</div>
+              <div class="estimate-range">
+                Likely range {placementResult.estimate_lower.toLocaleString()}–{placementResult.estimate_upper.toLocaleString()}
               </div>
-              <div class="word-sample">
-                {group.words.slice(0, 8).join('　')}
-                {#if group.words.length > 8}<span class="more">+{group.words.length - 8} more</span>{/if}
+            </div>
+            <div class="result-details">
+              <div>
+                <strong>{placementResult.correct}/{placementResult.total}</strong>
+                <span>meanings recognized</span>
               </div>
-            </button>
-          {/each}
-        </div>
+              <div>
+                <strong>{placementResult.verified_known}</strong>
+                <span>verified words saved</span>
+              </div>
+            </div>
+            <p class="method-note">
+              The estimate helps choose suitable content. Only answers you demonstrated were
+              marked known, so unfamiliar words stay visible instead of disappearing on an assumption.
+            </p>
+            <button class="retake-btn" on:click={resetPlacement}>Retake placement test</button>
+          {/if}
+        {:else}
+          <h2>Which of these words do you already know?</h2>
+          <p class="sub">
+            Select the groups you're comfortable with. A scored placement test is currently available for English;
+            other languages will follow.
+          </p>
+          <div class="group-list">
+            {#each currentGroups as group, i}
+              <button
+                class="group-card"
+                class:selected={knownGroups.has(i)}
+                on:click={() => toggleGroup(i)}
+              >
+                <div class="group-header">
+                  <span class="group-label">{group.label}</span>
+                  <span class="group-check">{knownGroups.has(i) ? '✓' : ''}</span>
+                </div>
+                <div class="word-sample">
+                  {group.words.slice(0, 8).join('　')}
+                  {#if group.words.length > 8}<span class="more">+{group.words.length - 8} more</span>{/if}
+                </div>
+              </button>
+            {/each}
+          </div>
+        {/if}
 
       {:else if step === 3}
         <h2>Start with a curated deck</h2>
@@ -403,12 +604,12 @@
 
     <div class="wizard-footer">
       {#if step > 1}
-        <button class="btn-ghost" on:click={() => step--} disabled={loading}>Back</button>
+        <button class="btn-ghost" on:click={back} disabled={loading}>Back</button>
       {:else}
         <div></div>
       {/if}
-      <button class="btn-primary" on:click={next} disabled={loading}>
-        {loading ? 'Saving…' : step === TOTAL_STEPS ? 'Go to my cards →' : 'Continue →'}
+      <button class="btn-primary" on:click={primaryAction} disabled={primaryDisabled}>
+        {primaryLabel}
       </button>
     </div>
   </div>
@@ -573,6 +774,164 @@
   .word-sample { font-size: 0.78rem; color: #8a96b3; line-height: 1.7; }
   .more { color: #8a96b3; margin-left: 0.25rem; }
 
+  /* ── English placement test ── */
+
+  .eyebrow {
+    display: block;
+    color: #81c784;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 0.5rem;
+  }
+
+  .placement-intro {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.6rem;
+    margin: 0.25rem 0 1.25rem;
+  }
+
+  .placement-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.9rem 0.5rem;
+    background: #13151a;
+    border: 1px solid #2a2d36;
+    border-radius: 9px;
+    text-align: center;
+  }
+  .placement-stat strong { color: #e8eaf0; font-size: 1.2rem; }
+  .placement-stat span { color: #8a96b3; font-size: 0.7rem; }
+
+  .method-note {
+    margin: 0;
+    padding: 0.8rem 0.9rem;
+    color: #8a96b3;
+    background: #171a20;
+    border-left: 3px solid #3b6f3e;
+    border-radius: 0 7px 7px 0;
+    font-size: 0.78rem;
+    line-height: 1.55;
+  }
+
+  .question-meta {
+    display: flex;
+    justify-content: space-between;
+    color: #8a96b3;
+    font-size: 0.75rem;
+    margin-bottom: 0.45rem;
+  }
+
+  .question-progress {
+    height: 4px;
+    overflow: hidden;
+    background: #2a2d36;
+    border-radius: 4px;
+    margin-bottom: 1.5rem;
+  }
+
+  .question-progress-fill {
+    height: 100%;
+    background: #4caf50;
+    border-radius: inherit;
+    transition: width 0.2s ease;
+  }
+
+  .tested-word { color: #81c784; }
+
+  .question-prompt {
+    margin: 0.85rem 0 1.15rem;
+    padding: 0.85rem 1rem;
+    color: #c8d0e0;
+    background: #13151a;
+    border-radius: 8px;
+    font-size: 0.92rem;
+    font-style: italic;
+    line-height: 1.5;
+  }
+
+  .answer-list { display: flex; flex-direction: column; gap: 0.55rem; }
+
+  .answer-option {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.65rem 0.75rem;
+    color: #b8c1d3;
+    background: #17191f;
+    border: 1px solid #2f333d;
+    border-radius: 8px;
+    font-size: 0.84rem;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, color 0.15s;
+  }
+  .answer-option:hover { border-color: #4f7652; background: #1a201c; }
+  .answer-option.selected { border-color: #4caf50; background: #162316; color: #e8eaf0; }
+
+  .answer-letter {
+    display: grid;
+    place-items: center;
+    flex: 0 0 1.55rem;
+    height: 1.55rem;
+    color: #8a96b3;
+    background: #242832;
+    border-radius: 5px;
+    font-size: 0.72rem;
+    font-weight: 700;
+  }
+  .answer-option.selected .answer-letter { color: #d8f3da; background: #2e6b32; }
+  .unknown-option { color: #8a96b3; border-style: dashed; }
+
+  .placement-result {
+    margin: 1.1rem 0 0.75rem;
+    padding: 1.25rem;
+    background: linear-gradient(145deg, #142016, #13151a);
+    border: 1px solid #315234;
+    border-radius: 11px;
+    text-align: center;
+  }
+  .estimate-label { color: #8a96b3; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; }
+  .estimate-value { color: #a5d6a7; font-size: 2.25rem; font-weight: 800; line-height: 1.2; margin-top: 0.25rem; }
+  .estimate-unit { color: #b8c1d3; font-size: 0.8rem; }
+  .estimate-range { color: #8a96b3; font-size: 0.72rem; margin-top: 0.65rem; }
+
+  .result-details {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.65rem;
+    margin-bottom: 0.9rem;
+  }
+  .result-details div {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.65rem;
+    background: #17191f;
+    border-radius: 8px;
+    text-align: center;
+  }
+  .result-details strong { color: #e8eaf0; font-size: 0.95rem; }
+  .result-details span { color: #8a96b3; font-size: 0.7rem; }
+
+  .retake-btn {
+    display: block;
+    margin: 0.8rem auto 0;
+    padding: 0.3rem;
+    color: #8a96b3;
+    background: transparent;
+    border: 0;
+    font-size: 0.78rem;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .retake-btn:hover { color: #c8d0e0; }
+
   /* ── Deck preview ── */
 
   .deck-preview { margin-top: 0.5rem; }
@@ -656,7 +1015,7 @@
     cursor: pointer;
     transition: background 0.15s;
   }
-  .btn-primary:hover:not(:disabled) { background: #43a047; }
+  .btn-primary:hover:not(:disabled) { background: #2f7d34; }
   .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
 
   .btn-ghost {
@@ -671,4 +1030,12 @@
   }
   .btn-ghost:hover:not(:disabled) { border-color: #8a96b3; color: #9ba8c0; }
   .btn-ghost:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  @media (max-width: 480px) {
+    .wizard-body { padding: 1.5rem 1rem 1.25rem; }
+    .wizard-footer { padding: 0.9rem 1rem 1.1rem; }
+    .placement-intro { gap: 0.4rem; }
+    .placement-stat { padding: 0.7rem 0.25rem; }
+    .answer-option { padding: 0.6rem; }
+  }
 </style>

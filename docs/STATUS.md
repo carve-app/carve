@@ -31,6 +31,9 @@ severity, and live-provider outcomes.
   401 in both web and extension, SMTP verification/reset delivery, and a
   real-stack Mailpit journey.
 - **Grammar** known-pattern tracking (JA, 30 JLPT patterns) with web UI.
+- **English placement**: 30 contextualized meaning questions across frequency
+  bands, a persisted receptive-vocabulary estimate with an uncertainty range,
+  and conservative exact-word seeding that filters already-known starter cards.
 - **Import**: Anki `.apkg`, Migaku CSV, Yomitan, JPDB. **Export**: Anki `.apkg`
   + CSV, including APKG image/audio preservation and scheduling round trips.
 - **Immersion tracking**, **comprehension overlay**, **idempotent card create**,
@@ -44,6 +47,8 @@ severity, and live-provider outcomes.
   review); there is no native iOS/Android and no mobile mining path. This is the
   single largest gap vs. Migaku.
 - **Grammar** detection is JA-only (UI/persistence are language-agnostic).
+- Vocabulary placement is currently English-only; other onboarding languages
+  retain the existing manual word-group selection.
 - **Pitch accent** is JA-only.
 - **Vietnamese** has no dictionary (coloring works, lookups return nothing).
 - **FreeDict glosses** (es/de/fr/it/pt definitions) carry minor source artifacts

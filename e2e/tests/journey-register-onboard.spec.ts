@@ -90,3 +90,30 @@ test('onboarding blocks and reports a failed starter-deck save', async ({ page, 
   await expect(page.getByRole('alert')).toContainText('Starter deck is temporarily unavailable');
   await expect(page.getByRole('heading', { name: 'Start with a curated deck' })).toBeVisible();
 });
+
+test('English learner completes the scored vocabulary placement test', async ({ page, request }) => {
+  const user = await registerTestUser(request, 'english-placement', 'English Placement');
+  await seedAuthenticatedPage(page, user.access_token);
+
+  await page.goto('/onboarding');
+  await page.getByRole('button', { name: /English \(intermediate\+\)/ }).click();
+  await page.getByRole('button', { name: /continue/i }).click();
+
+  await expect(page.getByRole('heading', { name: 'Find your vocabulary starting point' })).toBeVisible();
+  await expect(page.getByText('questions', { exact: true })).toBeVisible();
+  await expectNoSeriousA11y(page, { label: 'English placement intro' });
+  await page.getByRole('button', { name: /start the test/i }).click();
+
+  for (let question = 1; question <= 30; question++) {
+    await expect(page.getByText(`Question ${question} of 30`)).toBeVisible();
+    await page.getByRole('radio', { name: /the intended meaning/i }).click();
+    await page.getByRole('button', {
+      name: question === 30 ? /see my result/i : /next question/i,
+    }).click();
+  }
+
+  await expect(page.getByRole('heading', { name: 'Advanced receptive vocabulary' })).toBeVisible();
+  await expect(page.getByText('~12,000')).toBeVisible();
+  await expect(page.getByText('30', { exact: true }).first()).toBeVisible();
+  await expectNoSeriousA11y(page, { label: 'English placement result' });
+});
