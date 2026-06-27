@@ -517,8 +517,15 @@ func TestParseAnkiPackage_10kNotes_Under1s(t *testing.T) {
 	if len(got) != N {
 		t.Errorf("expected %d notes, got %d", N, len(got))
 	}
-	if elapsed > time.Second {
-		t.Errorf("parsing 10k notes took %v, want < 1s", elapsed)
+	maxDuration := time.Second
+	if raceDetectorEnabled {
+		// The race detector instruments every memory access and is materially
+		// slower than a production build. Keep a bounded regression check in
+		// race-enabled CI without weakening the normal <1s requirement.
+		maxDuration = 3 * time.Second
+	}
+	if elapsed > maxDuration {
+		t.Errorf("parsing 10k notes took %v, want < %v", elapsed, maxDuration)
 	}
 	t.Logf("parsed %d notes in %v (%.0f notes/s)", N, elapsed, float64(N)/elapsed.Seconds())
 }
