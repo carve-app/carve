@@ -1283,6 +1283,7 @@ paths:
           schema: { $ref: '#/components/schemas/LanguageCode' }
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DueCountResponse' } } } }
+        '400': { description: Unsupported language, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/review/session:
@@ -1300,6 +1301,7 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 500 }
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewSessionResponse' } } } }
+        '400': { description: Unsupported language, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/review/events:
@@ -1361,6 +1363,7 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 90 }
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ForecastResponse' } } } }
+        '400': { description: Unsupported language, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '401': { description: Unauthorized, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/review/notifications:
@@ -2147,6 +2150,7 @@ paths:
       responses:
         '200': { description: Grammar catalog }
         '401': { description: Unauthorized }
+        '502': { description: NLP service unavailable, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /v1/nlp/explain:
     post:

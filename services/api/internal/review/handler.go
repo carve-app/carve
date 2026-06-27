@@ -36,6 +36,19 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
 }
 
+func reviewLanguage(r *http.Request) (string, bool) {
+	language := r.URL.Query().Get("language")
+	if language == "" {
+		return "ja", true
+	}
+	switch language {
+	case "ja", "zh-cn", "zh-tw", "ko", "en", "es", "de", "fr", "it", "pt", "vi":
+		return language, true
+	default:
+		return "", false
+	}
+}
+
 // loadParams fetches a user's FSRS params (or returns defaults).
 func (h *Handler) loadParams(ctx interface{ Value(any) any }, userID, lang string, db interface {
 	QueryRow(context interface{ Value(any) any }, sql string, args ...any) interface {
@@ -83,9 +96,10 @@ func (h *Handler) DueCount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	language := r.URL.Query().Get("language")
-	if language == "" {
-		language = "ja"
+	language, languageOK := reviewLanguage(r)
+	if !languageOK {
+		writeError(w, http.StatusBadRequest, "unsupported language")
+		return
 	}
 	_, _ = h.db.Exec(r.Context(),
 		`UPDATE cards SET buried = FALSE, buried_until = NULL
@@ -152,9 +166,10 @@ func (h *Handler) Session(w http.ResponseWriter, r *http.Request) {
 	}
 
 	q := r.URL.Query()
-	language := q.Get("language")
-	if language == "" {
-		language = "ja"
+	language, languageOK := reviewLanguage(r)
+	if !languageOK {
+		writeError(w, http.StatusBadRequest, "unsupported language")
+		return
 	}
 	_, _ = h.db.Exec(r.Context(),
 		`UPDATE cards SET buried = FALSE, buried_until = NULL
@@ -626,9 +641,10 @@ func (h *Handler) Forecast(w http.ResponseWriter, r *http.Request) {
 	}
 
 	q := r.URL.Query()
-	language := q.Get("language")
-	if language == "" {
-		language = "ja"
+	language, languageOK := reviewLanguage(r)
+	if !languageOK {
+		writeError(w, http.StatusBadRequest, "unsupported language")
+		return
 	}
 	days := 14
 	if v := q.Get("days"); v != "" {

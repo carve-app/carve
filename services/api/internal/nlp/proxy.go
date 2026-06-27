@@ -68,15 +68,15 @@ func writeUpstreamResponse(w http.ResponseWriter, resp *http.Response) {
 	body, err := io.ReadAll(io.LimitReader(resp.Body, nlpMaxResponseBytes+1))
 	if err != nil {
 		slog.Error("nlp proxy: read response body", "error", err)
-		http.Error(w, `{"error":"invalid nlp service response"}`, http.StatusBadGateway)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "invalid nlp service response"})
 		return
 	}
 	if len(body) > nlpMaxResponseBytes {
-		http.Error(w, `{"error":"nlp service response too large"}`, http.StatusBadGateway)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "nlp service response too large"})
 		return
 	}
 	if strings.HasPrefix(resp.Header.Get("Content-Type"), "application/json") && !json.Valid(body) {
-		http.Error(w, `{"error":"invalid nlp service response"}`, http.StatusBadGateway)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "invalid nlp service response"})
 		return
 	}
 	for k, vals := range resp.Header {
@@ -103,7 +103,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, upstreamPath str
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, upstreamURL, r.Body)
 	if err != nil {
 		slog.Error("nlp proxy: build request", "error", err)
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
 
@@ -120,7 +120,7 @@ func (p *Proxy) forward(w http.ResponseWriter, r *http.Request, upstreamPath str
 	resp, err := p.do(req)
 	if err != nil {
 		slog.Error("nlp proxy: upstream request failed", "url", upstreamURL, "error", err)
-		http.Error(w, `{"error":"nlp service unavailable"}`, http.StatusBadGateway)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "nlp service unavailable"})
 		return
 	}
 	defer resp.Body.Close()
@@ -155,7 +155,7 @@ func (p *Proxy) forwardWithKnowledge(w http.ResponseWriter, r *http.Request, ups
 
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 2<<20))
 	if err != nil {
-		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
 	var payload map[string]any
@@ -180,7 +180,7 @@ func (p *Proxy) forwardWithKnowledge(w http.ResponseWriter, r *http.Request, ups
 
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
 	r.Body = io.NopCloser(bytes.NewReader(encoded))
@@ -284,7 +284,7 @@ func (p *Proxy) forwardGET(w http.ResponseWriter, r *http.Request, upstreamPath 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upstreamURL, nil)
 	if err != nil {
 		slog.Error("nlp proxy GET: build request", "error", err)
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
 	if p.internalSecret != "" {
@@ -293,7 +293,7 @@ func (p *Proxy) forwardGET(w http.ResponseWriter, r *http.Request, upstreamPath 
 	resp, err := p.do(req)
 	if err != nil {
 		slog.Error("nlp proxy GET: upstream request failed", "url", upstreamURL, "error", err)
-		http.Error(w, `{"error":"nlp service unavailable"}`, http.StatusBadGateway)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "nlp service unavailable"})
 		return
 	}
 	defer resp.Body.Close()

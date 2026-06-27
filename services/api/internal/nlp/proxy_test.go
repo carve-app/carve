@@ -76,6 +76,9 @@ func TestProxyReportsProviderFailure(t *testing.T) {
 	if w.Code != http.StatusBadGateway {
 		t.Fatalf("expected 502, got %d", w.Code)
 	}
+	if got := w.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("expected JSON content type, got %q", got)
+	}
 }
 
 func TestProxyRejectsMalformedOrOversizedProviderResponse(t *testing.T) {

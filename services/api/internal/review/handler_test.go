@@ -71,6 +71,32 @@ func TestForecast_NoAuth(t *testing.T) {
 	}
 }
 
+func TestLanguageEndpointsRejectUnsupportedLanguageBeforePersistence(t *testing.T) {
+	h := newReviewHandler()
+	tests := []struct {
+		name    string
+		handler http.HandlerFunc
+		path    string
+	}{
+		{name: "due count", handler: h.DueCount, path: "/v1/review/due-count?language=invalid"},
+		{name: "session", handler: h.Session, path: "/v1/review/session?language=invalid"},
+		{name: "forecast", handler: h.Forecast, path: "/v1/review/forecast?language=invalid"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := authedCtx(httptest.NewRequest(http.MethodGet, tc.path, nil))
+			w := httptest.NewRecorder()
+			tc.handler(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d", w.Code)
+			}
+			if got := w.Header().Get("Content-Type"); got != "application/json" {
+				t.Fatalf("expected JSON content type, got %q", got)
+			}
+		})
+	}
+}
+
 func TestNotifications_NoAuth(t *testing.T) {
 	h := newReviewHandler()
 	req := httptest.NewRequest(http.MethodGet, "/v1/review/notifications", nil)
