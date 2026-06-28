@@ -4,15 +4,33 @@ on:
   schedule:
     - cron: "17 * * * *"
     - cron: "30 2 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Scheduled suite to run
+        required: true
+        default: youtube-canary
+        type: choice
+        options:
+          - youtube-canary
+          - nightly-proof
+          - all
 
 permissions:
   contents: read
 
+concurrency:
+  group: scheduled-quality-${{ github.event.schedule || inputs.suite || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   youtube-canary:
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '17 * * * *'
+    if: >-
+      github.event.schedule == '17 * * * *' ||
+      (github.event_name == 'workflow_dispatch' &&
+        (inputs.suite == 'youtube-canary' || inputs.suite == 'all'))
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
@@ -23,12 +41,55 @@ jobs:
       - run: pnpm --filter @carve/extension build:chrome
       - working-directory: e2e
         run: pnpm exec playwright install --with-deps chromium
-      - working-directory: e2e
+      - name: Run deterministic packaged-extension replay
+        working-directory: e2e
+        env: { CI: "true" }
+        run: >-
+          xvfb-run -a pnpm exec playwright test
+          tests/extension-streaming.spec.ts
+          --project=web-chromium
+          --retries=0
+      - name: Probe live YouTube (advisory)
+        id: live_youtube
+        continue-on-error: true
+        working-directory: e2e
         env: { LIVE_PROVIDER_TESTS: "1", CI: "true" }
-        run: xvfb-run -a pnpm exec playwright test tests/live-youtube-canary.spec.ts --project=web-chromium
+        run: >-
+          xvfb-run -a pnpm exec playwright test
+          tests/live-youtube-canary.spec.ts
+          --project=web-chromium
+          --retries=0
+      - name: Report live-provider health
+        if: always()
+        env:
+          LIVE_YOUTUBE_OUTCOME: ${{ steps.live_youtube.outcome }}
+        run: |
+          if [ "$LIVE_YOUTUBE_OUTCOME" = "failure" ]; then
+            echo "::warning title=Live YouTube probe degraded::The deterministic packaged-extension replay passed, but youtube.com did not produce a cue. Diagnostics are attached to this run."
+            echo "### Live YouTube probe: degraded" >> "$GITHUB_STEP_SUMMARY"
+            echo "YouTube did not produce a subtitle cue from this runner. The deterministic packaged-extension replay remains the blocking regression gate; inspect the attached trace before changing provider integration code." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$LIVE_YOUTUBE_OUTCOME" = "success" ]; then
+            echo "### Live YouTube probe: healthy" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Live YouTube probe: not run" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload live-provider diagnostics
+        if: always() && steps.live_youtube.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: live-youtube-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            e2e/test-results/
+            e2e/playwright-report/
+          if-no-files-found: warn
+          retention-days: 7
 
   nightly-proof:
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '30 2 * * *'
+    if: >-
+      github.event.schedule == '30 2 * * *' ||
+      (github.event_name == 'workflow_dispatch' &&
+        (inputs.suite == 'nightly-proof' || inputs.suite == 'all'))
     runs-on: ubuntu-latest
     services:
       postgres:
