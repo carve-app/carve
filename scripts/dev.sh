@@ -129,7 +129,7 @@ fi
 ( cd services/nlp && \
     DICT_DB_PATH="$ROOT/services/nlp/data/dictionary.db" \
     GOOGLE_APPLICATION_CREDENTIALS="${GOOGLE_APPLICATION_CREDENTIALS:-}" \
-    .venv/bin/uvicorn src.app:app --port $NLP_PORT ) >"$LOGDIR/nlp.log" 2>&1 &
+    .venv/bin/uvicorn carve_nlp.app:app --port $NLP_PORT ) >"$LOGDIR/nlp.log" 2>&1 &
 PIDS+=($!)
 wait_http "http://localhost:$NLP_PORT/health" nlp
 

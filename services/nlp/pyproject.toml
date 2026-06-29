@@ -1,6 +1,11 @@
 [tool.mutmut]
-source_paths = ["src"]
+source_paths = ["carve_nlp"]
+also_copy = ["scripts"]
+only_mutate = ["carve_nlp/scorer.py"]
 pytest_add_cli_args = ["-x", "--tb=no", "-q"]
 pytest_add_cli_args_test_selection = ["tests"]
 mutate_only_covered_lines = true
 use_setproctitle = false
+
+[tool.pytest.ini_options]
+norecursedirs = [".hypothesis", ".venv", "mutants"]

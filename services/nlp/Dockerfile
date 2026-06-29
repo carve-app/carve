@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY --from=builder /install /usr/local
 
-COPY --chown=app:app src/ ./src/
+COPY --chown=app:app carve_nlp/ ./carve_nlp/
 # data/dictionary.db must be pre-built (CI runs scripts/import_jmdict.py
 # before `docker build` — see .github/workflows/deploy.yml).
 COPY --chown=app:app data/dictionary.db ./data/dictionary.db
@@ -38,4 +38,4 @@ EXPOSE 8001
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD wget -qO- http://localhost:8001/health || exit 1
 
-CMD ["uvicorn", "src.app:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "2"]
+CMD ["uvicorn", "carve_nlp.app:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "2"]

@@ -1,6 +1,6 @@
 -- Migration: 014_grammar_patterns
 -- Persists the grammar patterns a user has marked as "known". The NLP service
--- detects JLPT grammar patterns (see services/nlp/src/grammar_ja.py) with stable
+-- detects JLPT grammar patterns (see services/nlp/carve_nlp/grammar_ja.py) with stable
 -- string ids; this table records which of those ids each user already knows so
 -- the web UI and tokenizer can compute grammar comprehension.
 

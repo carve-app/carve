@@ -15,7 +15,7 @@ import pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from src.tokenizer_en import EnglishTokenizer, lemmatize
+from carve_nlp.tokenizer_en import EnglishTokenizer, lemmatize
 
 
 _tok = EnglishTokenizer()

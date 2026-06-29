@@ -197,7 +197,7 @@ Goal: Content recommendations, AI-powered features at scale.
 - [x] Content discovery engine: given user vocab, recommend URLs (`/v1/discover/feed`)
 - [x] NHK Easy + Watanoc integrations (Japanese reading); Satori Reader deferred (paywalled, no public feed)
 - [ ] YouTube channel / playlist tracker (auto-add new videos to library) — deferred: needs YouTube Data API key
-- [x] Grammar pattern library: 30 N5/N4/N3 JA patterns tracked alongside vocab (`services/nlp/src/grammar_ja.py`)
+- [x] Grammar pattern library: 30 N5/N4/N3 JA patterns tracked alongside vocab (`services/nlp/carve_nlp/grammar_ja.py`)
 - [x] Grammar difficulty in comprehension score: `/tokenize` returns `grammar_pct` + `unknown_patterns`
 - [x] Sentence similarity detection: `/v1/cards/find-similar` (char-trigram Jaccard)
 - [x] Smart sentence selection: `/v1/nlp/select-sentence` picks the best i+1 candidate from a context window

@@ -23,7 +23,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from src.tokenizer import JapaneseTokenizer
+from carve_nlp.tokenizer import JapaneseTokenizer
 
 
 @pytest.fixture(scope="module")

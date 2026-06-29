@@ -1,5 +1,5 @@
 """
-Unit tests for services/nlp/src/grammar_ja.py — the JA grammar pattern detector.
+Unit tests for services/nlp/carve_nlp/grammar_ja.py — the JA grammar pattern detector.
 
 Synthetic tokens are used (no SudachiPy dependency) so tests stay fast.
 """
@@ -11,12 +11,12 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.grammar_ja import (
+from carve_nlp.grammar_ja import (
     PATTERNS,
     detect_patterns,
     pattern_summary,
 )
-from src.tokenizer import Token
+from carve_nlp.tokenizer import Token
 
 
 def tok(surface: str, lemma: str | None = None, pos: str = "名詞") -> Token:

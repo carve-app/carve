@@ -16,7 +16,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from hypothesis import given, strategies as st, settings, HealthCheck
 
-from src.tokenizer_en import (
+from carve_nlp.tokenizer_en import (
     EnglishTokenizer,
     lemmatize,
     _IRREGULAR_VERBS,

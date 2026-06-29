@@ -21,7 +21,7 @@ import pytest
 # Import guard — tests are skipped if jieba is not installed
 jieba = pytest.importorskip("jieba", reason="jieba not installed")
 
-from src.tokenizer_zh import ChineseTokenizer, _is_traditional, _tone_from_pinyin
+from carve_nlp.tokenizer_zh import ChineseTokenizer, _is_traditional, _tone_from_pinyin
 
 
 @pytest.fixture(scope="module")

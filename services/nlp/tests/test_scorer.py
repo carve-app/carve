@@ -1,5 +1,5 @@
 """
-Unit tests for services/nlp/src/scorer.py — score_content function.
+Unit tests for services/nlp/carve_nlp/scorer.py — score_content function.
 
 Tests cover:
   - Empty token list
@@ -20,8 +20,8 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from src.scorer import ContentScore, score_content, select_best_sentence
-from src.tokenizer import Token
+from carve_nlp.scorer import ContentScore, score_content, select_best_sentence
+from carve_nlp.tokenizer import Token
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

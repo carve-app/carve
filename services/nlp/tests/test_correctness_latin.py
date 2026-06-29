@@ -20,7 +20,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 import pytest
 
-from src.tokenizer_latin import (
+from carve_nlp.tokenizer_latin import (
     LatinTokenizer,
     lemmatize_word,
     is_function_word,
@@ -173,7 +173,7 @@ class TestVietnamese:
 
 class TestFrequency:
     def test_content_words_get_a_rank_when_wordfreq_available(self):
-        from src.tokenizer_latin import _WORDFREQ_AVAILABLE
+        from carve_nlp.tokenizer_latin import _WORDFREQ_AVAILABLE
         if not _WORDFREQ_AVAILABLE:
             pytest.skip("wordfreq not installed")
         tok = LatinTokenizer("es")

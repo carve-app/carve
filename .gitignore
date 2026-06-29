@@ -1,9 +1,10 @@
 # Python
 services/nlp/.venv/
 services/nlp/__pycache__/
-services/nlp/src/__pycache__/
+services/nlp/carve_nlp/__pycache__/
 services/nlp/tests/__pycache__/
 services/nlp/.pytest_cache/
+services/nlp/mutants/
 **/__pycache__/
 *.pyc
 *.pyo
@@ -16,6 +17,7 @@ services/nlp/data/dictionary.db
 # Go
 services/api/api
 services/api/migrate
+services/api/report.json
 services/media/media
 bin/
 
@@ -35,6 +37,8 @@ apps/extension/build/
 apps/extension/wasm-src/*/pkg/
 apps/extension/wasm-src/*/target/
 apps/web/.svelte-kit/
+.lighthouseci/
+reports/lighthouse/
 
 # Environment
 .env

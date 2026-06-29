@@ -115,8 +115,8 @@ jobs:
       - uses: actions/setup-python@v6
         with: { python-version: "3.13" }
       - run: pnpm install --frozen-lockfile
-      - run: pip install mutmut
-      - run: go install github.com/avito-tech/go-mutesting/cmd/go-mutesting@latest
+      - run: pip install -r services/nlp/requirements.txt mutmut==3.6.0
+      - run: go install github.com/avito-tech/go-mutesting/cmd/go-mutesting@v0.0.0-20251226130216-48d0401f00fb
       - run: pnpm --filter @carve/extension exec stryker run
       - run: pnpm --filter @carve/web exec stryker run
       - working-directory: services/nlp
@@ -132,10 +132,8 @@ jobs:
           if score < 0.65:
               raise SystemExit('Python mutation score is below 65%')
           PY
-      - working-directory: services/api
-        run: go-mutesting --threshold 0.65 ./internal/fsrs/... ./internal/importer/... ./internal/output/... ./internal/metrics/...
-      - run: npm install -g @lhci/cli@0.13.x
-      - run: lhci autorun
+      - run: scripts/run-go-mutation.sh
+      - run: pnpm exec lhci autorun
       - name: Start isolated API for authenticated load proof
         env:
           DATABASE_URL: postgres://carve:carve@127.0.0.1:5432/carve?sslmode=disable

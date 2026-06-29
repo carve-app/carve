@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from fastapi.testclient import TestClient
 
-from src.app import app
+from carve_nlp.app import app
 
 client = TestClient(app)
 
@@ -44,7 +44,7 @@ class TestTranslateEndpoint:
         assert body["target_language"] == "en"
 
     def test_returns_fluent_translation_when_engine_configured(self, monkeypatch):
-        import src.app as app_module
+        import carve_nlp.app as app_module
 
         monkeypatch.setattr(app_module, "_INTERNAL_SECRET", "")
         monkeypatch.setattr(
@@ -60,7 +60,7 @@ class TestTranslateEndpoint:
 
     def test_returns_null_when_engine_unavailable(self, monkeypatch):
         # No gloss fallback: engine None -> translation null (not a word gloss).
-        import src.app as app_module
+        import carve_nlp.app as app_module
 
         monkeypatch.setattr(app_module, "_INTERNAL_SECRET", "")
         monkeypatch.setattr(app_module.translator, "translate_sentence", lambda *a, **k: None)
@@ -74,7 +74,7 @@ class TestTranslateEndpoint:
     def test_internal_secret_required_when_set(self, monkeypatch):
         monkeypatch.setenv("NLP_INTERNAL_SECRET", "secret123")
         import importlib
-        import src.app as app_module
+        import carve_nlp.app as app_module
         importlib.reload(app_module)
         patched = TestClient(app_module.app)
         try:
@@ -91,15 +91,15 @@ class TestTranslateEndpoint:
 
 
 class TestTranslatorModule:
-    """Unit tests for src/translator.py — pure logic + gating, no network."""
+    """Unit tests for carve_nlp/translator.py — pure logic + gating, no network."""
 
     def test_parse_v3_response(self):
-        from src import translator as T
+        from carve_nlp import translator as T
         out = {"translations": [{"translatedText": "Black cats sleep.", "model": "x"}]}
         assert T._parse_v3_response(out) == "Black cats sleep."
 
     def test_parse_v3_response_strips_and_handles_empty(self):
-        from src import translator as T
+        from carve_nlp import translator as T
         assert T._parse_v3_response({"translations": [{"translatedText": "  hi "}]}) == "hi"
         assert T._parse_v3_response({"translations": [{"translatedText": ""}]}) is None
         assert T._parse_v3_response({"translations": []}) is None
@@ -107,7 +107,7 @@ class TestTranslatorModule:
         assert T._parse_v3_response(None) is None
 
     def test_bcp47_mapping(self):
-        from src import translator as T
+        from carve_nlp import translator as T
         assert T._bcp47("zh-cn") == "zh-CN"
         assert T._bcp47("ZH-TW") == "zh-TW"
         assert T._bcp47("vi") == "vi"
@@ -116,7 +116,7 @@ class TestTranslatorModule:
 
     def test_disabled_without_credentials_returns_none(self, monkeypatch):
         # No ADC -> engine disabled -> None, no network. Reset module cache.
-        from src import translator as T
+        from carve_nlp import translator as T
         monkeypatch.setattr(T, "_init_done", False)
         monkeypatch.setattr(T, "_creds", None)
         monkeypatch.setattr(T, "_project", None)
@@ -127,7 +127,7 @@ class TestTranslatorModule:
 
     def test_unsupported_or_same_language_returns_none(self, monkeypatch):
         # Guard checks happen before any creds/network use.
-        from src import translator as T
+        from carve_nlp import translator as T
         assert T.translate_sentence("hello", "en", "en") is None   # same language
         assert T.translate_sentence("hello", "es", "xx") is None   # unknown target
         assert T.translate_sentence("", "es", "en") is None        # empty
@@ -140,7 +140,7 @@ class TestSentenceTranslationFromCorpus:
 
     def _service_with_corpus(self, tmp_path):
         import sqlite3
-        from src.dictionary import DictionaryService
+        from carve_nlp.dictionary import DictionaryService
 
         db = tmp_path / "dict.db"
         conn = sqlite3.connect(str(db))
@@ -170,7 +170,7 @@ class TestSentenceTranslationFromCorpus:
 
     def test_missing_corpus_returns_none_not_error(self, tmp_path):
         import sqlite3
-        from src.dictionary import DictionaryService
+        from carve_nlp.dictionary import DictionaryService
 
         db = tmp_path / "bare.db"
         sqlite3.connect(str(db)).close()

@@ -1,0 +1,10 @@
+# go-mutesting configuration for the targeted nightly mutation gate. The gate
+# exercises deterministic FSRS, transcript-diff, and metrics rendering logic;
+# expand the function set only after its tests clear the blocking threshold.
+# Threshold enforcement lives in scripts/run-go-mutation.sh because
+# go-mutesting does not provide a threshold command-line option.
+skip_without_test: true
+skip_with_build_tags: true
+json_output: true
+silent_mode: true
+exclude_dirs: []

@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
 
-from src.tokenizer_ko import (
+from carve_nlp.tokenizer_ko import (
     KoreanTokenizer,
     romanize,
     _strip_particles,

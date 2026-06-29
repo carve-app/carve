@@ -16,8 +16,8 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-import src.app as app_module
-from src.dictionary import DictionaryService
+import carve_nlp.app as app_module
+from carve_nlp.dictionary import DictionaryService
 
 
 SCHEMA_SQL = """

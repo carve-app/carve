@@ -19,7 +19,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
 import import_cedict_sqlite as cedict
 import import_kde4_sqlite as kde4
 import import_freedict as freedict
-from src.dictionary import DictionaryService, normalize_language_code
+from carve_nlp.dictionary import DictionaryService, normalize_language_code
 
 
 # ── CC-CEDICT parser ────────────────────────────────────────────────────────────

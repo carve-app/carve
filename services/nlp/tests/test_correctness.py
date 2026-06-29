@@ -34,7 +34,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest
-from src.tokenizer import JapaneseTokenizer, kata_to_hira, generate_furigana
+from carve_nlp.tokenizer import JapaneseTokenizer, kata_to_hira, generate_furigana
 
 
 @pytest.fixture(scope="module")

@@ -151,7 +151,7 @@ dev-api:
 	  go run ./cmd/api
 
 dev-nlp:
-	cd $(NLP_DIR) && .venv/bin/uvicorn src.app:app --reload --port 8001
+	cd $(NLP_DIR) && .venv/bin/uvicorn carve_nlp.app:app --reload --port 8001
 
 dev-web:
 	mise exec -- pnpm --filter @carve/web dev
@@ -279,12 +279,11 @@ test-e2e:
 test-mutation: test-mutation-api test-mutation-nlp test-mutation-ts
 
 test-mutation-api:
-	@command -v go-mutesting >/dev/null 2>&1 || { echo "✗ go install github.com/avito-tech/go-mutesting/cmd/go-mutesting@latest"; exit 1; }
-	cd $(API_DIR) && go-mutesting --config .mutation.txt --threshold 0.65 \
-		./internal/fsrs/... ./internal/importer/... ./internal/output/... ./internal/metrics/...
+	@command -v go-mutesting >/dev/null 2>&1 || { echo "✗ go install github.com/avito-tech/go-mutesting/cmd/go-mutesting@v0.0.0-20251226130216-48d0401f00fb"; exit 1; }
+	./scripts/run-go-mutation.sh
 
 test-mutation-nlp:
-	@command -v mutmut >/dev/null 2>&1 || { echo "✗ pip install mutmut"; exit 1; }
+	@command -v mutmut >/dev/null 2>&1 || { echo "✗ pip install mutmut==3.6.0"; exit 1; }
 	cd $(NLP_DIR) && mutmut run
 
 test-mutation-ts:
@@ -297,8 +296,7 @@ test-perf:
 	@command -v k6 >/dev/null 2>&1 || { echo "✗ brew install k6"; exit 1; }
 	k6 run tests/perf/load.js
 	@echo "→ Lighthouse CI..."
-	@command -v lhci >/dev/null 2>&1 || { echo "✗ npm i -g @lhci/cli"; exit 1; }
-	lhci autorun
+	mise exec -- pnpm exec lhci autorun
 
 # L14 — LLM-as-judge polish
 test-polish:
