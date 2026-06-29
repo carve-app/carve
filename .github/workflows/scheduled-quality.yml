@@ -133,7 +133,7 @@ jobs:
               raise SystemExit('Python mutation score is below 65%')
           PY
       - run: scripts/run-go-mutation.sh
-      - run: pnpm exec lhci autorun
+      - run: pnpm dlx @lhci/cli@0.15.1 autorun
       - name: Start isolated API for authenticated load proof
         env:
           DATABASE_URL: postgres://carve:carve@127.0.0.1:5432/carve?sslmode=disable

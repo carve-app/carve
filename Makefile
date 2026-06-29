@@ -296,7 +296,7 @@ test-perf:
 	@command -v k6 >/dev/null 2>&1 || { echo "✗ brew install k6"; exit 1; }
 	k6 run tests/perf/load.js
 	@echo "→ Lighthouse CI..."
-	mise exec -- pnpm exec lhci autorun
+	mise exec -- pnpm dlx @lhci/cli@0.15.1 autorun
 
 # L14 — LLM-as-judge polish
 test-polish:
