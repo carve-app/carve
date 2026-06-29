@@ -4,6 +4,10 @@
   "plugins": ["@stryker-mutator/vitest-runner"],
   "reporters": ["html", "clear-text", "progress"],
   "testRunner": "vitest",
+  "vitest": {
+    "configFile": "vitest.stryker.config.ts"
+  },
+  "buildCommand": "node scripts/prepare-stryker.mjs",
   "coverageAnalysis": "perTest",
   "mutate": ["src/lib/offline.ts"],
   "thresholds": {
